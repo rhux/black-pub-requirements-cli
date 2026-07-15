@@ -1,2 +1,4 @@
 playwright>=1.57,<2
 openpyxl>=3.1,<4
+PyMuPDF>=1.24,<2
+opencv-python-headless>=4.10,<5
