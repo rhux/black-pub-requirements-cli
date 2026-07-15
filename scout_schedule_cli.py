@@ -568,6 +568,166 @@ def write_csv(path: Path, records: list[Any], fieldnames: list[str]) -> None:
 
 
 
+
+CHOICE_COUNT_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+}
+
+
+def requirement_path(number: str, current_top_level: str | None) -> tuple[tuple[str, ...], str | None]:
+    """Return a comparable requirement path and the current top-level number.
+
+    ScoutingEvent occasionally emits malformed display numbers such as ``#(c)``
+    where the leading top-level number is omitted. In that case, retain the most
+    recently observed numeric top-level requirement so nested rows still group
+    correctly in the HTML report.
+    """
+    text = str(number or "").strip()
+    tokens = [token.lower() for token in re.findall(r"[A-Za-z]+|\d+", text)]
+    if not tokens:
+        return (), current_top_level
+
+    if tokens[0].isdigit():
+        current_top_level = tokens[0]
+        return tuple(tokens), current_top_level
+
+    if current_top_level:
+        return (current_top_level, *tokens), current_top_level
+
+    return tuple(tokens), current_top_level
+
+
+def choice_requirement_count(description: str) -> int | None:
+    """Extract X from wording such as 'Do TWO of the following'."""
+    text = re.sub(r"\s+", " ", str(description or "")).strip().lower()
+    words = "|".join(CHOICE_COUNT_WORDS)
+    match = re.search(
+        rf"\b(?:do|complete|choose|select|perform)\s+(?:any\s+)?(?P<count>\d+|{words})\s+of\s+the\s+following\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    value = match.group("count").lower()
+    return int(value) if value.isdigit() else CHOICE_COUNT_WORDS.get(value)
+
+
+def annotate_requirement_statuses(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add inferred display status fields used only by the HTML report.
+
+    The API frequently leaves parent rows incomplete even when every child row is
+    complete. Parent status is therefore calculated recursively. Choice parents
+    such as 'Do ONE of the following' are marked as completed-but-review when the
+    minimum number of alternatives appears complete.
+    """
+    annotated = [dict(item) for item in requirements]
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in annotated:
+        grouped.setdefault((str(item.get("scout_name") or ""), str(item.get("class_p4_id") or "")), []).append(item)
+
+    for group in grouped.values():
+        current_top_level: str | None = None
+        paths: list[tuple[str, ...]] = []
+        for item in group:
+            path, current_top_level = requirement_path(str(item.get("requirement_number") or ""), current_top_level)
+            paths.append(path)
+            item["requirement_path"] = list(path)
+
+        children: list[list[int]] = [[] for _ in group]
+        prior_path_indexes: dict[tuple[str, ...], int] = {}
+        header_stack: list[tuple[int, int]] = []
+
+        for index, (item, path) in enumerate(zip(group, paths)):
+            parent_index: int | None = None
+            if len(path) > 1:
+                for depth in range(len(path) - 1, 0, -1):
+                    candidate = path[:depth]
+                    if candidate in prior_path_indexes:
+                        parent_index = prior_path_indexes[candidate]
+                        break
+
+            # Fallback for malformed numbering: use the nearest prior header with
+            # a shallower inferred path. This preserves ordering without making
+            # assumptions across unrelated top-level requirements.
+            if parent_index is None and len(path) > 1:
+                for candidate_index, candidate_depth in reversed(header_stack):
+                    if candidate_depth < len(path):
+                        parent_index = candidate_index
+                        break
+
+            if parent_index is not None:
+                children[parent_index].append(index)
+
+            if path:
+                prior_path_indexes[path] = index
+            if str(item.get("requirement_type_id") or "") == "3":
+                while header_stack and header_stack[-1][1] >= len(path):
+                    header_stack.pop()
+                header_stack.append((index, len(path)))
+
+        cache: dict[int, tuple[str, str]] = {}
+
+        def calculate(index: int) -> tuple[str, str]:
+            if index in cache:
+                return cache[index]
+
+            item = group[index]
+            direct_children = children[index]
+            if bool(item.get("completed_requirement")):
+                result = ("complete", "Marked complete by ScoutingEvent.")
+            elif direct_children:
+                child_results = [calculate(child_index) for child_index in direct_children]
+                satisfied = [status in {"complete", "complete_check"} for status, _ in child_results]
+                satisfied_count = sum(satisfied)
+                total_count = len(direct_children)
+                choice_count = choice_requirement_count(str(item.get("description") or ""))
+
+                item["completed_subrequirements"] = satisfied_count
+                item["total_subrequirements"] = total_count
+                item["choice_required_count"] = choice_count
+
+                if total_count and satisfied_count == total_count:
+                    if any(status == "complete_check" for status, _ in child_results):
+                        result = (
+                            "complete_check",
+                            f"All {total_count} subrequirements appear satisfied, but at least one was inferred from a choice requirement.",
+                        )
+                    else:
+                        result = ("complete", f"All {total_count} subrequirements are complete.")
+                elif choice_count is not None and satisfied_count >= choice_count:
+                    result = (
+                        "complete_check",
+                        f"{satisfied_count} of {total_count} subrequirements appear complete; this meets the stated choice of {choice_count}, but should be verified.",
+                    )
+                else:
+                    result = (
+                        "incomplete",
+                        f"{satisfied_count} of {total_count} subrequirements are complete.",
+                    )
+            else:
+                result = ("incomplete", "Not marked complete by ScoutingEvent.")
+
+            cache[index] = result
+            return result
+
+        for index, item in enumerate(group):
+            status, reason = calculate(index)
+            item["calculated_status"] = status
+            item["calculated_status_reason"] = reason
+
+    return annotated
+
 def json_for_html(value: Any) -> str:
     """Serialize JSON safely for embedding inside an HTML script element."""
     return (
@@ -586,7 +746,9 @@ def write_html_report(
     generated_at_local: str,
 ) -> None:
     classes = [asdict(item) for result in results for item in result.classes]
-    requirements = [asdict(item) for result in results for item in result.requirements]
+    requirements = annotate_requirement_statuses(
+        [asdict(item) for result in results for item in result.requirements]
+    )
     errors = [
         {"scout_name": result.name, "attendee_id": result.attendee_id, "error": error}
         for result in results
@@ -751,6 +913,7 @@ button:hover { border-color: var(--accent); }
 .badge.success { color: var(--success); background: var(--success-bg); }
 .badge.warn { color: var(--warn); background: var(--warn-bg); }
 .badge.danger { color: var(--danger); background: var(--danger-bg); }
+.badge.check { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn); }
 details.requirements { grid-column: 1 / -1; }
 details.requirements summary { cursor: pointer; color: var(--accent); font-weight: 700; }
 .requirement-list { margin: .6rem 0 0; padding: 0; list-style: none; }
@@ -913,6 +1076,16 @@ tr:hover td { background: var(--panel-alt); }
   const boolBadge = (value, yes="Complete", no="Incomplete") => value
     ? `<span class="badge success">${escapeHtml(yes)}</span>`
     : `<span class="badge warn">${escapeHtml(no)}</span>`;
+  const requirementBadge = item => {
+    const reason = escapeHtml(item.calculated_status_reason || "");
+    if (item.calculated_status === "complete") {
+      return `<span class="badge success" title="${reason}">Completed</span>`;
+    }
+    if (item.calculated_status === "complete_check") {
+      return `<span class="badge check" title="${reason}">Completed, but double check</span>`;
+    }
+    return `<span class="badge warn" title="${reason}">Not complete</span>`;
+  };
   const tokensForDays = value => dayOrder.filter(token => String(value || "").includes(token));
   const normalize = value => String(value ?? "").trim().toLocaleLowerCase();
   const uniqueSorted = values => [...new Set(values.filter(Boolean))].sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
@@ -1005,7 +1178,7 @@ tr:hover td { background: var(--panel-alt); }
       const rows = grouped.get(name).slice().sort((a,b) => compareValues(a,b,sortMap[sortKey],false) || compareValues(a,b,"class_name",false));
       const content = rows.map(item => {
         const reqs = requirementsByClass.get(reqKey(item)) || [];
-        const reqHtml = reqs.length ? `<details class="requirements"><summary>${reqs.length} requirement row(s)</summary><ul class="requirement-list">${reqs.map(req => `<li><span class="requirement-number">${escapeHtml(req.requirement_number)}</span>${escapeHtml(req.description)} ${req.completed_requirement ? '<span class="badge success">Complete</span>' : '<span class="badge warn">Not complete</span>'}</li>`).join("")}</ul></details>` : "";
+        const reqHtml = reqs.length ? `<details class="requirements"><summary>${reqs.length} requirement row(s)</summary><ul class="requirement-list">${reqs.map(req => `<li><span class="requirement-number">${escapeHtml(req.requirement_number)}</span>${escapeHtml(req.description)} ${requirementBadge(req)}</li>`).join("")}</ul></details>` : "";
         return `<div class="class-row">
           <div><strong>${escapeHtml(item.start_time)}</strong></div>
           <div>${escapeHtml(item.days)}</div>
@@ -1037,7 +1210,7 @@ tr:hover td { background: var(--panel-alt); }
     $("requirements-table").querySelector("tbody").innerHTML = rows.map(item => `<tr>
       <td>${escapeHtml(item.scout_name)}</td><td>${escapeHtml(item.merit_badge_name)}</td><td>${escapeHtml(item.class_number)}</td>
       <td><strong>${escapeHtml(item.requirement_number)}</strong></td><td>${escapeHtml(item.description).replaceAll("\n", "<br>")}</td>
-      <td>${escapeHtml(item.present_days)}</td><td>${boolBadge(item.completed_requirement, "Yes", "No")}</td>
+      <td>${escapeHtml(item.present_days)}</td><td>${requirementBadge(item)}</td>
       <td>${boolBadge(item.requirement_on_event, "Yes", "No")}</td>
     </tr>`).join("") || '<tr><td colspan="8" class="empty">No requirements match the current filters.</td></tr>';
     updateSortHeaders("requirements-table", state.reqSort);

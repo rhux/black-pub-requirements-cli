@@ -79,6 +79,8 @@ The known `mike.dev.admin.247scouting.com` and `mike.dev.scoutingevent.com` Java
 - `report.html` — self-contained interactive report; open it directly in a browser
   - filter by scout, class, block, day, location, completion status, or free-text search
   - view schedules grouped by scout with expandable class requirements
+  - infer parent-requirement status when all subrequirements are complete
+  - mark choice requirements such as “Do TWO of the following” as **Completed, but double check** once enough alternatives appear complete
   - sort the all-classes and requirements tables by clicking column headings
   - no web server or external JavaScript libraries are required
 - `scouts.json` — complete nested result
