@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scouting Merit Badges</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>Scouting Merit Badges</h1>
+  <p id="status-line">Loading&hellip;</p>
+</header>
+<main>
+  <section class="panel" id="upload-panel">
+    <h2 id="upload-heading">Upload class-schedule PDFs</h2>
+    <p class="meta">Extracts attendee names and QR codes to build <code>scouts.csv</code>, the input the schedule downloader needs.</p>
+    <form id="upload-form">
+      <input id="pdf-files" type="file" accept="application/pdf" multiple>
+      <button id="upload-submit" type="submit">Extract scouts.csv</button>
+      <button id="upload-cancel" type="button" hidden>Cancel</button>
+    </form>
+    <div class="progress-bar" id="upload-progress" hidden><div class="progress-fill"></div></div>
+    <p class="log-line" id="upload-log"></p>
+  </section>
+
+  <section class="panel" id="scouts-panel" hidden>
+    <div class="panel-header">
+      <h2>Scouts</h2>
+      <div class="actions">
+        <button id="download-btn" type="button">Download Schedule</button>
+        <button id="pause-resume-btn" type="button" class="secondary" hidden>Pause after current scout</button>
+        <button id="reload-pdfs-btn" type="button" class="secondary">Reload PDFs</button>
+      </div>
+    </div>
+    <div class="progress-bar" id="download-progress" hidden><div class="progress-fill"></div></div>
+    <p class="log-line" id="download-status"></p>
+    <div class="table-wrap">
+      <table id="scouts-table">
+        <thead><tr><th>Name</th><th>Registrant Type</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" id="runs-panel">
+    <h2>Run History</h2>
+    <p class="meta" id="runs-empty">No schedule downloads yet.</p>
+    <div class="table-wrap">
+      <table id="runs-table" hidden>
+        <thead><tr><th>Run</th><th>Scouts</th><th>With errors</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" hidden></div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

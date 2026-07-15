@@ -13,7 +13,7 @@ import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import cv2
 import fitz  # PyMuPDF
@@ -491,7 +491,11 @@ def write_errors_csv(path: Path, errors: Sequence[ExtractionError]) -> None:
             )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    progress_callback: Callable[[int, int, Path], None] | None = None,
+) -> int:
     args = parse_args(argv)
     pdf_paths = expand_pdf_inputs(args.pdfs, args.recursive)
     if not pdf_paths:
@@ -507,9 +511,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     extracted: list[ExtractedAttendee] = []
     errors: list[ExtractionError] = []
 
-    for pdf_path in pdf_paths:
+    for index, pdf_path in enumerate(pdf_paths, start=1):
         if not args.quiet:
             print(f"Reading {pdf_path} ...")
+        if progress_callback is not None:
+            progress_callback(index, len(pdf_paths), pdf_path)
         pdf_attendees, pdf_errors = extract_pdf(
             pdf_path=pdf_path,
             dpis=dpis,

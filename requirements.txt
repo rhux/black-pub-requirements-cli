@@ -2,3 +2,7 @@ playwright>=1.57,<2
 openpyxl>=3.1,<4
 PyMuPDF>=1.24,<2
 opencv-python-headless>=4.10,<5
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
+python-multipart>=0.0.12,<1
+pywebview>=5.3,<6

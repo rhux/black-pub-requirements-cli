@@ -19,7 +19,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Awaitable, Callable, Iterable
 from urllib.parse import parse_qs
 
 from openpyxl import load_workbook
@@ -473,6 +473,21 @@ async def process_scout(
             raise RuntimeError(f"Schedule API returned failure: {schedule_payload.get('status')}")
 
         schedule_rows = schedule_payload.get("data") or []
+        deduped_rows: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for item in schedule_rows:
+            key = str(item.get("classP4ID") or "")
+            if not key:
+                key = f"__no_id_{len(order)}"  # no ID to dedupe on; treat as its own class
+                deduped_rows[key] = item
+                order.append(key)
+            elif key not in deduped_rows:
+                deduped_rows[key] = item
+                order.append(key)
+            elif truthy(item.get("CLASS_COMPLETED")) and not truthy(deduped_rows[key].get("CLASS_COMPLETED")):
+                deduped_rows[key] = item  # prefer the completed duplicate — status should not regress
+        schedule_rows = [deduped_rows[key] for key in order]
+
         for item in schedule_rows:
             raw_class_name = str(item.get("CLASS_NAME") or "")
             class_record = ClassRecord(
@@ -1228,7 +1243,10 @@ tr:hover td { background: var(--panel-alt); }
           const reqBody = reqs.length
             ? `<ul class="requirement-list">${reqs.map(req => `<li><span class="requirement-number">${escapeHtml(req.requirement_number)}</span>${escapeHtml(req.description)} ${requirementBadge(req)}</li>`).join("")}</ul>`
             : `<p class="meta">No requirement rows match the current filters.</p>`;
-          reqHtml = `<details class="requirements"><summary>${reqs.length} visible requirement row(s)${hiddenText}</summary>${reqBody}</details>`;
+          const completedCount = reqs.filter(requirementIsComplete).length;
+          const prereqIncompleteCount = reqs.filter(req => !requirementIsComplete(req) && isPrereqRequirement(req)).length;
+          const incompleteCount = reqs.length - completedCount - prereqIncompleteCount;
+          reqHtml = `<details class="requirements"><summary>${reqs.length} visible requirement row(s), ${completedCount} completed, ${incompleteCount} incomplete, ${prereqIncompleteCount} incomplete (pre-reqs)${hiddenText}</summary>${reqBody}</details>`;
         }
         return `<div class="class-row">
           <div><strong>${escapeHtml(item.start_time)}</strong></div>
@@ -1392,20 +1410,38 @@ def write_outputs(
     )
 
 
-async def async_main(args: argparse.Namespace) -> int:
+async def async_main(
+    args: argparse.Namespace,
+    *,
+    progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    resume_event: asyncio.Event | None = None,
+) -> int:
     scouts = load_inputs(args.input, args.sheet, args.include_adults)
     args.output.mkdir(parents=True, exist_ok=True)
     raw_dir = args.output / "raw"
 
     print(f"Loaded {len(scouts)} attendee QR link(s).")
+    if progress_callback is not None:
+        await progress_callback({"type": "batch_start", "total": len(scouts)})
     results: list[ScoutResult] = []
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=not args.headed)
         try:
             for index, scout in enumerate(scouts, start=1):
+                if resume_event is not None and not resume_event.is_set():
+                    if progress_callback is not None:
+                        await progress_callback({"type": "paused", "index": index, "total": len(scouts)})
+                    await resume_event.wait()
+                    if progress_callback is not None:
+                        await progress_callback({"type": "resumed", "index": index, "total": len(scouts)})
+
                 label = scout.name or scout.url
                 print(f"[{index}/{len(scouts)}] {label}")
+                if progress_callback is not None:
+                    await progress_callback(
+                        {"type": "scout_start", "index": index, "total": len(scouts), "name": label}
+                    )
                 result = await process_scout(browser, scout, args, raw_dir)
                 results.append(result)
                 print(
@@ -1413,6 +1449,19 @@ async def async_main(args: argparse.Namespace) -> int:
                     f"classes={len(result.classes)}, requirements={len(result.requirements)}, "
                     f"errors={len(result.errors)}"
                 )
+                if progress_callback is not None:
+                    await progress_callback(
+                        {
+                            "type": "scout_done",
+                            "index": index,
+                            "total": len(scouts),
+                            "name": label,
+                            "attendee_id": result.attendee_id,
+                            "classes": len(result.classes),
+                            "requirements": len(result.requirements),
+                            "errors": len(result.errors),
+                        }
+                    )
                 if args.scout_delay_ms > 0 and index < len(scouts):
                     await asyncio.sleep(args.scout_delay_ms / 1000)
         finally:

@@ -4,3 +4,5 @@ scouting-output*/
 heritage-results*/
 *.xlsx
 scouts*.csv
+pdf-uploads/
+runs/

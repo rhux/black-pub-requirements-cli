@@ -1,0 +1,133 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --panel-alt: #eef3f6;
+  --text: #17212b;
+  --muted: #5e6b78;
+  --border: #d3dbe3;
+  --accent: #245b78;
+  --success: #176b3a;
+  --success-bg: #dff2e7;
+  --warn: #8a4b08;
+  --warn-bg: #fff0d8;
+  --danger: #9b1c1c;
+  --danger-bg: #fde5e5;
+  --shadow: 0 2px 10px rgba(18, 38, 54, 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111820;
+    --panel: #18222d;
+    --panel-alt: #202d39;
+    --text: #ecf2f7;
+    --muted: #aab7c4;
+    --border: #334353;
+    --accent: #70b6db;
+    --success: #8fe0ad;
+    --success-bg: #173b26;
+    --warn: #ffd08a;
+    --warn-bg: #4a3214;
+    --danger: #ffaaaa;
+    --danger-bg: #4b2222;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.45;
+}
+header {
+  background: linear-gradient(135deg, #173f57, #28739a);
+  color: white;
+  padding: 1.25rem clamp(1rem, 4vw, 3rem);
+}
+header h1 { margin: 0; font-size: clamp(1.4rem, 3vw, 1.9rem); }
+header p { margin: .35rem 0 0; opacity: .9; }
+main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+.panel h2 { margin: 0 0 .5rem; font-size: 1.15rem; }
+.panel-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
+.meta { color: var(--muted); font-size: .88rem; margin: 0 0 .75rem; }
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+button, input[type=file] {
+  font: inherit;
+}
+button {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--accent);
+  color: white;
+  padding: .6rem 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+button.secondary { background: var(--panel-alt); color: var(--text); }
+button:disabled { opacity: .55; cursor: not-allowed; }
+button:hover:not(:disabled) { filter: brightness(1.06); }
+#upload-form { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+input[type=file] {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-alt);
+  color: var(--text);
+  padding: .5rem .6rem;
+  flex: 1 1 260px;
+}
+.progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel-alt);
+  overflow: hidden;
+  margin: .8rem 0;
+}
+.progress-fill { height: 100%; width: 0%; background: var(--accent); transition: width .2s ease; }
+.log-line { color: var(--muted); font-size: .85rem; min-height: 1.2em; margin: 0; }
+.table-wrap { overflow: auto; max-height: 60vh; border: 1px solid var(--border); border-radius: 8px; }
+table { border-collapse: separate; border-spacing: 0; width: 100%; background: var(--panel); }
+th, td { text-align: left; padding: .55rem .7rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--panel-alt);
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+tr:hover td { background: var(--panel-alt); }
+.badge {
+  display: inline-block;
+  padding: .16rem .5rem;
+  border-radius: 999px;
+  font-size: .76rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.badge.pending { color: var(--muted); background: var(--panel-alt); }
+.badge.active { color: var(--accent); background: var(--panel-alt); border: 1px solid var(--accent); }
+.badge.success { color: var(--success); background: var(--success-bg); }
+.badge.warn { color: var(--warn); background: var(--warn-bg); }
+.badge.danger { color: var(--danger); background: var(--danger-bg); }
+.toast {
+  position: fixed;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  border-radius: 8px;
+  padding: .7rem 1.1rem;
+  max-width: min(90vw, 480px);
+}
+.toast.error { border-color: var(--danger); color: var(--danger); }
