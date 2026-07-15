@@ -864,6 +864,28 @@ input, select, button {
   padding: .62rem .7rem;
   font: inherit;
 }
+.checkbox-control { align-self: end; }
+.checkbox-control[hidden] { display: none; }
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: .55rem;
+  min-height: 45px;
+  margin: 0 !important;
+  padding: .55rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-alt);
+  color: var(--text) !important;
+  cursor: pointer;
+}
+.checkbox-label input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+.checkbox-label span { line-height: 1.25; }
 button { cursor: pointer; font-weight: 700; }
 button:hover { border-color: var(--accent); }
 .tabs { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: 1rem; }
@@ -993,6 +1015,12 @@ tr:hover td { background: var(--panel-alt); }
           <option value="incomplete">Incomplete classes</option>
         </select>
       </div>
+      <div class="control checkbox-control" id="completed-requirements-control" hidden>
+        <label class="checkbox-label" for="show-completed-requirements">
+          <input id="show-completed-requirements" type="checkbox">
+          <span>Show completed requirements in incomplete classes</span>
+        </label>
+      </div>
       <div class="control">
         <label for="sort-select">Sort scout schedules</label>
         <select id="sort-select">
@@ -1086,6 +1114,7 @@ tr:hover td { background: var(--panel-alt); }
     }
     return `<span class="badge warn" title="${reason}">Not complete</span>`;
   };
+  const requirementIsComplete = item => ["complete", "complete_check"].includes(item.calculated_status);
   const tokensForDays = value => dayOrder.filter(token => String(value || "").includes(token));
   const normalize = value => String(value ?? "").trim().toLocaleLowerCase();
   const uniqueSorted = values => [...new Set(values.filter(Boolean))].sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
@@ -1125,7 +1154,8 @@ tr:hover td { background: var(--panel-alt); }
       search: normalize($("search").value), scout: $("scout-filter").value,
       className: $("class-filter").value, block: $("block-filter").value,
       day: $("day-filter").value, location: $("location-filter").value,
-      completion: $("completion-filter").value
+      completion: $("completion-filter").value,
+      showCompletedRequirements: $("show-completed-requirements").checked
     };
   }
 
@@ -1149,7 +1179,8 @@ tr:hover td { background: var(--panel-alt); }
       && (!f.block || linkedClass?.period_name === f.block)
       && (!f.day || tokensForDays(item.present_days).includes(f.day) || tokensForDays(linkedClass?.days).includes(f.day))
       && (!f.location || linkedClass?.location === f.location)
-      && (!f.completion || (f.completion === "complete") === Boolean(item.completed_class));
+      && (!f.completion || (f.completion === "complete") === Boolean(item.completed_class))
+      && (!(f.completion === "incomplete" && !f.showCompletedRequirements) || !requirementIsComplete(item));
   }
 
   function compareValues(a, b, key, desc) {
@@ -1177,8 +1208,18 @@ tr:hover td { background: var(--panel-alt); }
     $("scout-results").innerHTML = scoutNames.map(name => {
       const rows = grouped.get(name).slice().sort((a,b) => compareValues(a,b,sortMap[sortKey],false) || compareValues(a,b,"class_name",false));
       const content = rows.map(item => {
-        const reqs = requirementsByClass.get(reqKey(item)) || [];
-        const reqHtml = reqs.length ? `<details class="requirements"><summary>${reqs.length} requirement row(s)</summary><ul class="requirement-list">${reqs.map(req => `<li><span class="requirement-number">${escapeHtml(req.requirement_number)}</span>${escapeHtml(req.description)} ${requirementBadge(req)}</li>`).join("")}</ul></details>` : "";
+        const allReqs = requirementsByClass.get(reqKey(item)) || [];
+        const hideCompleted = f.completion === "incomplete" && !f.showCompletedRequirements;
+        const reqs = hideCompleted ? allReqs.filter(req => !requirementIsComplete(req)) : allReqs;
+        const hiddenCount = allReqs.length - reqs.length;
+        let reqHtml = "";
+        if (allReqs.length) {
+          const hiddenText = hiddenCount ? `; ${hiddenCount} completed hidden` : "";
+          const reqBody = reqs.length
+            ? `<ul class="requirement-list">${reqs.map(req => `<li><span class="requirement-number">${escapeHtml(req.requirement_number)}</span>${escapeHtml(req.description)} ${requirementBadge(req)}</li>`).join("")}</ul>`
+            : `<p class="meta">All ${allReqs.length} requirement row(s) are completed and currently hidden.</p>`;
+          reqHtml = `<details class="requirements"><summary>${reqs.length} visible requirement row(s)${hiddenText}</summary>${reqBody}</details>`;
+        }
         return `<div class="class-row">
           <div><strong>${escapeHtml(item.start_time)}</strong></div>
           <div>${escapeHtml(item.days)}</div>
@@ -1194,7 +1235,7 @@ tr:hover td { background: var(--panel-alt); }
   }
 
   function renderClasses() {
-    const rows = classes.filter(classMatches).slice().sort((a,b) => compareValues(a,b,state.classSort.key,state.classSort.desc));
+    const rows = classes.filter(item => classMatches(item)).slice().sort((a,b) => compareValues(a,b,state.classSort.key,state.classSort.desc));
     $("class-count").textContent = `${rows.length} matching class row(s)`;
     $("classes-table").querySelector("tbody").innerHTML = rows.map(item => `<tr>
       <td>${escapeHtml(item.scout_name)}</td><td>${escapeHtml(item.start_time)}</td><td>${escapeHtml(item.days)}</td>
@@ -1205,7 +1246,7 @@ tr:hover td { background: var(--panel-alt); }
   }
 
   function renderRequirements() {
-    const rows = requirements.filter(requirementMatches).slice().sort((a,b) => compareValues(a,b,state.reqSort.key,state.reqSort.desc));
+    const rows = requirements.filter(item => requirementMatches(item)).slice().sort((a,b) => compareValues(a,b,state.reqSort.key,state.reqSort.desc));
     $("requirement-count").textContent = `${rows.length} matching requirement row(s)`;
     $("requirements-table").querySelector("tbody").innerHTML = rows.map(item => `<tr>
       <td>${escapeHtml(item.scout_name)}</td><td>${escapeHtml(item.merit_badge_name)}</td><td>${escapeHtml(item.class_number)}</td>
@@ -1223,12 +1264,22 @@ tr:hover td { background: var(--panel-alt); }
     }
   }
 
-  function renderAll() { renderScouts(); renderClasses(); renderRequirements(); }
-  for (const id of ["search","scout-filter","class-filter","block-filter","day-filter","location-filter","completion-filter","sort-select"]) {
+  function syncCompletedRequirementsControl() {
+    $("completed-requirements-control").hidden = $("completion-filter").value !== "incomplete";
+  }
+
+  function renderAll() {
+    syncCompletedRequirementsControl();
+    renderScouts();
+    renderClasses();
+    renderRequirements();
+  }
+  for (const id of ["search","scout-filter","class-filter","block-filter","day-filter","location-filter","completion-filter","sort-select","show-completed-requirements"]) {
     $(id).addEventListener(id === "search" ? "input" : "change", renderAll);
   }
   $("reset").addEventListener("click", () => {
     for (const id of ["search","scout-filter","class-filter","block-filter","day-filter","location-filter","completion-filter"]) $(id).value = "";
+    $("show-completed-requirements").checked = false;
     $("sort-select").value = "time";
     renderAll();
   });
