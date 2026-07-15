@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+scouting-output*/
+heritage-results*/
+*.xlsx
+scouts*.csv
