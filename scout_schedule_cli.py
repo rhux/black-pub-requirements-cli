@@ -1021,6 +1021,12 @@ tr:hover td { background: var(--panel-alt); }
           <span>Show completed requirements in incomplete classes</span>
         </label>
       </div>
+      <div class="control checkbox-control">
+        <label class="checkbox-label" for="prereq-filter">
+          <input id="prereq-filter" type="checkbox">
+          <span>Show only (pre-req) requirements</span>
+        </label>
+      </div>
       <div class="control">
         <label for="sort-select">Sort scout schedules</label>
         <select id="sort-select">
@@ -1115,6 +1121,7 @@ tr:hover td { background: var(--panel-alt); }
     return `<span class="badge warn" title="${reason}">Not complete</span>`;
   };
   const requirementIsComplete = item => ["complete", "complete_check"].includes(item.calculated_status);
+  const isPrereqRequirement = item => normalize(item.description).includes("(pre-req)");
   const tokensForDays = value => dayOrder.filter(token => String(value || "").includes(token));
   const normalize = value => String(value ?? "").trim().toLocaleLowerCase();
   const uniqueSorted = values => [...new Set(values.filter(Boolean))].sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
@@ -1155,7 +1162,8 @@ tr:hover td { background: var(--panel-alt); }
       className: $("class-filter").value, block: $("block-filter").value,
       day: $("day-filter").value, location: $("location-filter").value,
       completion: $("completion-filter").value,
-      showCompletedRequirements: $("show-completed-requirements").checked
+      showCompletedRequirements: $("show-completed-requirements").checked,
+      prereqOnly: $("prereq-filter").checked
     };
   }
 
@@ -1180,7 +1188,8 @@ tr:hover td { background: var(--panel-alt); }
       && (!f.day || tokensForDays(item.present_days).includes(f.day) || tokensForDays(linkedClass?.days).includes(f.day))
       && (!f.location || linkedClass?.location === f.location)
       && (!f.completion || (f.completion === "complete") === Boolean(item.completed_class))
-      && (!(f.completion === "incomplete" && !f.showCompletedRequirements) || !requirementIsComplete(item));
+      && (!(f.completion === "incomplete" && !f.showCompletedRequirements) || !requirementIsComplete(item))
+      && (!f.prereqOnly || isPrereqRequirement(item));
   }
 
   function compareValues(a, b, key, desc) {
@@ -1210,14 +1219,15 @@ tr:hover td { background: var(--panel-alt); }
       const content = rows.map(item => {
         const allReqs = requirementsByClass.get(reqKey(item)) || [];
         const hideCompleted = f.completion === "incomplete" && !f.showCompletedRequirements;
-        const reqs = hideCompleted ? allReqs.filter(req => !requirementIsComplete(req)) : allReqs;
+        let reqs = hideCompleted ? allReqs.filter(req => !requirementIsComplete(req)) : allReqs;
+        if (f.prereqOnly) reqs = reqs.filter(isPrereqRequirement);
         const hiddenCount = allReqs.length - reqs.length;
         let reqHtml = "";
         if (allReqs.length) {
-          const hiddenText = hiddenCount ? `; ${hiddenCount} completed hidden` : "";
+          const hiddenText = hiddenCount ? `; ${hiddenCount} hidden` : "";
           const reqBody = reqs.length
             ? `<ul class="requirement-list">${reqs.map(req => `<li><span class="requirement-number">${escapeHtml(req.requirement_number)}</span>${escapeHtml(req.description)} ${requirementBadge(req)}</li>`).join("")}</ul>`
-            : `<p class="meta">All ${allReqs.length} requirement row(s) are completed and currently hidden.</p>`;
+            : `<p class="meta">No requirement rows match the current filters.</p>`;
           reqHtml = `<details class="requirements"><summary>${reqs.length} visible requirement row(s)${hiddenText}</summary>${reqBody}</details>`;
         }
         return `<div class="class-row">
@@ -1274,12 +1284,13 @@ tr:hover td { background: var(--panel-alt); }
     renderClasses();
     renderRequirements();
   }
-  for (const id of ["search","scout-filter","class-filter","block-filter","day-filter","location-filter","completion-filter","sort-select","show-completed-requirements"]) {
+  for (const id of ["search","scout-filter","class-filter","block-filter","day-filter","location-filter","completion-filter","sort-select","show-completed-requirements","prereq-filter"]) {
     $(id).addEventListener(id === "search" ? "input" : "change", renderAll);
   }
   $("reset").addEventListener("click", () => {
     for (const id of ["search","scout-filter","class-filter","block-filter","day-filter","location-filter","completion-filter"]) $(id).value = "";
     $("show-completed-requirements").checked = false;
+    $("prereq-filter").checked = false;
     $("sort-select").value = "time";
     renderAll();
   });
