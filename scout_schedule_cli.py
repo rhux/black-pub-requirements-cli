@@ -115,6 +115,11 @@ def parse_args() -> argparse.Namespace:
         help="Show the Chromium window while running.",
     )
     parser.add_argument(
+        "--channel",
+        default=None,
+        help="Playwright browser channel to use (e.g. 'msedge'); default uses Playwright's bundled Chromium.",
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=45,
@@ -1426,7 +1431,9 @@ async def async_main(
     results: list[ScoutResult] = []
 
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=not args.headed)
+        browser = await playwright.chromium.launch(
+            headless=not args.headed, channel=getattr(args, "channel", None) or None
+        )
         try:
             for index, scout in enumerate(scouts, start=1):
                 if resume_event is not None and not resume_event.is_set():

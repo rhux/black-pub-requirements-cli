@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import os
 import sys
 import time
 import webbrowser
@@ -35,6 +36,7 @@ SCOUTS_CSV = REPO_ROOT / "scouts.csv"
 PDF_UPLOADS_DIR = REPO_ROOT / "pdf-uploads"
 RUNS_DIR = REPO_ROOT / "runs"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+BROWSER_CHANNEL = os.environ.get("SCOUTMB_BROWSER_CHANNEL") or None
 
 RUNS_DIR.mkdir(exist_ok=True)
 
@@ -195,6 +197,7 @@ async def start_schedule_download() -> JSONResponse:
                 include_adults=False,
                 no_html=False,
                 html_name="report.html",
+                channel=BROWSER_CHANNEL,
             )
             await scout_schedule_cli.async_main(
                 args, progress_callback=on_progress, resume_event=resume_event

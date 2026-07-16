@@ -6,3 +6,5 @@ heritage-results*/
 scouts*.csv
 pdf-uploads/
 runs/
+/build/
+/dist/
