@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-21
 **Status:** Approved design, pending implementation plan
+**Supersedes:** `docs/refactor-plan.md`
 
 ## Problem
 
@@ -40,11 +41,18 @@ concrete defects this causes:
    (`scout_schedule_cli.py:363,400,468`) swallow silently with no record.
 8. **User data commingled with replaceable source.** `scouts.csv`, `pdf-uploads/`, and
    `runs/` live in the same app directory the launcher overwrites on each start.
+9. **Untyped, unvalidated external payloads.** Responses from `scoutingevent.com` flow
+   through the pipeline as `dict[str, Any]`. A field rename upstream produces silently
+   wrong completion status rather than a visible failure.
+10. **Pervasive nondeterminism.** Timestamps, `random.uniform`, and `uuid4` are called
+    directly from business logic, making output unreproducible and untestable.
 
 ## Goals
 
 - A conventional, installable Python package with tests, linting, typing, and CI.
 - Testable seams — in particular, business logic exercisable without a browser.
+- Reproducible output, so behavior can be pinned by golden tests.
+- Resilience to upstream schema drift, with drift made visible rather than silent.
 - A launcher that is portable to macOS and can update itself.
 - Preserve current behavior through the restructure; treat behavior changes as
   separate, deliberate, individually tested decisions.
@@ -67,6 +75,8 @@ concrete defects this causes:
   require a system Python. This constraint is preserved, not relaxed.
 - **The app is not currently deployed to users.** This removes the need for data
   migration code and permits breaking changes to the app-local layout.
+- **The upstream API is not ours.** `scoutingevent.com` may change its payload shape
+  without notice. The design must tolerate this rather than assume stability.
 
 ## Architecture
 
@@ -74,9 +84,11 @@ concrete defects this causes:
 
 ```
 pyproject.toml                 # PEP 621 metadata; single source of dependency truth
+uv.lock                        # locked resolution shipped with the wheel
 src/scoutmb/
   config.py                    # frozen dataclasses; replaces argparse.Namespace passing
   models.py                    # ScoutInput, ClassRecord, RequirementRecord, ScoutResult
+  runtime.py                   # Clock, IdFactory, RunContext — injected nondeterminism
   progress.py                  # ProgressReporter protocol + null/console/queue impls
   errors.py                    # ScoutmbError hierarchy
   pdf/
@@ -85,10 +97,12 @@ src/scoutmb/
     extract.py                 # per-PDF orchestration
     discovery.py               # expand_pdf_inputs (files, dirs, globs)
   schedule/
-    inputs.py                  # 4 loaders + header aliasing; openpyxl imported lazily
+    inputs.py                  # loaders + shared header aliasing; openpyxl imported lazily
+    payloads.py                # anti-corruption layer: wire dicts -> owned models
     session.py                 # ALL Playwright contact, behind ScheduleSession
     scrape.py                  # process_scout, browser-free
-    requirements.py            # requirement_path, choice_requirement_count, inference
+    tree.py                    # requirement_path, build_requirement_tree
+    statuses.py                # choice_requirement_count, calculate_statuses
   reports/
     csv.py  json.py  email.py
     html.py
@@ -98,7 +112,7 @@ src/scoutmb/
     scout_schedule.py
   webapp/
     server.py  jobs.py  routes/  static/
-tests/{unit,integration,fixtures}/
+tests/{unit,integration,contract,fixtures}/
 tools/scrub_fixtures.py
 bootstrap/                     # stays top-level; see below
 ```
@@ -106,6 +120,9 @@ bootstrap/                     # stays top-level; see below
 `bootstrap/` deliberately remains outside `src/scoutmb/`. It runs *before* the
 application's dependencies exist and may import only the standard library. Folding it
 into the app package would blur a constraint that is currently load-bearing.
+
+Note that `annotate_requirement_statuses` is **decomposed, not relocated** — see
+"Requirement inference" below.
 
 ### Seams
 
@@ -142,6 +159,14 @@ payloads. `process_scout` becomes pure orchestration over the protocol.
 The fixture format already exists: `write_outputs` dumps untouched payloads to `raw/`
 for auditing, and those files are exactly what `RecordedSession` replays.
 
+The return type is deliberately `dict[str, Any]` — this is the wire boundary, and
+claiming more structure than the upstream API guarantees would be dishonest typing.
+Structure is imposed one layer in, by `payloads.py`.
+
+*Known interface-segregation tension:* `discover_name` is page-scraping while the other
+two are data retrieval. Accepted as one interface for now because both implementations
+need all three; revisit if a third implementation wants only part of it.
+
 **`ProgressReporter` protocol.** Today two different callback shapes exist — a
 positional `(index, total, path)` for stage 1 and an async `dict` event for stage 2.
 These unify into one protocol emitting typed events, with `NullReporter`,
@@ -155,6 +180,73 @@ dependency. The registry retains task references, fixing defect 6.
 placeholder inside a `<script type="application/json">` block, loaded via
 `importlib.resources.files()` — not `Path(__file__).parent`, which breaks in a wheel.
 Same treatment for `webapp/static/`.
+
+### Determinism
+
+All nondeterminism moves behind injected collaborators, gathered in a `RunContext`:
+
+```python
+@dataclass(frozen=True, slots=True)
+class RunContext:
+    clock: Clock          # now() -> datetime; report timestamps
+    ids: IdFactory        # new_id() -> str; operation and run IDs
+    rng: random.Random    # seeded; inter-scout pacing jitter
+```
+
+This replaces five direct calls that currently make output unreproducible:
+
+| Source | Location | Replaced by |
+| --- | --- | --- |
+| `time.strftime` → `generated_at_local` | `scout_schedule_cli.py:1644` | `ctx.clock` |
+| `datetime.now()` → `generated_at_iso` | `:1645` | `ctx.clock` |
+| `random.uniform(0.5, 2.0)` pacing | `:1765` | `ctx.rng` |
+| `uuid4()` operation IDs | `ui/server.py:110,174` | `ctx.ids` |
+| `time.strftime` run IDs | `ui/server.py:65` | `ctx.clock` |
+
+Production wires real implementations; tests wire a frozen clock, a counting ID factory,
+and a seeded RNG. Without this, golden comparison is impossible — every report embeds a
+wall-clock timestamp.
+
+### Requirement inference
+
+`annotate_requirement_statuses` (105 lines, containing a nested recursive closure) is
+**decomposed rather than moved**. Relocating it intact would preserve the exact fusion
+that makes it untestable:
+
+- `tree.py` — `requirement_path()`, `build_requirement_tree()`. Pure structure: given
+  rows, produce a parent/child tree, including the header-stack fallback.
+- `statuses.py` — `choice_requirement_count()`, `calculate_statuses()`. Pure evaluation:
+  given a tree plus completion flags, derive `complete` / `complete_check` /
+  `incomplete`.
+
+Splitting these is what allows the `Note.` question (see Testing) to be settled by a
+direct test of tree construction rather than by inspecting whole-report output.
+
+### External payload handling
+
+Because the upstream schema is not ours and may change without notice, `payloads.py` is
+an anti-corruption layer, not a type declaration:
+
+```python
+def parse_requirement_rows(
+    payload: dict[str, Any],
+) -> tuple[list[RequirementRecord], list[SchemaDrift]]: ...
+```
+
+Rules:
+
+- **Unknown fields are ignored.** New upstream fields never break a run.
+- **Missing expected fields are recorded, not raised.** Each produces a `SchemaDrift`
+  entry naming the field and the context.
+- **Drift is surfaced**, in `errors.csv` and a `schema_drift` count in `summary.json`,
+  so a silent upstream rename shows up as a visible warning instead of an entire
+  merit badge quietly reading "incomplete".
+- **Type coercion is explicit and total.** `truthy()`-style flag parsing tolerates
+  `"1"`, `"0"`, `""`, and `None` — the corpus contains 309 rows with `(None, None)`
+  flags — and never raises on unexpected values.
+
+Downstream of this boundary, everything is an owned, strictly typed model. `dict[str,
+Any]` appears only in `session.py` and `payloads.py`.
 
 ### Deployment
 
@@ -189,15 +281,32 @@ bootstrap/platforms/
 `webview2.py` imports `winreg` at module scope, so the factory must lazily import the
 platform module rather than importing both and branching.
 
+**Dependency locking.** `pyproject.toml` declares ranges; `uv.lock` pins an exact
+resolution and ships alongside the wheel. Installation uses the lock, so two users
+installing weeks apart get identical dependency versions. Without this, an upstream
+breaking release silently breaks new installs while existing machines keep working —
+the hardest class of bug to diagnose remotely.
+
 **Self-update.** The launcher queries GitHub Releases for a newer wheel version, at most
 **once per 24 hours** (timestamp recorded in `state/`) and bounded by a **3 second**
 connect-and-read timeout. Any failure — no network, timeout, malformed response — is
-logged and the installed version launches anyway.
-**Startup never blocks on an update check**; the deployment environment is a Scout camp
-with unreliable connectivity.
+logged and the installed version launches anyway. **Startup never blocks on an update
+check**; the deployment environment is a Scout camp with unreliable connectivity.
 
-`requirements.txt` ceases to be an installer input, since the wheel declares its own
-dependencies. `marker.py`'s `requirements_hash` becomes `wheel_version` + `wheel_hash`.
+Two safety requirements:
+
+- **Playwright browser revalidation.** The `playwright` Python package is version-coupled
+  to its browser binaries. After any update that changes the resolved `playwright`
+  version, the launcher must re-run browser installation before launching. Skipping this
+  produces an app that starts and then fails mid-scrape, offline, at camp.
+- **Rollback.** The previously working wheel is retained in `state/`. If a freshly
+  updated version fails to launch twice consecutively, the launcher reinstalls the
+  retained wheel and logs the downgrade. An auto-updater without a rollback path can
+  brick every installation simultaneously.
+
+`requirements.txt` ceases to be an installer input, since the wheel plus lock file
+declare dependencies. `marker.py`'s `requirements_hash` becomes `wheel_version` +
+`wheel_hash`.
 
 `PLAYWRIGHT_BROWSERS_PATH` is set under `state/` so browser downloads land in the app
 root rather than the user's global cache, making uninstall a single directory removal.
@@ -210,33 +319,42 @@ The Iron Law — no production code without a failing test — applies different
 three kinds of work in this plan. All three are in scope; none is exempt.
 
 **New code: strict red-green-refactor.** `ScheduleSession`, `RecordedSession`,
-`JobRegistry`, `ProgressReporter`, `errors.py`, all platform dispatch, self-update, and
-the scrubber. Test first, observe the failure, write minimal code to pass.
+`JobRegistry`, `ProgressReporter`, `RunContext`, `payloads.py`, `errors.py`, all platform
+dispatch, self-update, rollback, and the scrubber. Test first, observe the failure, write
+minimal code to pass.
 
 **Deliberate behavior changes: strict red-green-refactor.** The `html_report: str | None`
-collapse and the redesigned CLI surface are new behavior and get failing tests first.
+collapse, the redesigned CLI surface, and schema-drift reporting are new behavior and get
+failing tests first.
 
 **Code motion: characterization-first.** Moving existing code must not change behavior,
-so red-green-refactor does not apply. Instead, pin current behavior, then move. A
-genuine RED step still exists and is mandatory: **write the characterization test
-against the new import path first.**
-
-```python
-from scoutmb.schedule.requirements import annotate_requirement_statuses  # ImportError → RED
-```
-
-Move the code → GREEN. This is not ceremony; it catches the specific failure mode where
-a test silently continues importing the old module and passes while proving nothing.
+so red-green-refactor does not apply. Pin current behavior, then move.
 
 **Characterization tests pin current behavior, including bugs.** Where a test documents
 behavior we believe is wrong, it is committed as-is with a comment, and the fix becomes
 a separate change with its own failing test. Refactoring and bug-fixing never share a
 commit.
 
+### Phase 0 / phase 1 test sequencing
+
+Phase 0 must end with a **green** build, and phase 1 must retain a genuine RED step.
+These are reconciled by an explicit order, not left to improvisation:
+
+1. **Phase 0.** Characterization tests import the **flat modules**
+   (`import scout_schedule_cli`) and pass. This is the real safety net. CI is green.
+2. **Phase 1, per module.** Write a one-line import test against the new path:
+   `from scoutmb.schedule.tree import requirement_path` → **RED** (`ImportError`).
+3. Move the code → **GREEN**.
+4. Re-point that module's characterization tests to the new path; delete the temporary
+   import test.
+
+The RED step is not ceremony — it catches the specific failure where a characterization
+test silently keeps importing the old module and passes while proving nothing.
+
 ### The known gap
 
 Phase 0 requires characterization tests against current code, but some current code
-cannot be invoked without a browser. Auditing what is reachable today:
+cannot be invoked without a browser:
 
 | Reachable now (pure or file-level) | Not reachable without the seam |
 | --- | --- |
@@ -271,10 +389,9 @@ Two consequences:
 2. **State-transition coverage must be synthesized.** Since the corpus contains no real
    transitions, tests that exercise inference branching (partial completion, choice
    requirements crossing their threshold, parents flipping as children complete) are
-   built by mutating completion flags over the real row structure. This keeps realistic
-   requirement trees while producing the state variety the corpus lacks.
+   built by mutating completion flags over the real row structure.
 
-Payload shape:
+Payload shape as observed (not guaranteed — see External payload handling):
 
 ```
 {"status": {"status": int, "stack": [...]},
@@ -282,6 +399,86 @@ Payload shape:
            "REQ_NBR_WEB_DISPLAY", "REQ_DESCR", "COMPLETED_REQ_FLAG",
            "COMPLETED_CLASS_FLAG", "REQ_ON_EVENT", "PRESENT_DAYS", ...}]}
 ```
+
+### Committed fixtures must be small
+
+The real `report.html` for 22 scouts is **3,092,771 bytes**. Committing multi-megabyte
+golden files makes every diff unreviewable and every failure undiagnosable. Therefore:
+
+- Golden fixtures use a **reduced corpus of 2–3 scouts**, derived from the real run.
+- HTML is asserted **structurally** — parse the injected `<script type="application/json">`
+  payload and assert on that — never by byte-comparing the rendered document.
+- CSV and JSON outputs, being small and line-oriented, are compared in full.
+
+### Sanitization
+
+Real data appears in **every** output artifact, not only `raw/`. Measured: `classes.csv`
+carries a `scout_name` and an 8-digit `attendee_id` on every data row; `report.html`
+contains 4,978 attendee-ID references. One piece of good news — zero
+`scoutingevent.com/mobile` URLs appear in generated reports, so QR bearer tokens do not
+propagate downstream.
+
+`tools/scrub_fixtures.py` therefore:
+
+- Covers **all** artifacts: `raw/`, `classes.csv`, `requirements.csv`, `errors.csv`,
+  `scouts.json`, `summary.json`, `report.html`, and `emails/`.
+- Covers **filenames**, not just contents — `raw/` files are named from scout-name slugs,
+  a leak vector distinct from file contents.
+- **Verifies itself.** After substitution it scans output for every original name,
+  attendee ID, and QR token, and fails if any survives.
+- **Is security-critical code and gets full TDD treatment**, including tests with
+  deliberately leaky inputs: a name embedded in a filename, an ID inside an HTML
+  attribute, a name appearing only in an email body, and a name that is a substring of
+  another name.
+
+An unverified scrubber is a data leak with extra steps.
+
+### Required coverage
+
+The spec mandates these specifically, rather than leaving adequacy to judgement:
+
+| Area | Requirement |
+| --- | --- |
+| `requirement_path` | All 18 observed shapes as a `parametrize` table (below) |
+| Completion flags | All 5 observed `(REQ, CLASS)` combinations, including 309 `(None, None)` rows |
+| Empty rows | The 402 rows with empty number *and* description |
+| Label rows | The 375 `Note.`-style rows |
+| Choice requirements | Every wording variant in the corpus, plus synthesized threshold crossings |
+| Schema drift | Renamed field, missing field, added field, wrong type — each reports drift without crashing |
+| Loaders | All four formats plus every header alias |
+| Protocol conformance | Shared contract suite (below) |
+| Scrubber | Leaky-input suite (above) |
+
+### Protocol conformance testing
+
+`RecordedSession` is only useful if it is genuinely substitutable for
+`PlaywrightSession`; otherwise every test using it proves nothing about production. A
+single contract suite is therefore parametrized over both implementations, with the
+live one marked `@pytest.mark.live` and excluded from default runs. This is Liskov
+substitutability enforced mechanically rather than assumed.
+
+### Test layers
+
+1. **Pure unit** — `tree.py`, `statuses.py`, `payloads.py`, `inputs.py`, QR selection,
+   formatters. The bulk of the suite.
+2. **Contract** — protocol conformance, run against every implementation.
+3. **Golden / characterization** — reduced sanitized corpus through the full pipeline.
+4. **Integration with fakes** — `process_scout` against `RecordedSession`; routes under
+   `TestClient`.
+5. **PDF** — synthetic PDFs built at test time. PyMuPDF draws pages and
+   `cv2.QRCodeEncoder` generates codes, so **no new dependency** — OpenCV is already
+   present for decoding. Layout is derived from the real PDF, which is never committed.
+6. **Property-based** (`hypothesis`) — `requirement_path` never raises on arbitrary
+   strings; `payloads.parse_requirement_rows` never raises on arbitrary JSON.
+
+### Enforced rules
+
+- **`pytest-socket` blocks all network access** in the default suite. Otherwise "no live
+  tests" is aspirational and erodes.
+- **Coverage:** hard gates of **95% line coverage on `schedule/tree.py`,
+  `schedule/statuses.py`, `schedule/payloads.py`, and `schedule/inputs.py`**, enforced
+  per-module in CI; **no global percentage target.** A global gate on a codebase
+  containing a browser driver produces tests written to move a number.
 
 ### Edge cases observed in real data
 
@@ -298,14 +495,14 @@ implementation:
 | `Note.` (375 rows) | `('7','note')` | **suspect** — see below |
 | `''` (402 rows) | `()` | **suspect** — empty number *and* empty description |
 
-Two open questions to be settled by phase 0's characterization tests:
+Two open questions, to be settled by direct tests of `build_requirement_tree` once
+inference is decomposed:
 
 1. **Label rows are grafted onto the preceding requirement.** `Note.` has no top-level
    number, so `requirement_path` prepends the last-seen one, making a note a *child* of
    requirement 7. If requirement 7 is a "Do TWO of the following" choice, the note
    enters the satisfied-child arithmetic. Whether this changes a reported completion
-   status depends on `calculate`, which has not yet been traced. **Hypothesis, not a
-   confirmed defect.**
+   status depends on `calculate_statuses`. **Hypothesis, not a confirmed defect.**
 2. **402 fully empty rows** collapse to path `()` and are carried through the pipeline.
 
 One resolved question, recorded to prevent re-investigation: `choice_requirement_count`
@@ -319,39 +516,12 @@ Also worth recording: `#2.Option.A.(1)` and `#5..Opt.A.(1)` tokenize to `'option
 almost certainly *why* the header-stack fallback exists — previously folklore, now
 documented.
 
-### Test layers
-
-1. **Pure unit** — `requirements.py`, `inputs.py`, QR candidate selection, formatters.
-   The bulk of the suite. The shape table above becomes a `parametrize` table.
-2. **Golden / characterization** — sanitized payloads through the full pipeline, against
-   committed expected CSV/JSON/HTML.
-3. **Integration with fakes** — `process_scout` against `RecordedSession`; routes under
-   `TestClient`.
-4. **PDF** — synthetic PDFs built at test time. PyMuPDF draws pages and
-   `cv2.QRCodeEncoder` generates codes, so **no new dependency** — OpenCV is already
-   present for decoding. Layout is derived from the real PDF, which is never committed.
-5. **Property-based** (optional, `hypothesis`) — `requirement_path` should never raise
-   on arbitrary strings.
-
-### Enforced rules
-
-- **`pytest-socket` blocks all network access in the suite.** Otherwise "no live tests"
-  is aspirational and erodes.
-- **The scrubber verifies itself.** After substitution, `tools/scrub_fixtures.py` scans
-  its output for every original name, attendee ID, and QR token and fails if any
-  survives. This includes **filenames** — `raw/` files are named from scout-name slugs,
-  which is a leak vector distinct from file contents. An unverified scrubber is a data
-  leak with extra steps.
-- **Coverage:** hard gates of **95% line coverage on `schedule/requirements.py` and
-  `schedule/inputs.py`**, enforced per-module in CI; **no global percentage target.** A
-  global gate on a codebase containing a browser driver produces tests written to move a
-  number.
-
 ## Python conventions
 
 - **Ruff** for lint and format, replacing black, isort, flake8, and pyupgrade, with an
   explicit rule selection rather than defaults.
-- **mypy strict** on `src/`, lenient on `tests/`.
+- **mypy strict** on `src/`, lenient on `tests/`. `dict[str, Any]` is confined to
+  `session.py` and `payloads.py`; everywhere else is strictly typed owned models.
 - **`logging` replaces all 19 `print()` calls.** Library modules take module-level
   loggers and never configure handlers; the CLI and launcher configure them. The three
   silent `except Exception:` sites become `logger.exception(...)`.
@@ -361,31 +531,68 @@ documented.
 - **pytest** with fixtures and `parametrize`; no `unittest.TestCase`.
 - **Lazy heavyweight imports** — `openpyxl` moves inside `load_xlsx` so pure logic is
   importable without it (defect 4).
+- **Shared loader helpers** — the four input loaders currently duplicate header-alias
+  resolution; `norm_header` / `first_matching_key` become one shared path so a new alias
+  is added in one place (DRY).
 - Protocols over ABCs, frozen slotted dataclasses, `pathlib`, `importlib.resources`.
   The existing code already uses `@dataclass(frozen=True, slots=True)` and `pathlib`
   correctly; this continues established practice rather than imposing something new.
+
+## Continuous integration
+
+| Job | Runs on | Contents |
+| --- | --- | --- |
+| `lint` | ubuntu | ruff check, ruff format --check |
+| `types` | ubuntu | mypy strict on `src/` |
+| `test` | ubuntu, windows | pytest with `pytest-socket`, per-module coverage gates |
+| `lock` | ubuntu | verify `uv.lock` matches `pyproject.toml` |
+| `build` | ubuntu | build wheel, verify packaged assets are present |
+| `launcher` | windows (+ macos from phase 5) | PyInstaller build smoke test |
+
+Playwright browsers are **not** installed in the default CI job — `@pytest.mark.live` is
+excluded, so nothing needs a browser. A separate manually-triggered workflow runs the
+live contract suite.
+
+## Design decisions
+
+Recorded so the rationale survives, since each was questioned during review:
+
+| Decision | Rationale |
+| --- | --- |
+| Keep `errors.py` hierarchy | Explicit choice to design it upfront rather than grow it |
+| Keep `ProgressReporter` with three implementations | Required by planned future work, not speculative |
+| Keep self-update | Accepted complexity; mitigated by rollback and browser revalidation |
+| Wire-boundary `dict[str, Any]`, not `TypedDict` | The upstream API is not ours; declaring its shape as a type would encode an assumption we cannot enforce and would turn upstream renames into silent `None`s |
+| Technical layout (`reports/`, `cli/`, `webapp/`), not domain-based | A deliberate deviation from CUPID's domain-based principle, appropriate at this size; revisit if the domain grows |
+| Wheel + lock, not loose-file sync | Eliminates both `sys.path` hacks and the stale-file problem |
 
 ## Phases
 
 | Phase | Work | Exit criterion |
 | --- | --- | --- |
-| **0** | pyproject, ruff, mypy, pytest, CI on 3.12; scrubber; fixtures; characterization tests against **current** flat code | Green CI; safety net in place; **zero code moved** |
-| **1** | Extract `src/scoutmb/`: models, config, progress, errors, requirements, inputs, reports. Flat scripts become shims | Phase 0's characterization tests pass **unchanged** |
-| **2** | `ScheduleSession`; `PlaywrightSession` + `RecordedSession`; `process_scout` becomes pure; HTML to asset | `process_scout` tested with no browser |
+| **0** | pyproject, uv.lock, ruff, mypy, pytest, CI; scrubber (TDD); reduced fixtures; characterization tests against **flat** modules | Green CI; safety net in place; **zero app code moved** |
+| **1** | Extract `src/scoutmb/`: models, config, runtime, progress, errors, payloads, tree, statuses, inputs, reports. Decompose inference. Flat scripts become shims | Phase 0's characterization tests pass against new import paths |
+| **2** | `ScheduleSession`; `PlaywrightSession` + `RecordedSession`; contract suite; `process_scout` pure; HTML to asset | `process_scout` tested with no browser; contract suite green on both implementations |
 | **3** | `cli/` console scripts, flat scripts deleted; `webapp/` with `JobRegistry` + routers; both `sys.path` hacks gone | Routes tested under `TestClient` |
-| **4** | Bootstrap rebuild: platforms, standalone runtime, venv, wheel install, `data/` split, self-update | Windows launcher verified end to end |
+| **4** | Bootstrap rebuild: platforms, standalone runtime, venv, wheel install, `data/` split, self-update, rollback, browser revalidation | Windows launcher verified end to end, including a forced-rollback test |
 | **5** | macOS: `macos.py`, CI matrix on both runners, notarization | A macOS launcher that runs |
 
 Phase 1's exit criterion is load-bearing. Characterization tests written against the old
 flat modules, still passing after the code moves, is the actual proof that behavior did
 not change — not code review, not confidence.
 
+Phases 0–3 (application code) and phases 4–5 (launcher) are separable. If the work is
+split across efforts, phase 3 is a clean stopping point.
+
 ## Risks
 
 | Risk | Mitigation |
 | --- | --- |
 | Playwright extraction has no prior characterization test | Mechanical move only; manual end-to-end verification; `RecordedSession` coverage immediately after |
-| Scrubber leaks real data into a commit | Self-verifying scrubber covering contents *and* filenames; `/raw_data/` gitignored; review fixture diffs before commit |
+| Scrubber leaks real data into a commit | Self-verifying scrubber over all artifacts and filenames; own TDD suite with leaky inputs; `/raw_data/` gitignored; review fixture diffs before commit |
+| Upstream API changes shape | Anti-corruption layer with drift reporting; property-based tests assert no crash on arbitrary payloads |
+| Bad wheel bricks installations | Retained previous wheel; automatic rollback after two consecutive launch failures |
+| Playwright/browser version skew after update | Mandatory browser revalidation when the resolved playwright version changes |
 | `python-build-standalone` behaves unlike the embeddable distribution | Phase 4 is Windows-only and verified end to end before phase 5 adds a second platform |
 | macOS Gatekeeper blocks unsigned launcher | Known cost; Apple Developer Program is a purchasing decision tracked outside this plan |
 | tkinter under PyInstaller on macOS is historically fragile | Phase 5 detour if it manifests; not a blocker |
@@ -394,5 +601,6 @@ not change — not code review, not confidence.
 ## Open questions
 
 None blocking. The two suspect behaviors in `requirement_path` (label-row grafting,
-empty rows) are resolved by phase 0's characterization tests rather than by advance
-decision, and any resulting fix is scheduled separately per the risk table.
+empty rows) are resolved by direct tests of `build_requirement_tree` in phase 1 rather
+than by advance decision, and any resulting fix is scheduled separately per the risk
+table.
