@@ -18,6 +18,19 @@ python -m pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
+## Install on macOS
+
+From Terminal (bash/zsh) in this folder:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+On Apple Silicon, every dependency (PyMuPDF, opencv-python-headless, and the PyObjC frameworks pywebview needs for its native window) publishes arm64/universal2 wheels, so no Rosetta or source builds are required.
+
 Chromium is only needed by `scout_schedule_cli.py`; PDF extraction does not launch a browser.
 
 ## Step 1: Build `scouts.csv` from a PDF
@@ -26,6 +39,15 @@ Chromium is only needed by `scout_schedule_cli.py`; PDF extraction does not laun
 python .\pdf_to_scouts.py `
   ".\Class_Schedule_2026_07_06.pdf" `
   --output .\scouts.csv `
+  --strict
+```
+
+macOS/Linux:
+
+```bash
+python pdf_to_scouts.py \
+  "Class_Schedule_2026_07_06.pdf" \
+  --output scouts.csv \
   --strict
 ```
 
@@ -54,6 +76,13 @@ python .\pdf_to_scouts.py `
   --output .\scouts.csv
 ```
 
+macOS/Linux:
+
+```bash
+python pdf_to_scouts.py "pdfs/*.pdf" --output scouts.csv
+python pdf_to_scouts.py pdfs --recursive --output scouts.csv
+```
+
 The extractor first decodes QR images embedded directly in the PDF. If a PDF stores the QR as vector content or an unusual image, it falls back to rendering the page at several resolutions.
 
 ### Useful PDF options
@@ -77,6 +106,14 @@ When extraction warnings occur, the tool writes `<output-name>.errors.csv`.
 python .\scout_schedule_cli.py `
   --input .\scouts.csv `
   --output .\heritage-results
+```
+
+macOS/Linux:
+
+```bash
+python scout_schedule_cli.py \
+  --input scouts.csv \
+  --output heritage-results
 ```
 
 For every scout, this utility:

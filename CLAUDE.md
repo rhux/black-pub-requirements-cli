@@ -11,7 +11,11 @@ Two standalone Python CLI scripts (no package, no build step, no test suite) tha
 
 Run stage 1 only when starting from PDFs; if you already have a CSV/XLSX/JSON of names+QR URLs, go straight to stage 2.
 
-## Setup and running (Windows/PowerShell)
+## Setup and running
+
+Originally Windows-only; also runs on macOS (verified on Apple Silicon — every dependency, including PyMuPDF, opencv-python-headless, and pywebview's PyObjC frameworks, has native arm64/universal2 wheels, so nothing needs Rosetta or a source build).
+
+### Windows/PowerShell
 
 ```powershell
 py -m venv .venv
@@ -25,6 +29,22 @@ Run the pipeline:
 ```powershell
 python .\pdf_to_scouts.py ".\Class_Schedule_2026_07_06.pdf" --output .\scouts.csv --strict
 python .\scout_schedule_cli.py --input .\scouts.csv --output .\heritage-results
+```
+
+### macOS (bash/zsh)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m playwright install chromium   # only needed for scout_schedule_cli.py
+```
+
+Run the pipeline:
+
+```bash
+python pdf_to_scouts.py "Class_Schedule_2026_07_06.pdf" --output scouts.csv --strict
+python scout_schedule_cli.py --input scouts.csv --output heritage-results
 ```
 
 There is no test suite, linter, or CI config in this repo. Verify changes by running the scripts against real or sample input and inspecting the generated CSV/JSON/HTML output.
@@ -62,3 +82,42 @@ There is no test suite, linter, or CI config in this repo. Verify changes by run
 ## Data/privacy notes
 
 - QR URLs and attendee IDs act as bearer access tokens for real scouts' data. `.gitignore` already excludes generated output directories (`scouting-output*/`, `heritage-results*/`), input files (`scouts*.csv`, `*.xlsx`), and `.venv/` — keep it that way and don't commit real PDFs, CSVs, or generated reports.
+
+<!-- code-review-graph MCP tools -->
+## MCP Tools: code-review-graph
+
+**IMPORTANT: This project has a knowledge graph. ALWAYS use the
+code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
+the codebase.** The graph is faster, cheaper (fewer tokens), and gives
+you structural context (callers, dependents, test coverage) that file
+scanning cannot.
+
+### When to use graph tools FIRST
+
+- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
+- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
+- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
+- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
+- **Architecture questions**: `get_architecture_overview` + `list_communities`
+
+Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
+
+### Key Tools
+
+| Tool | Use when |
+| ------ | ---------- |
+| `detect_changes` | Reviewing code changes — gives risk-scored analysis |
+| `get_review_context` | Need source snippets for review — token-efficient |
+| `get_impact_radius` | Understanding blast radius of a change |
+| `get_affected_flows` | Finding which execution paths are impacted |
+| `query_graph` | Tracing callers, callees, imports, tests, dependencies |
+| `semantic_search_nodes` | Finding functions/classes by name or keyword |
+| `get_architecture_overview` | Understanding high-level codebase structure |
+| `refactor_tool` | Planning renames, finding dead code |
+
+### Workflow
+
+1. The graph auto-updates on file changes (via hooks).
+2. Use `detect_changes` for code review.
+3. Use `get_affected_flows` to understand impact.
+4. Use `query_graph` pattern="tests_for" to check coverage.

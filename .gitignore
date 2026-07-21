@@ -8,3 +8,5 @@ pdf-uploads/
 runs/
 /build/
 /dist/
+# Added by code-review-graph
+.code-review-graph/
