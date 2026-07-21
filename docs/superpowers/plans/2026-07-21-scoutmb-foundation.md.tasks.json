@@ -1,0 +1,105 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-21-scoutmb-foundation.md",
+  "specPath": "docs/superpowers/specs/2026-07-21-scoutmb-refactor-design.md",
+  "scope": "Spec phases 0-3 only. Plan 2 (phases 4-8) is written after Task 14 lands.",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Project tooling scaffold",
+      "status": "pending",
+      "description": "**Goal:** `pyproject.toml` with ruff, mypy, pytest, and coverage configured for a 3.12 target, with zero source changes.\n\n**Files:**\n- Create: `pyproject.toml`\n- Modify: `.gitignore`\n\n**Acceptance Criteria:**\n- `ruff check .` exits 0 on the untouched tree\n- `ruff format --check .` reports current state without erroring the run\n- `mypy` runs and exits 0\n- `requires-python = \">=3.12\"` and ruff `target-version = \"py312\"`\n- No test job configured yet\n\n**Verify:** `ruff check . && mypy --version && python -c \"import tomllib,pathlib; tomllib.loads(pathlib.Path('pyproject.toml').read_text())\"` -> exit 0\n\n```json:metadata\n{\"files\": [\"pyproject.toml\", \".gitignore\"], \"verifyCommand\": \".venv/bin/ruff check . && .venv/bin/mypy\", \"acceptanceCriteria\": [\"ruff check exits 0\", \"mypy exits 0\", \"requires-python is >=3.12\", \"no test job in CI yet\"], \"modelTier\": \"mechanical\"}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Staged CI - lint, types",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** CI that passes today. No test or build job, because pytest with zero tests exits non-zero and src/scoutmb does not exist yet.\n\n**Files:**\n- Create: `.github/workflows/ci.yml`\n\n**Acceptance Criteria:**\n- Workflow parses as valid YAML\n- Jobs: `lint`, `types` only\n- Runs on ubuntu-latest with Python 3.12\n- No pytest step, no wheel build\n- `ruff format` applied as its own formatting-only commit\n\n**Verify:** `python -c \"import yaml,pathlib; yaml.safe_load(pathlib.Path('.github/workflows/ci.yml').read_text()); print('valid')\"` -> `valid`\n\n```json:metadata\n{\"files\": [\".github/workflows/ci.yml\"], \"verifyCommand\": \".venv/bin/python -c \\\"import yaml,pathlib; yaml.safe_load(pathlib.Path('.github/workflows/ci.yml').read_text()); print('valid')\\\"\", \"acceptanceCriteria\": [\"valid YAML\", \"only lint and types jobs\", \"Python 3.12\", \"formatting is a separate commit\"], \"modelTier\": \"mechanical\"}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Corpus verification tool",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** A tool that reproduces the spec's corpus counts while emitting only aggregates, so the numbers can be re-checked without exporting any Scout data.\n\n**Files:**\n- Create: `tools/verify_corpus.py`\n- Test: `tests/tools/test_verify_corpus.py`\n\n**Acceptance Criteria:**\n- Prints scouts / classes / requirements / raw-payload counts per run\n- Prints the (COMPLETED_REQ_FLAG, COMPLETED_CLASS_FLAG) distribution\n- Prints distinct REQ_NBR_WEB_DISPLAY shape counts, never raw values\n- Emits no names, attendee IDs, descriptions, or URLs - enforced by a test\n- Exits non-zero if the corpus directory is absent\n\n**Verify:** `.venv/bin/pytest tests/tools/test_verify_corpus.py -v` -> all pass\n\n```json:metadata\n{\"files\": [\"tools/verify_corpus.py\", \"tests/tools/test_verify_corpus.py\"], \"verifyCommand\": \".venv/bin/pytest tests/tools/test_verify_corpus.py -v\", \"acceptanceCriteria\": [\"aggregate counts only\", \"no PII in output, test-enforced\", \"reproduces 4858 requirements per run\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Self-verifying fixture scrubber",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Convert a real run directory into committable fixtures, with automated proof that no original name, ID, or token survives - in file contents or filenames.\n\n**Files:**\n- Create: `tools/scrub_fixtures.py`\n- Test: `tests/tools/test_scrub_fixtures.py`\n\n**Acceptance Criteria:**\n- Replaces names and attendee IDs deterministically\n- Rewrites filenames as well as contents\n- Longest-first replacement so 'Ann Lee' inside 'Ann Leeson' leaves no fragment\n- `verify_clean` returns every surviving original; scrub raises if any remain\n- Rewrites scoutingevent.com/mobile/ tokens to TESTTOKEN####\n\n**Verify:** `.venv/bin/pytest tests/tools/test_scrub_fixtures.py -v` -> all pass\n\n```json:metadata\n{\"files\": [\"tools/scrub_fixtures.py\", \"tests/tools/test_scrub_fixtures.py\"], \"verifyCommand\": \".venv/bin/pytest tests/tools/test_scrub_fixtures.py -v\", \"acceptanceCriteria\": [\"substring names fully replaced\", \"IDs in HTML attributes replaced\", \"QR tokens rewritten\", \"raises LeakDetected when an original survives\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Generate fixtures and install tripwire",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** A reduced, sanitized fixture set in the repo, plus a conftest tripwire that fails the suite if unsanitized data ever appears.\n\n**Files:**\n- Create: `tests/conftest.py`\n- Create: `tests/fixtures/run_reduced/` (generated)\n- Create: `tests/factories/records.py`\n\n**Acceptance Criteria:**\n- `tests/fixtures/run_reduced/` holds 2-3 scouts' worth of scrubbed artifacts\n- Tripwire fails on any scoutingevent.com/mobile/ token not starting with TESTTOKEN\n- pytest-socket blocks network in the default suite\n- A PII sweep over tests/ finds zero real names or IDs\n\n**Verify:** `.venv/bin/pytest tests/ -v` passes AND the Step 4 PII sweep prints `LEAKS: NONE`\n\n```json:metadata\n{\"files\": [\"tests/conftest.py\", \"tests/factories/records.py\", \"tests/fixtures/run_reduced\"], \"verifyCommand\": \".venv/bin/pytest tests/ -v\", \"acceptanceCriteria\": [\"reduced fixture set generated\", \"tripwire active\", \"PII sweep prints NONE\"], \"modelTier\": \"standard\", \"notes\": \"If LeakDetected is raised, commit nothing. Fix the scrubber and re-run.\"}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Characterize requirement_path",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** Pin the current parse result for every requirement-number shape the real corpus contains, and add the `test` job to CI now that tests exist.\n\n**Files:**\n- Create: `tests/characterization/test_requirement_path.py`\n- Modify: `.github/workflows/ci.yml`\n\n**Acceptance Criteria:**\n- All 18 observed shapes covered as a parametrize table\n- Suspect behaviors (`Note.` -> ('7','note'), '' -> ()) pinned AS-IS with comments, not fixed\n- A hypothesis property test asserts requirement_path never raises on arbitrary strings\n- CI gains a `test` job on ubuntu + windows\n\n**Verify:** `.venv/bin/pytest tests/characterization/test_requirement_path.py -v` -> all pass\n\n```json:metadata\n{\"files\": [\"tests/characterization/test_requirement_path.py\", \".github/workflows/ci.yml\"], \"verifyCommand\": \".venv/bin/pytest tests/characterization/test_requirement_path.py -v\", \"acceptanceCriteria\": [\"18 shapes parametrized\", \"suspect cases pinned not fixed\", \"property test present\", \"CI test job added\"], \"modelTier\": \"standard\", \"notes\": \"Characterization: if an assertion fails, the EXPECTATION is wrong, not the code.\"}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: Characterize inference and both consumers",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** Pin annotate_requirement_statuses and build_missing_requirements, including the non-mutation guarantee and the id()-keyed bookkeeping that a later dataclass refactor will disturb.\n\n**Files:**\n- Create: `tests/characterization/test_inference.py`\n\n**Acceptance Criteria:**\n- A test proves input dictionaries are NOT mutated (guards the copy at :672)\n- Choice-requirement threshold behavior pinned (Do ONE / Do TWO)\n- Both consumers pinned separately\n- A test documents that same-named attendees currently MERGE, marked as the defect Task 10 fixes\n- Leaf selection and ancestor inclusion pinned (build_missing_requirements keys on id(item) at :801-835; that keying cannot survive the dataclass move, so Plan 2 rewrites it over node indices and these tests are the only guard)\n- The '(not used)' filter and requirement_type_id == '3' exclusion pinned\n\n**Verify:** `.venv/bin/pytest tests/characterization/test_inference.py -v` -> all pass\n\n```json:metadata\n{\"files\": [\"tests/characterization/test_inference.py\"], \"verifyCommand\": \".venv/bin/pytest tests/characterization/test_inference.py -v\", \"acceptanceCriteria\": [\"non-mutation test present\", \"choice threshold pinned\", \"both consumers pinned separately\", \"KNOWN_DEFECT merge test present\", \"leaf/ancestor selection pinned\", \"header and not-used exclusions pinned\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: Characterize process_scout and CSV headers",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** Pin the orchestration path reachable via monkeypatch, plus the CSV header rows that silently depend on dataclass field order.\n\n**Files:**\n- Create: `tests/characterization/test_process_scout.py`\n- Create: `tests/characterization/test_outputs.py`\n\n**Acceptance Criteria:**\n- process_scout exercised with NO real browser, by monkeypatching navigate_and_trigger_schedule, discover_name, post_requirement\n- Retry behavior pinned at exactly 3 attempts\n- classes.csv and requirements.csv header rows asserted literally, guarding __dataclass_fields__ order at :1666 and :1671\n- A failing scout accumulates an error rather than raising\n\n**Verify:** `.venv/bin/pytest tests/characterization/ -v` -> all pass\n\n```json:metadata\n{\"files\": [\"tests/characterization/test_process_scout.py\", \"tests/characterization/test_outputs.py\"], \"verifyCommand\": \".venv/bin/pytest tests/characterization/ -v\", \"acceptanceCriteria\": [\"process_scout tested with no browser\", \"retry pinned at 3 attempts\", \"CSV headers asserted literally\", \"error accumulation pinned\"], \"modelTier\": \"standard\", \"notes\": \"If a fake lacks a method process_scout calls, add it to the fake. Do NOT change scout_schedule_cli.py.\"}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 9: AttendeeKey identity type",
+      "status": "pending",
+      "blockedBy": [6, 7, 8],
+      "description": "**Goal:** A domain type that replaces the display name as identity, with a filename-safe digest that never exposes the bearer-token attendee ID.\n\n**Files:**\n- Create: `src/scoutmb/__init__.py`, `src/scoutmb/errors.py`, `src/scoutmb/domain/__init__.py`, `src/scoutmb/domain/identity.py`\n- Test: `tests/unit/test_identity.py`\n\n**Acceptance Criteria:**\n- `AttendeeKey.from_attendee_id` rejects blank IDs with a typed error\n- `AttendeeKey.unresolved(seed)` produces a stable key when the API supplies no ID\n- `.short` is 8 hex chars, deterministic, and does NOT contain the raw ID\n- 500 distinct IDs produce 500 distinct shorts\n- `mypy --strict src/scoutmb/domain/identity.py` passes\n\n**Verify:** `.venv/bin/pytest tests/unit/test_identity.py -v && .venv/bin/mypy --strict src/scoutmb/domain/identity.py`\n\n```json:metadata\n{\"files\": [\"src/scoutmb/__init__.py\", \"src/scoutmb/errors.py\", \"src/scoutmb/domain/identity.py\", \"tests/unit/test_identity.py\"], \"verifyCommand\": \".venv/bin/pytest tests/unit/test_identity.py -v && .venv/bin/mypy --strict src/scoutmb/domain/identity.py\", \"acceptanceCriteria\": [\"blank id rejected\", \"unresolved key stable and distinct\", \"short is 8 chars and hides raw id\", \"no collisions across 500 ids\", \"mypy strict clean\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 10: Key inference on AttendeeKey",
+      "status": "pending",
+      "blockedBy": [9],
+      "description": "**Goal:** Replace name-based grouping so two same-named attendees are never merged. Deliberate behavior change, tested first.\n\n**Files:**\n- Modify: `scout_schedule_cli.py` :675 (grouping key), :786 (by_key), :813-817 (parent_key), :838-840 (grouped output), :920 (email lookup)\n- Modify: `tests/characterization/test_inference.py` (replace the KNOWN_DEFECT test)\n- Test: `tests/unit/test_inference_identity.py`\n\n**Acceptance Criteria:**\n- Two attendees with identical names and different IDs produce SEPARATE groups\n- build_missing_requirements returns a mapping keyed by attendee identity, with display_name carried inside each entry\n- The KNOWN_DEFECT characterization test is replaced by its corrected counterpart\n- Three Task 7 tests updated to the new return shape; their assertions unchanged\n- All other characterization tests still pass unchanged\n\n**Verify:** `.venv/bin/pytest tests/ -v` -> all pass including the corrected identity test\n\n```json:metadata\n{\"files\": [\"scout_schedule_cli.py\", \"tests/unit/test_inference_identity.py\", \"tests/characterization/test_inference.py\"], \"verifyCommand\": \".venv/bin/pytest tests/ -v\", \"acceptanceCriteria\": [\"same-named attendees stay separate\", \"missing attendee_id still yields distinct buckets\", \"display_name carried in each entry\", \"KNOWN_DEFECT test replaced\", \"Task 7 tests updated to new shape with identical assertions\"], \"modelTier\": \"careful\"}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 11: Collision-free output filenames",
+      "status": "pending",
+      "blockedBy": [10],
+      "description": "**Goal:** Email and raw-payload filenames stop colliding for same-named attendees, while staying human-scannable.\n\n**Files:**\n- Modify: `scout_schedule_cli.py` :490 (raw payload), :595-597 (add helper), :935 (email files)\n- Test: `tests/unit/test_output_filenames.py`\n\n**Acceptance Criteria:**\n- Two same-named attendees produce FOUR distinct email files, not two\n- Raw payload filenames are distinct per attendee\n- Filenames contain the readable name slug AND the AttendeeKey.short digest\n- No filename contains the raw attendee_id\n\n**Verify:** `.venv/bin/pytest tests/unit/test_output_filenames.py -v` -> all pass\n\n```json:metadata\n{\"files\": [\"scout_schedule_cli.py\", \"tests/unit/test_output_filenames.py\"], \"verifyCommand\": \".venv/bin/pytest tests/unit/test_output_filenames.py -v\", \"acceptanceCriteria\": [\"same name different ids give distinct stems\", \"stem readable and hides raw id\", \"stem stable across calls\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 12: Atomic scouts.csv writes",
+      "status": "pending",
+      "blockedBy": [6],
+      "description": "**Goal:** A failed PDF extraction must leave the previous scouts.csv intact, rather than truncating it.\n\n**Files:**\n- Modify: `pdf_to_scouts.py` (add atomic_write_text, route write_attendees_csv through it)\n- Test: `tests/unit/test_atomic_write.py`\n\n**Acceptance Criteria:**\n- A write that raises mid-way leaves the original file byte-identical\n- A successful write replaces the file atomically\n- No .tmp file is left behind on either path\n- The CSV header column order is unchanged (it is a contract scout_schedule_cli.py depends on)\n\n**Verify:** `.venv/bin/pytest tests/unit/test_atomic_write.py -v` -> all pass\n\n```json:metadata\n{\"files\": [\"pdf_to_scouts.py\", \"tests/unit/test_atomic_write.py\"], \"verifyCommand\": \".venv/bin/pytest tests/unit/test_atomic_write.py -v\", \"acceptanceCriteria\": [\"successful write replaces content\", \"failed write preserves original\", \"no tmp files left\", \"header order unchanged\"], \"modelTier\": \"standard\", \"notes\": \"Check the existing column order against the current implementation BEFORE replacing the body.\"}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 13: UiSettings with explicit data_root",
+      "status": "pending",
+      "blockedBy": [9],
+      "description": "**Goal:** Kill the __file__-derived data paths (Hazard 1) BEFORE any module moves, with a documented resolution order.\n\n**Files:**\n- Create: `src/scoutmb/ui/__init__.py`, `src/scoutmb/ui/settings.py`\n- Modify: `ui/server.py:24-41`\n- Test: `tests/unit/test_ui_settings.py`\n\n**Acceptance Criteria:**\n- Resolution order: explicit argument -> SCOUTMB_DATA_DIR -> platform user-data dir -> Path.cwd() only in dev mode\n- ui/server.py derives no DATA path from __file__ (STATIC_DIR still may; it locates code, not data)\n- A test proves relocating the module does not move the data root\n- The app still starts and /api/status responds\n\n**Verify:** `.venv/bin/pytest tests/unit/test_ui_settings.py -v` -> all pass\n\n```json:metadata\n{\"files\": [\"src/scoutmb/ui/settings.py\", \"ui/server.py\", \"tests/unit/test_ui_settings.py\"], \"verifyCommand\": \".venv/bin/pytest tests/unit/test_ui_settings.py -v\", \"acceptanceCriteria\": [\"explicit argument wins\", \"env var used when no argument\", \"dev mode falls back to cwd\", \"derived paths hang off data_root\", \"data root independent of module location\"], \"modelTier\": \"careful\"}\n```"
+    },
+    {
+      "id": 14,
+      "subject": "Task 14: Copy-only legacy data migration",
+      "status": "pending",
+      "blockedBy": [13],
+      "description": "**Goal:** Move the one live installation's data from app/ to data/ without ever deleting the originals.\n\n**Files:**\n- Create: `bootstrap/migrate.py`\n- Modify: `bootstrap/paths.py` (add data_dir), `bootstrap/main.py` (call migration, export SCOUTMB_DATA_DIR)\n- Test: `tests/unit/test_migrate.py`\n\n**Acceptance Criteria:**\n- Copies scouts.csv, pdf-uploads/, runs/ from app/ to data/\n- NEVER deletes or moves the originals\n- Idempotent - a second run is a no-op via the .migrated marker\n- Verifies each copy (size for files, recursive count for directories)\n- A destination collision writes <name>.legacy instead of overwriting\n- The launcher exports SCOUTMB_DATA_DIR pointing at data/\n\n**Verify:** `.venv/bin/pytest tests/unit/test_migrate.py -v` -> all pass, and the Step 7 throwaway-root rehearsal prints `original still present: True`\n\n```json:metadata\n{\"files\": [\"bootstrap/migrate.py\", \"bootstrap/paths.py\", \"bootstrap/main.py\", \"tests/unit/test_migrate.py\"], \"verifyCommand\": \".venv/bin/pytest tests/unit/test_migrate.py -v\", \"acceptanceCriteria\": [\"copies all user data\", \"originals never deleted\", \"idempotent via marker\", \"collision writes .legacy\", \"no legacy install is a no-op\", \"launcher exports SCOUTMB_DATA_DIR\"], \"modelTier\": \"careful\", \"notes\": \"One real install exists. Snapshot its app/ directory before this ships.\"}\n```"
+    }
+  ],
+  "lastUpdated": "2026-07-21T22:40:00Z"
+}

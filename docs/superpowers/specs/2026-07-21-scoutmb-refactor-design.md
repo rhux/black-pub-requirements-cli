@@ -27,8 +27,10 @@ current tree.
 ### Correctness defects in shipped code
 
 1. **Attendee identity is the display name, not a stable ID.** Inference groups on
-   `(scout_name, class_p4_id)` (`:675`); email lookup is `missing.get(scout_name)`
-   (`:920`); email filenames are `safe_slug(scout_name)` (`:935`); raw audit payloads are
+   `(scout_name, class_p4_id)` (`:675`); `build_missing_requirements` builds `by_key` on
+   `(scout_name, class_p4_id, requirement_number)` (`:786`) and buckets output by
+   `scout_name` (`:838-840`); email lookup is `missing.get(scout_name)` (`:920`); email
+   filenames are `safe_slug(scout_name)` (`:935`); raw audit payloads are
    `safe_slug(result.name)` (`:490`). **Two attendees with the same name have their
    requirements merged and their output files overwritten.** `attendee_id` is read at
    `:919` and then never used. At troop scale this is unlikely; at council-camp scale it
@@ -60,20 +62,27 @@ current tree.
    two consumers — HTML (`:981`) and email via `build_missing_requirements` (`:783`) —
    *conditionally*, at `:1687` and `:1692` respectively. Under default configuration it
    runs once.
-9. **Two `sys.path` hacks.** `ui/server.py:25` inserts the repo root; `python_env.py:62`
+9. **`build_missing_requirements` keys bookkeeping on `id(item)`** (`:801`, `:807`,
+   `:808`, `:825`, `:835`). It is not a live defect — the dicts stay referenced by
+   `annotated` for the call's duration, so identities are stable — but it is fragile by
+   construction, invisible to a type checker, and **breaks the moment inference moves to
+   dataclasses**, which is exactly what the `inference/` decomposition does. The
+   ancestor-walk selection it implements must be re-expressed over explicit node indices
+   or an identity field before that move.
+10. **Two `sys.path` hacks.** `ui/server.py:25` inserts the repo root; `python_env.py:62`
    patches the app directory into the embeddable Python's `._pth`.
-10. **Heavyweight imports block testing.** `scout_schedule_cli.py:27` imports `openpyxl`
+11. **Heavyweight imports block testing.** `scout_schedule_cli.py:27` imports `openpyxl`
     at module scope, so importing even `requirement_path` requires every dependency.
-11. **`parse_args()` takes no `argv`** (`:88`), a hard prerequisite for CLI testing.
-12. **`print()` is the logging system** — 19 calls, nine `except Exception` sites, three
+12. **`parse_args()` takes no `argv`** (`:88`), a hard prerequisite for CLI testing.
+13. **`print()` is the logging system** — 19 calls, nine `except Exception` sites, three
     swallowing silently (`:363`, `:400`, `:468`).
-13. **Nondeterminism in business logic.** `time.strftime`/`datetime.now()` (`:1644-1645`),
+14. **Nondeterminism in business logic.** `time.strftime`/`datetime.now()` (`:1644-1645`),
     `random.uniform` (`:1765`), `uuid4` (`ui/server.py:110,174`).
-14. **Untyped external payloads.** `scoutingevent.com` responses flow through as
+15. **Untyped external payloads.** `scoutingevent.com` responses flow through as
     `dict[str, Any]`; an upstream rename produces silently wrong completion status.
-15. **Duplication.** `DEFAULT_ADULT_TYPES` (`pdf_to_scouts.py:23`) is re-declared as a
+16. **Duplication.** `DEFAULT_ADULT_TYPES` (`pdf_to_scouts.py:23`) is re-declared as a
     literal set at `scout_schedule_cli.py:212`; header-alias lists appear three times.
-16. **User data commingled with replaceable source.** `scouts.csv`, `pdf-uploads/`, and
+17. **User data commingled with replaceable source.** `scouts.csv`, `pdf-uploads/`, and
     `runs/` live in the directory the launcher overwrites on each start.
 
 ### Claims explicitly retracted
@@ -318,6 +327,20 @@ Both consumers (HTML at `:981`, email at `:783`) receive the same `asdict(Requir
 shape today and are pinned separately before unification — not because their shapes
 diverge (they do not), but because they are independently reachable code paths with
 different enclosing conditions (`:1687` vs `:1692`).
+
+**The `id()` dependency is the blocking prerequisite for `missing.py`.** Today
+`build_missing_requirements` selects actionable leaves and walks their still-incomplete
+ancestors using `dict[int, bool]` keyed on `id(item)` (`:801`, `:807`, `:808`, `:825`,
+`:835`). That works only because the dicts remain referenced by `annotated` for the
+call's duration — and it stops working the instant those dicts become frozen dataclasses,
+which are neither guaranteed-distinct by identity nor safe to key on that way.
+
+The decomposition therefore re-expresses the ancestor walk over **explicit node indices**
+into the tree produced by `tree.py`, with `selected: dict[NodeIndex, bool]`. This is a
+structural rewrite of `:801-836`, not a copy, and it is the one place in the inference
+extraction where the code cannot move mechanically. It gets its own characterization
+tests covering leaf selection, ancestor inclusion, the `(not used)` filter, and the
+`requirement_type_id == "3"` section-header exclusion **before** the rewrite.
 
 ### External payload handling
 
