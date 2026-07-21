@@ -10,5 +10,7 @@ runs/
 /dist/
 # Added by code-review-graph
 .code-review-graph/
-/raw_data/
+# No trailing slash: also covers a symlink to the corpus, which worktrees need
+# (a trailing slash matches directories only, leaving a symlink committable).
+/raw_data
 .DS_Store
