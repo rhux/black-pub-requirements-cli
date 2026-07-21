@@ -11,3 +11,4 @@ runs/
 # Added by code-review-graph
 .code-review-graph/
 /raw_data/
+.DS_Store
