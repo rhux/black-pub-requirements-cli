@@ -1,5 +1,11 @@
 # Restructure `black-pub-requirements-cli` into the `scoutmb` package
 
+> **SUPERSEDED (2026-07-21).** This plan has been merged into
+> [`docs/superpowers/specs/2026-07-21-scoutmb-refactor-design.md`](superpowers/specs/2026-07-21-scoutmb-refactor-design.md),
+> which is the authoritative spec. Retained as a record — its hazard analysis, coverage
+> calibration, and phase structure were carried over largely intact. Do not implement
+> from this document.
+
 > Status: **proposed** — awaiting review. Nothing in this document has been implemented.
 
 ## Context
