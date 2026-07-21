@@ -302,5 +302,38 @@ async def open_report(run_id: str, request: Request) -> dict[str, Any]:
     return {"opened": True, "url": url}
 
 
+@app.post("/api/runs/{run_id}/generate-emails")
+async def generate_emails(run_id: str) -> dict[str, Any]:
+    run_dir = _safe_run_id(run_id)
+    scouts_json = run_dir / "scouts.json"
+    if not scouts_json.exists():
+        raise HTTPException(404, "Run not found or has no scouts.json")
+    scouts = json.loads(scouts_json.read_text(encoding="utf-8"))
+
+    await asyncio.to_thread(scout_schedule_cli.write_email_reports, run_dir, scouts)
+
+    with (run_dir / "emails" / "missing_requirements.csv").open(
+        "r", encoding="utf-8-sig", newline=""
+    ) as stream:
+        rows = list(csv.DictReader(stream))
+    scouts_needing_email = sum(1 for row in rows if row.get("status") == "missing_requirements")
+    return {
+        "generated": True,
+        "scouts_needing_email": scouts_needing_email,
+        "scouts_all_complete": sum(1 for row in rows if row.get("status") == "all_complete"),
+        "scouts_no_data": sum(1 for row in rows if row.get("status") == "no_data_scraped"),
+    }
+
+
+@app.post("/api/runs/{run_id}/open-emails-folder")
+async def open_emails_folder(run_id: str) -> dict[str, Any]:
+    run_dir = _safe_run_id(run_id)
+    emails_dir = run_dir / "emails"
+    if not emails_dir.exists():
+        raise HTTPException(404, "Emails have not been generated yet for this run")
+    os.startfile(str(emails_dir))  # noqa: S606 - local-only app, user-triggered
+    return {"opened": True}
+
+
 app.mount("/runs", StaticFiles(directory=RUNS_DIR), name="runs")
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

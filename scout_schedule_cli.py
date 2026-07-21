@@ -164,6 +164,17 @@ def parse_args() -> argparse.Namespace:
         default="report.html",
         help="HTML report filename inside the output directory (default: report.html).",
     )
+    parser.add_argument(
+        "--email-report",
+        action="store_true",
+        help=(
+            "Also generate per-scout missing-requirement emails (HTML, text, and a "
+            "combined CSV) in an 'emails' subdirectory of the output directory. "
+            "The HTML report's 'Generate missing-requirement emails' button does "
+            "this on demand when run through the local web UI, so this flag is "
+            "only needed for bare command-line runs (default: off)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -756,6 +767,196 @@ def annotate_requirement_statuses(requirements: list[dict[str, Any]]) -> list[di
 
     return annotated
 
+
+def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """Group incomplete, actionable requirements by scout name and merit badge.
+
+    `scouts` is the same nested shape written to scouts.json: a list of
+    {name, attendee_id, classes, requirements, errors} dicts. Leaf requirements
+    (no children) left 'incomplete' by annotate_requirement_statuses are the
+    actionable items; section headers and parent rollups aren't actionable on
+    their own, but when a leaf is missing, its still-incomplete ancestors (e.g.
+    "3" when "3b"/"3c" are missing) are included too for context -- a scout
+    seeing "3b" in isolation has no idea what "3" actually asked for.
+    """
+    flattened = [dict(req) for scout in scouts for req in scout.get("requirements", [])]
+    annotated = annotate_requirement_statuses(flattened)
+
+    by_key = {
+        (str(item.get("scout_name") or ""), str(item.get("class_p4_id") or ""), str(item.get("requirement_number") or "")): item
+        for item in annotated
+    }
+
+    def is_not_used(item: dict[str, Any]) -> bool:
+        return "(not used)" in clean_html_description(str(item.get("description") or "")).lower()
+
+    def is_actionable_leaf(item: dict[str, Any]) -> bool:
+        return (
+            item.get("calculated_status") == "incomplete"
+            and "total_subrequirements" not in item
+            and str(item.get("requirement_type_id") or "") != "3"
+            and not is_not_used(item)
+        )
+
+    selected: dict[int, bool] = {}  # id(item) -> is_leaf
+    for item in annotated:
+        if not is_actionable_leaf(item):
+            continue
+        current = item
+        is_leaf = True
+        while current is not None and id(current) not in selected:
+            selected[id(current)] = is_leaf
+            is_leaf = False
+            parent_number = current.get("parent_requirement_number")
+            if parent_number is None:
+                break
+            parent_key = (
+                str(current.get("scout_name") or ""),
+                str(current.get("class_p4_id") or ""),
+                str(parent_number),
+            )
+            parent = by_key.get(parent_key)
+            if parent is None or parent.get("calculated_status") in {"complete", "complete_check"}:
+                break
+            current = parent
+
+    grouped: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for item in annotated:
+        if id(item) not in selected:
+            continue
+        if is_not_used(item):
+            continue
+
+        description = clean_html_description(str(item.get("description") or ""))
+        entry = {
+            "requirement_number": str(item.get("requirement_number") or ""),
+            "description": description,
+            "is_prereq": "(pre-req)" in description.lower(),
+            "is_leaf": selected[id(item)],
+            "depth": max(len(item.get("requirement_path") or []) - 1, 0),
+        }
+        scout_name = str(item.get("scout_name") or "")
+        badge_name = str(item.get("merit_badge_name") or "")
+        grouped.setdefault(scout_name, {}).setdefault(badge_name, []).append(entry)
+
+    return grouped
+
+
+def email_subject(scout_name: str) -> str:
+    return f"Merit Badge Requirements Still Needed - {scout_name}"
+
+
+def render_email_text(scout_name: str, badge_groups: dict[str, list[dict[str, Any]]]) -> str:
+    lines = [f"Hi {scout_name},", "", "Here are the merit badge requirements you still need to complete:"]
+    for badge_name, items in badge_groups.items():
+        lines.append("")
+        lines.append(badge_name)
+        lines.append("-" * len(badge_name))
+        for item in items:
+            indent = "  " * (item["depth"] + 1)
+            prefix = f"{indent}{item['requirement_number']}. " if item["requirement_number"] else indent
+            body = item["description"].replace("\n", "\n" + " " * len(prefix))
+            line = f"{prefix}{body}"
+            if item["is_prereq"]:
+                line += " (complete before the event)"
+            lines.append(line)
+    lines.append("")
+    lines.append("Please work with your merit badge counselor to complete these. Reach out if you have questions.")
+    return "\n".join(lines)
+
+
+def render_email_html(scout_name: str, badge_groups: dict[str, list[dict[str, Any]]]) -> str:
+    sections = []
+    for badge_name, items in badge_groups.items():
+        rows = []
+        for item in items:
+            number = html.escape(item["requirement_number"])
+            description = html.escape(item["description"]).replace("\n", "<br>")
+            prereq_badge = (
+                ' <span class="prereq">complete before the event</span>' if item["is_prereq"] else ""
+            )
+            indent = f' style="margin-left: {item["depth"] * 1.25}rem"' if item["depth"] else ""
+            rows.append(f"<li{indent}><strong>{number}.</strong> {description}{prereq_badge}</li>")
+        sections.append(f"<h2>{html.escape(badge_name)}</h2><ul>{''.join(rows)}</ul>")
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Merit Badge Requirements Still Needed - {html.escape(scout_name)}</title>
+<style>
+body {{ font-family: Arial, Helvetica, sans-serif; color: #17212b; max-width: 640px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; }}
+h1 {{ font-size: 1.4rem; }}
+h2 {{ font-size: 1.1rem; margin-top: 1.5rem; border-bottom: 2px solid #245b78; padding-bottom: .25rem; }}
+ul {{ padding-left: 1.25rem; }}
+li {{ margin-bottom: .5rem; }}
+.prereq {{ display: inline-block; font-size: .75rem; font-weight: bold; color: #8a4b08; background: #fff0d8; border-radius: 4px; padding: .05rem .4rem; }}
+</style>
+</head>
+<body>
+<h1>Hi {html.escape(scout_name)},</h1>
+<p>Here are the merit badge requirements you still need to complete:</p>
+{"".join(sections)}
+<p>Please work with your merit badge counselor to complete these. Reach out if you have questions.</p>
+</body>
+</html>
+"""
+
+
+def write_email_reports(output_dir: Path, scouts: list[dict[str, Any]]) -> Path:
+    """Write per-scout missing-requirement emails plus a combined mail-merge CSV."""
+    emails_dir = output_dir / "emails"
+    emails_dir.mkdir(parents=True, exist_ok=True)
+    missing = build_missing_requirements(scouts)
+
+    fieldnames = [
+        "scout_name", "attendee_id", "status", "merit_badge_count",
+        "missing_requirement_count", "subject", "body_text", "body_html",
+    ]
+    csv_rows = []
+    for scout in scouts:
+        scout_name = str(scout.get("name") or "")
+        attendee_id = str(scout.get("attendee_id") or "")
+        badge_groups = missing.get(scout_name, {})
+        missing_count = sum(1 for items in badge_groups.values() for item in items if item["is_leaf"])
+
+        if missing_count:
+            status = "missing_requirements"
+        elif not scout.get("requirements") and scout.get("errors"):
+            status = "no_data_scraped"
+        else:
+            status = "all_complete"
+
+        subject = email_subject(scout_name)
+        body_text = render_email_text(scout_name, badge_groups) if missing_count else ""
+        body_html = render_email_html(scout_name, badge_groups) if missing_count else ""
+
+        if missing_count:
+            slug = safe_slug(scout_name)
+            (emails_dir / f"{slug}.txt").write_text(body_text, encoding="utf-8")
+            (emails_dir / f"{slug}.html").write_text(body_html, encoding="utf-8")
+
+        csv_rows.append(
+            {
+                "scout_name": scout_name,
+                "attendee_id": attendee_id,
+                "status": status,
+                "merit_badge_count": len(badge_groups),
+                "missing_requirement_count": missing_count,
+                "subject": subject,
+                "body_text": body_text,
+                "body_html": body_html,
+            }
+        )
+
+    with (emails_dir / "missing_requirements.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_rows)
+
+    return emails_dir
+
+
 def json_for_html(value: Any) -> str:
     """Serialize JSON safely for embedding inside an HTML script element."""
     return (
@@ -1182,7 +1383,59 @@ tr:hover td { background: var(--panel-alt); }
     requirementsByClass.get(key).push(req);
   }
 
-  $("generated-at").textContent = `Generated ${data.generated_at_local || ""}`;
+  const generatedEl = $("generated-at");
+  generatedEl.textContent = `Generated ${data.generated_at_local || ""}`;
+  if (data.generated_at_iso) {
+    const ageMs = Math.abs(Date.now() - new Date(data.generated_at_iso).getTime());
+    if (Number.isFinite(ageMs) && ageMs > 4 * 60 * 60 * 1000) {
+      generatedEl.classList.add("stale");
+      generatedEl.insertAdjacentHTML("beforeend", ` — <strong>this report may be out of date; consider re-running it.</strong>`);
+    }
+  }
+
+  const emailStatusEl = $("email-status");
+  const generateEmailsBtn = $("generate-emails-btn");
+  const openEmailsFolderBtn = $("open-emails-folder-btn");
+
+  async function apiPost(path) {
+    const response = await fetch(path, { method: "POST" });
+    let body = null;
+    try { body = await response.json(); } catch { /* ignore */ }
+    if (!response.ok) {
+      throw new Error(body?.detail || `${response.status} ${response.statusText}`);
+    }
+    return body;
+  }
+
+  generateEmailsBtn.addEventListener("click", async () => {
+    generateEmailsBtn.disabled = true;
+    emailStatusEl.textContent = "Generating emails…";
+    try {
+      const result = await apiPost(`/api/runs/${encodeURIComponent(data.run_id || "")}/generate-emails`);
+      emailStatusEl.textContent =
+        `${result.scouts_needing_email} scout(s) need an email, ${result.scouts_all_complete} fully complete.`;
+    } catch (err) {
+      emailStatusEl.textContent =
+        "Could not generate emails. Open this report through the Scout Schedule app to use this feature.";
+    } finally {
+      generateEmailsBtn.disabled = false;
+    }
+  });
+
+  openEmailsFolderBtn.addEventListener("click", async () => {
+    openEmailsFolderBtn.disabled = true;
+    try {
+      await apiPost(`/api/runs/${encodeURIComponent(data.run_id || "")}/open-emails-folder`);
+      emailStatusEl.textContent = "Opened the emails folder.";
+    } catch (err) {
+      emailStatusEl.textContent = /not.*generated/i.test(err.message)
+        ? "Generate emails first."
+        : "Could not open the emails folder. Open this report through the Scout Schedule app to use this feature.";
+    } finally {
+      openEmailsFolderBtn.disabled = false;
+    }
+  });
+
   $("summary").innerHTML = [
     [scouts.length, "Scouts"],
     [classes.length, "Scheduled classes"],
@@ -1382,11 +1635,14 @@ def write_outputs(
     *,
     generate_html: bool = True,
     html_name: str = "report.html",
+    generate_email_report: bool = False,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    run_id = output_dir.name
     classes = [item for result in results for item in result.classes]
     requirements = [item for result in results for item in result.requirements]
     generated_at_local = time.strftime("%Y-%m-%d %H:%M:%S %Z")
+    generated_at_iso = datetime.now().astimezone().isoformat(timespec="seconds")
 
     nested = []
     for result in results:
@@ -1429,7 +1685,11 @@ def write_outputs(
     if not safe_html_name.lower().endswith(".html"):
         safe_html_name += ".html"
     if generate_html:
-        write_html_report(output_dir / safe_html_name, results, generated_at_local)
+        write_html_report(
+            output_dir / safe_html_name, results, generated_at_local, generated_at_iso, run_id=run_id
+        )
+
+    email_report_dir = write_email_reports(output_dir, nested).name if generate_email_report else None
 
     summary = {
         "scouts_processed": len(results),
@@ -1437,7 +1697,9 @@ def write_outputs(
         "classes": len(classes),
         "requirements": len(requirements),
         "generated_at_local": generated_at_local,
+        "generated_at_iso": generated_at_iso,
         "html_report": safe_html_name if generate_html else None,
+        "email_report_dir": email_report_dir,
     }
     (output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
@@ -1514,6 +1776,7 @@ async def async_main(
         results,
         generate_html=not args.no_html,
         html_name=args.html_name,
+        generate_email_report=getattr(args, "email_report", False),
     )
     print(f"Results written to: {args.output.resolve()}")
     return 1 if any(result.errors for result in results) else 0
