@@ -40,7 +40,7 @@ BROWSER_CHANNEL = os.environ.get("SCOUTMB_BROWSER_CHANNEL") or None
 
 RUNS_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(title="Scouting Merit Badges UI")
+app = FastAPI(title="Troop 349 Summer Camp Command Program UI")
 
 operations: dict[str, asyncio.Queue] = {}
 busy = {"pdf-extract": False, "schedule-download": False}
@@ -192,7 +192,7 @@ async def start_schedule_download() -> JSONResponse:
                 headed=False,
                 timeout=45,
                 request_delay_ms=200,
-                scout_delay_ms=500,
+                scout_delay_ms=None,  # None => random 0.5-2s delay per scout, matching the CLI default
                 allow_dead_assets=False,
                 include_adults=False,
                 no_html=False,
@@ -275,6 +275,7 @@ async def list_runs() -> list[dict[str, Any]]:
             {
                 "run_id": run_id,
                 "generated_at_local": summary.get("generated_at_local"),
+                "generated_at_iso": summary.get("generated_at_iso"),
                 "scouts_processed": summary.get("scouts_processed"),
                 "scouts_with_errors": summary.get("scouts_with_errors"),
                 "classes": summary.get("classes"),

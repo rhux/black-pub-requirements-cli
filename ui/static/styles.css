@@ -48,6 +48,7 @@ header {
 }
 header h1 { margin: 0; font-size: clamp(1.4rem, 3vw, 1.9rem); }
 header p { margin: .35rem 0 0; opacity: .9; }
+#disclaimer { font-size: .82rem; max-width: 62ch; opacity: .85; }
 main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
 .panel {
   background: var(--panel);

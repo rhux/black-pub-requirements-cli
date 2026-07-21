@@ -3,18 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scouting Merit Badges</title>
+<title>Troop 349 Summer Camp Command Program</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header>
-  <h1>Scouting Merit Badges</h1>
+  <h1>Troop 349 Summer Camp Command Program</h1>
+  <p id="disclaimer">This software parses the scoutingevent.com schedule's QR code to pull a scout's merit badge report, bypassing the legacy jQuery that prevents the website from sometimes loading. It should be used as is and isn't affiliated with scoutingevent.com, and might stop working in the future. Please double check the generated report, Troop 349 isn't liable for any inaccuracies.</p>
   <p id="status-line">Loading&hellip;</p>
 </header>
 <main>
   <section class="panel" id="upload-panel">
     <h2 id="upload-heading">Upload class-schedule PDFs</h2>
-    <p class="meta">Extracts attendee names and QR codes to build <code>scouts.csv</code>, the input the schedule downloader needs.</p>
+    <p class="meta">Reads the scoutingevent.com class-schedule PDF you already have to pull out each attendee's name and schedule link, entirely on this computer — nothing is sent to scoutingevent.com or anywhere online. Produces <code>scouts.csv</code>, the input the schedule downloader needs.</p>
     <form id="upload-form">
       <input id="pdf-files" type="file" accept="application/pdf" multiple>
       <button id="upload-submit" type="submit">Extract scouts.csv</button>
@@ -28,7 +29,7 @@
     <div class="panel-header">
       <h2>Scouts</h2>
       <div class="actions">
-        <button id="download-btn" type="button">Download Schedule</button>
+        <button id="download-btn" type="button">Download Merit Badges</button>
         <button id="pause-resume-btn" type="button" class="secondary" hidden>Pause after current scout</button>
         <button id="reload-pdfs-btn" type="button" class="secondary">Reload PDFs</button>
       </div>

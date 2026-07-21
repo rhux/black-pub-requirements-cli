@@ -101,7 +101,7 @@ def _run(window: ProgressWindow, paths: AppPaths, logger: logging.Logger) -> Non
 def main() -> int:
     paths = get_paths()
     logger = _setup_logging(paths)
-    window = ProgressWindow("Scouting Merit Badges - Setup")
+    window = ProgressWindow("Troop 349 Summer Camp Command Program - Setup")
 
     if not _acquire_lock(paths):
         window.run(

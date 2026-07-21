@@ -14,10 +14,12 @@ import asyncio
 import csv
 import html
 import json
+import random
 import re
 import sys
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable
 from urllib.parse import parse_qs
@@ -134,8 +136,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--scout-delay-ms",
         type=int,
-        default=500,
-        help="Delay between scouts (default: 500 ms).",
+        default=None,
+        help=(
+            "Delay between scouts, in milliseconds. Default: a random delay "
+            "between 500-2000 ms per scout (so requests don't hit the server at a "
+            "fixed cadence); pass a fixed value (e.g. 0 to disable, or 750 for a "
+            "fixed 750ms) to override."
+        ),
     )
     parser.add_argument(
         "--allow-dead-assets",
@@ -688,6 +695,7 @@ def annotate_requirement_statuses(requirements: list[dict[str, Any]]) -> list[di
 
             if parent_index is not None:
                 children[parent_index].append(index)
+                item["parent_requirement_number"] = group[parent_index].get("requirement_number")
 
             if path:
                 prior_path_indexes[path] = index
@@ -764,6 +772,8 @@ def write_html_report(
     path: Path,
     results: list[ScoutResult],
     generated_at_local: str,
+    generated_at_iso: str,
+    run_id: str = "",
 ) -> None:
     classes = [asdict(item) for result in results for item in result.classes]
     requirements = annotate_requirement_statuses(
@@ -786,6 +796,8 @@ def write_html_report(
     ]
     report_data = {
         "generated_at_local": generated_at_local,
+        "generated_at_iso": generated_at_iso,
+        "run_id": run_id,
         "scouts": scouts,
         "classes": classes,
         "requirements": requirements,
@@ -797,7 +809,7 @@ def write_html_report(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ScoutingEvent Schedule Report</title>
+<title>ScoutingEvent Merit Badge / Schedule Report</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -851,6 +863,12 @@ header {
 }
 header h1 { margin: 0; font-size: clamp(1.55rem, 3vw, 2.35rem); }
 header p { margin: .35rem 0 0; opacity: .9; }
+header p#generated-at { font-size: 1.05rem; font-weight: 700; }
+header p#generated-at.stale { color: #ffd6d6; }
+.header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: .9rem; }
+.header-actions button { width: auto; background: rgba(255,255,255,.12); color: white; border-color: rgba(255,255,255,.4); }
+.header-actions button:hover { border-color: white; }
+.header-actions #email-status { opacity: .9; font-size: .85rem; }
 main { max-width: 1500px; margin: 0 auto; padding: 1rem; }
 .summary-grid {
   display: grid;
@@ -983,6 +1001,12 @@ tr:hover td { background: var(--panel-alt); }
 @media (max-width: 900px) {
   .class-row { grid-template-columns: 90px 70px 1fr; }
   .class-row > :nth-child(4), .class-row > :nth-child(5), .class-row > :nth-child(6) { grid-column: 3; }
+  .controls { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .5rem; }
+  input, select, button { padding: .45rem .55rem; font-size: .85rem; }
+}
+@media (max-width: 600px), (max-height: 500px) {
+  .controls { grid-template-columns: 1fr 1fr; gap: .4rem; }
+  input, select, button { padding: .35rem .45rem; font-size: .8rem; }
 }
 @media print {
   body { background: white; color: black; }
@@ -995,8 +1019,13 @@ tr:hover td { background: var(--panel-alt); }
 </head>
 <body>
 <header>
-  <h1>ScoutingEvent Schedule Report</h1>
+  <h1>ScoutingEvent Merit Badge / Schedule Report</h1>
   <p id="generated-at"></p>
+  <div class="header-actions">
+    <button id="generate-emails-btn" type="button">Generate missing-requirement emails</button>
+    <button id="open-emails-folder-btn" type="button">Open emails folder</button>
+    <span id="email-status"></span>
+  </div>
 </header>
 <main>
   <section class="summary-grid" id="summary"></section>
@@ -1469,8 +1498,14 @@ async def async_main(
                             "errors": len(result.errors),
                         }
                     )
-                if args.scout_delay_ms > 0 and index < len(scouts):
-                    await asyncio.sleep(args.scout_delay_ms / 1000)
+                if index < len(scouts):
+                    delay_seconds = (
+                        random.uniform(0.5, 2.0)
+                        if args.scout_delay_ms is None
+                        else args.scout_delay_ms / 1000
+                    )
+                    if delay_seconds > 0:
+                        await asyncio.sleep(delay_seconds)
         finally:
             await browser.close()
 

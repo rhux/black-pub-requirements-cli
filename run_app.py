@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch the Scouting Merit Badges UI.
+"""Launch the Troop 349 Summer Camp Command Program UI.
 
 By default this opens a chromeless native window (pywebview, using Windows'
 built-in WebView2 control) around a local FastAPI server. Pass --browser to
@@ -79,7 +79,7 @@ def main() -> int:
     else:
         import webview
 
-        webview.create_window("Scouting Merit Badges", base_url, width=1150, height=820, min_size=(760, 560))
+        webview.create_window("Troop 349 Summer Camp Command Program", base_url, width=1150, height=820, min_size=(760, 560))
         webview.start()
 
     return 0

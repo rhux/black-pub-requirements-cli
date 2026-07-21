@@ -13,6 +13,7 @@
   const uploadLog = $("upload-log");
   const scoutsPanel = $("scouts-panel");
   const scoutsTableBody = document.querySelector("#scouts-table tbody");
+  const tableWrap = document.querySelector("#scouts-panel .table-wrap");
   const downloadBtn = $("download-btn");
   const pauseResumeBtn = $("pause-resume-btn");
   const reloadPdfsBtn = $("reload-pdfs-btn");
@@ -83,8 +84,24 @@
     `).join("") || `<tr><td colspan="3" class="meta">No scouts found.</td></tr>`;
   }
 
+  function rowFor(index) {
+    return scoutsTableBody.querySelector(`tr[data-index="${index}"]`);
+  }
+
   function statusCellFor(index) {
-    return scoutsTableBody.querySelector(`tr[data-index="${index}"] .status-cell`);
+    return rowFor(index)?.querySelector(".status-cell") ?? null;
+  }
+
+  function scrollRowIntoView(row) {
+    if (!row) return;
+    const wrapRect = tableWrap.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const headerHeight = scoutsTableBody.parentElement.querySelector("thead").offsetHeight;
+    if (rowRect.top < wrapRect.top + headerHeight) {
+      tableWrap.scrollTop -= (wrapRect.top + headerHeight - rowRect.top);
+    } else if (rowRect.bottom > wrapRect.bottom) {
+      tableWrap.scrollTop += (rowRect.bottom - wrapRect.bottom);
+    }
   }
 
   async function loadScouts() {
@@ -123,15 +140,21 @@
     }
     runsEmpty.hidden = true;
     runsTable.hidden = false;
+    const STALE_MS = 4 * 60 * 60 * 1000;
     runsTableBody.innerHTML = runs.map((run) => {
       const errorBadge = run.scouts_with_errors
         ? `<span class="badge warn">${run.scouts_with_errors}</span>`
         : `<span class="badge success">0</span>`;
+      const isStale = run.generated_at_iso &&
+        Math.abs(Date.now() - new Date(run.generated_at_iso).getTime()) > STALE_MS;
+      const staleBadge = isStale
+        ? ` <span class="badge warn" title="Report is over 4 hours old">Stale</span>`
+        : "";
       const openButton = run.report_url
         ? `<button type="button" class="secondary open-report" data-run-id="${escapeHtml(run.run_id)}">Open Report</button>`
         : `<span class="meta">No report</span>`;
       return `<tr>
-        <td>${escapeHtml(run.run_id)}</td>
+        <td>${escapeHtml(run.run_id)}${staleBadge}</td>
         <td>${escapeHtml(run.scouts_processed)}</td>
         <td>${errorBadge}</td>
         <td>${openButton}</td>
@@ -272,6 +295,7 @@
         setProgress(downloadProgress, evt.index - 1, evt.total);
         const cell = statusCellFor(evt.index - 1);
         if (cell) cell.innerHTML = `<span class="badge active">Downloading…</span>`;
+        scrollRowIntoView(rowFor(evt.index - 1));
       } else if (evt.type === "scout_done") {
         setProgress(downloadProgress, evt.index, evt.total);
         const cell = statusCellFor(evt.index - 1);
