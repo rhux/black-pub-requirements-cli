@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "planPath": "docs/superpowers/plans/2026-07-22-slice-1-foundation-and-correctness.md",
+  "specPath": "docs/superpowers/specs/2026-07-21-scoutmb-refactor-design.md",
+  "slice": "1 of 4 (READY)",
+  "planDigest": {
+    "algorithm": "sha256",
+    "value": "22fbebd65fbc75223c3af3d2b31a18506737cdf012892942e6e1dc2ac7398d02",
+    "mismatchBehavior": "If the plan .md changed, regenerate this sidecar before executing."
+  },
+  "lastUpdated": "2026-07-22T00:00:00Z",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Project tooling scaffold (uv, ruff, mypy, pytest, 3.12)",
+      "status": "pending",
+      "description": "**Goal:** A Hatchling src/ project pinned to Python 3.12 that syncs reproducibly from uv.lock, with ruff/mypy/pytest/coverage configured. Zero production-source changes.\n\n**Files:**\n- Create: pyproject.toml, .python-version\n- Generate: uv.lock\n- Modify: .gitignore\n\n**Acceptance Criteria:**\n- .python-version is 3.12; requires-python >=3.12; ruff target-version py312\n- uv sync --locked succeeds; python reports 3.12\n- ruff check and mypy exit 0; no test job in CI yet\n\n**Verify:** `uv sync --locked && uv run ruff check . && uv run mypy && uv run python -c \"import sys;assert sys.version_info[:2]==(3,12);print('py312 ok')\"`\n\n```json:metadata\n{\"files\":[\"pyproject.toml\",\".python-version\",\"uv.lock\",\".gitignore\"],\"verifyCommand\":\"uv sync --locked && uv run ruff check . && uv run mypy\",\"acceptanceCriteria\":[\"py312 pinned\",\"uv sync --locked works\",\"ruff+mypy exit 0\",\"no test job yet\"],\"modelTier\":\"mechanical\"}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Staged CI - lint, types, lock",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** CI that passes today: lint, types, lock-drift only. No test/build job yet.\n\n**Files:**\n- Create: .github/workflows/ci.yml\n\n**Acceptance Criteria:**\n- Valid YAML; jobs lint, types, lock only; Python 3.12\n- lock job fails on stale uv.lock\n- ruff format applied as its own commit\n\n**Verify:** `uv run python -c \"import yaml,pathlib;yaml.safe_load(pathlib.Path('.github/workflows/ci.yml').read_text());print('valid')\"`\n\n```json:metadata\n{\"files\":[\".github/workflows/ci.yml\"],\"verifyCommand\":\"uv run python -c \\\"import yaml,pathlib;yaml.safe_load(pathlib.Path('.github/workflows/ci.yml').read_text());print('valid')\\\"\",\"acceptanceCriteria\":[\"valid YAML\",\"lint/types/lock only\",\"formatting is a separate commit\"],\"modelTier\":\"mechanical\"}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Offline test enforcement",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Default tests cannot reach a non-loopback address. Python sockets blocked, app-level network policy exists, scoutingevent.com needs a two-part opt-in.\n\n**Files:**\n- Create: src/scoutmb/__init__.py, src/scoutmb/network_policy.py, src/scoutmb/errors.py, tests/conftest.py (network half), tests/network/test_offline_policy.py\n\n**Acceptance Criteria:**\n- Non-loopback socket in a default test fails; loopback allowed\n- assert_egress_allowed raises ExternalNetworkBlocked for a real host unless SCOUTMB_ALLOW_LIVE_SERVICE set\n- pytest -m 'not live_service' passes with zero real network\n\n**Verify:** `uv run pytest tests/network -q`\n\n```json:metadata\n{\"files\":[\"src/scoutmb/network_policy.py\",\"src/scoutmb/errors.py\",\"tests/conftest.py\",\"tests/network/test_offline_policy.py\"],\"verifyCommand\":\"uv run pytest tests/network -q\",\"acceptanceCriteria\":[\"non-loopback blocked\",\"loopback allowed\",\"two-part live opt-in\"],\"modelTier\":\"standard\"}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Synthetic factories and fixtures",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Deterministic fully-synthetic builders for records and API payloads covering the observed edge cases. No committed fixture derives from real data.\n\n**Files:**\n- Create: tests/factories/records.py, tests/factories/payloads.py, tests/factories/test_factories_smoke.py\n\n**Acceptance Criteria:**\n- make_requirement/make_class valid; override per test\n- payloads mirror real API field names (classP4ID, MDM_LKP_BADGE_REQ_ID, REQ_NBR_WEB_DISPLAY, COMPLETED_REQ_FLAG)\n- 18 requirement-number shapes represented\n\n**Verify:** `uv run pytest tests/factories -q`\n\n```json:metadata\n{\"files\":[\"tests/factories/records.py\",\"tests/factories/payloads.py\"],\"verifyCommand\":\"uv run pytest tests/factories -q\",\"acceptanceCriteria\":[\"valid record builders\",\"API-shaped payloads\",\"18 shapes present\"],\"modelTier\":\"standard\"}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Privacy scanner and fixture tripwire",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** A scanner that fails closed on likely-private data under tests/, plus a conftest tripwire that runs it before the suite.\n\n**Files:**\n- Create: tools/check_private_data.py, tests/privacy/test_fixture_hygiene.py\n- Modify: tests/conftest.py (tripwire half)\n\n**Acceptance Criteria:**\n- Flags a scoutingevent.com/mobile/?t= token not starting with TESTTOKEN\n- Reports 'private-data findings: 0' on clean fixtures without echoing matches\n- Session tripwire fails on an un-prefixed live token; non-zero exit on findings\n\n**Verify:** `uv run python tools/check_private_data.py tests && uv run pytest tests/privacy -q`\n\n```json:metadata\n{\"files\":[\"tools/check_private_data.py\",\"tests/conftest.py\",\"tests/privacy/test_fixture_hygiene.py\"],\"verifyCommand\":\"uv run python tools/check_private_data.py tests && uv run pytest tests/privacy -q\",\"acceptanceCriteria\":[\"flags live token\",\"0 findings on clean\",\"never echoes matches\",\"tripwire active\"],\"modelTier\":\"standard\"}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Local corpus verification tool",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** Confirm synthetic factories match reality: read the private raw_data corpus and print aggregate shape/flag counts only, no real data committed or echoed.\n\n**Files:**\n- Create: tools/verify_corpus.py, tests/tools/test_verify_corpus.py\n\n**Acceptance Criteria:**\n- Prints requirement/payload counts, 5 flag combos, requirement-number shape counts\n- Emits no names/IDs/descriptions/URLs (test-enforced); non-zero if corpus absent\n- Reproduces 4858 requirements / 120 payloads per run\n\n**Verify:** `uv run pytest tests/tools/test_verify_corpus.py -q && uv run python tools/verify_corpus.py raw_data`\n\n```json:metadata\n{\"files\":[\"tools/verify_corpus.py\",\"tests/tools/test_verify_corpus.py\"],\"verifyCommand\":\"uv run pytest tests/tools/test_verify_corpus.py -q\",\"acceptanceCriteria\":[\"aggregates only\",\"no PII in output\",\"reproduces 4858/120\"],\"modelTier\":\"standard\",\"notes\":\"If counts differ, update the spec (the claim under test), not the tool.\"}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: Characterize requirement_path + add test CI job",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** Pin the current parse for all 18 shapes (suspect ones as-is), a property test that it never raises, and add the test job to CI.\n\n**Files:**\n- Create: tests/characterization/test_requirement_path.py\n- Modify: .github/workflows/ci.yml\n\n**Acceptance Criteria:**\n- 18 shapes parametrized; Note.->('7','note') and ''->() pinned as-is, comment-marked unresolved\n- hypothesis: never raises on arbitrary strings\n- CI test job on ubuntu + windows\n\n**Verify:** `uv run pytest tests/characterization/test_requirement_path.py -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_requirement_path.py\",\".github/workflows/ci.yml\"],\"verifyCommand\":\"uv run pytest tests/characterization/test_requirement_path.py -q\",\"acceptanceCriteria\":[\"18 shapes\",\"suspect pinned not fixed\",\"property test\",\"CI test job\"],\"modelTier\":\"standard\",\"notes\":\"Characterization: a failing assertion means the expectation is wrong, not the code.\"}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: Characterize inference (consumers, non-mutation, id() selection)",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** Pin annotate_requirement_statuses and build_missing_requirements: non-mutation copy, choice thresholds, both consumers, id()-keyed leaf/ancestor selection, exclusions, and the same-name MERGE defect.\n\n**Files:**\n- Create: tests/characterization/test_inference.py\n\n**Acceptance Criteria:**\n- Input dicts not mutated (guards :672)\n- Choice threshold pinned; leaf/ancestor selection pinned (guards :801-835 id() walk)\n- (not used) filter and requirement_type_id=='3' exclusion pinned\n- Same-name MERGE pinned as test_KNOWN_DEFECT_ (Task 11 replaces it)\n\n**Verify:** `uv run pytest tests/characterization/test_inference.py -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_inference.py\"],\"verifyCommand\":\"uv run pytest tests/characterization/test_inference.py -q\",\"acceptanceCriteria\":[\"non-mutation\",\"choice threshold\",\"leaf/ancestor selection\",\"exclusions\",\"KNOWN_DEFECT merge pinned\"],\"modelTier\":\"standard\"}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 9: Characterize process_scout, loaders, PDF, CSV headers",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** Pin the browser-free orchestration path (monkeypatched), retry count, dedup, a loader, and the exact CSV headers.\n\n**Files:**\n- Create: tests/characterization/test_process_scout.py, tests/characterization/test_inputs_and_outputs.py\n\n**Acceptance Criteria:**\n- process_scout runs with no browser via monkeypatched navigate_and_trigger_schedule/discover_name/post_requirement\n- Retry pinned at 3 attempts; failing scout accumulates an error, does not raise\n- Both CSV headers asserted literally (guards __dataclass_fields__ order :1666,:1671)\n\n**Verify:** `uv run pytest tests/characterization -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_process_scout.py\",\"tests/characterization/test_inputs_and_outputs.py\"],\"verifyCommand\":\"uv run pytest tests/characterization -q\",\"acceptanceCriteria\":[\"process_scout no browser\",\"retry 3\",\"error accumulation\",\"CSV headers literal\"],\"modelTier\":\"standard\",\"notes\":\"If a fake lacks a method process_scout calls, add it to the fake; do not edit production.\"}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 10: Core identity (AttendeeId + per-run UUIDv4 output identity)",
+      "status": "pending",
+      "blockedBy": [7, 8, 9],
+      "description": "**Goal:** Typed identity: AttendeeId fails closed on blank; RunIdentity assigns a stable-within-run UUIDv4 per attendee for OUTPUT; the raw ID never enters a filename.\n\n**Files:**\n- Create: src/scoutmb/core/identity.py\n- Modify: src/scoutmb/errors.py (MissingAttendeeId)\n- Test: tests/unit/test_identity.py\n\n**Acceptance Criteria:**\n- AttendeeId.parse('  ') raises MissingAttendeeId\n- RunIdentity.output_id returns v4, stable within instance, distinct per attendee, no raw id\n- mypy --strict on identity.py passes\n\n**Verify:** `uv run pytest tests/unit/test_identity.py -q && uv run mypy --strict src/scoutmb/core/identity.py`\n\n```json:metadata\n{\"files\":[\"src/scoutmb/core/identity.py\",\"src/scoutmb/errors.py\",\"tests/unit/test_identity.py\"],\"verifyCommand\":\"uv run pytest tests/unit/test_identity.py -q && uv run mypy --strict src/scoutmb/core/identity.py\",\"acceptanceCriteria\":[\"blank fails closed\",\"uuid4 stable within run\",\"distinct per attendee\",\"no raw id\",\"mypy strict clean\"],\"modelTier\":\"standard\"}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 11: Fix the merge - key inference on attendee ID",
+      "status": "pending",
+      "blockedBy": [10],
+      "description": "**Goal:** Two same-named attendees never merge. Grouping, by_key, parent lookup, and output bucketing key on the attendee ID; display name becomes carried data. Deliberate behavior change, RED-tested first.\n\n**Files:**\n- Modify: scout_schedule_cli.py (:675, :786, :813-817, :838-840, :920), tests/characterization/test_inference.py (delete KNOWN_DEFECT)\n- Test: tests/unit/test_inference_identity.py\n\n**Acceptance Criteria:**\n- Two same-name different-id attendees -> two groups\n- build_missing_requirements returns {attendee_id: {display_name, badges}}\n- blank-id attendees do not silently merge\n- KNOWN_DEFECT removed; other characterization tests pass (shape-updated)\n\n**Verify:** `uv run pytest tests/ -q`\n\n```json:metadata\n{\"files\":[\"scout_schedule_cli.py\",\"tests/unit/test_inference_identity.py\",\"tests/characterization/test_inference.py\"],\"verifyCommand\":\"uv run pytest tests/ -q\",\"acceptanceCriteria\":[\"same-name stays separate\",\"new return shape with display_name\",\"blank ids distinct\",\"KNOWN_DEFECT replaced\"],\"modelTier\":\"careful\"}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 12: Collision-free output filenames via per-run UUID",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** Email and raw-payload filenames are distinct per attendee and carry no raw ID - readable slug + run UUID short form.\n\n**Files:**\n- Modify: scout_schedule_cli.py (helper after :595-597; :490; :935; thread a RunIdentity in async_main)\n- Test: tests/unit/test_output_filenames.py\n\n**Acceptance Criteria:**\n- Two same-named attendees -> distinct email and raw filenames\n- stem = slug + output_id[:8]; no raw attendee id; stable within run\n\n**Verify:** `uv run pytest tests/unit/test_output_filenames.py -q`\n\n```json:metadata\n{\"files\":[\"scout_schedule_cli.py\",\"tests/unit/test_output_filenames.py\"],\"verifyCommand\":\"uv run pytest tests/unit/test_output_filenames.py -q\",\"acceptanceCriteria\":[\"distinct per attendee\",\"no raw id in name\",\"stable within run\"],\"modelTier\":\"standard\"}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 13: Atomic single-file writes",
+      "status": "pending",
+      "blockedBy": [9],
+      "description": "**Goal:** A failed write never truncates the previous file. scouts.csv, report, and email files write via temp + fsync + os.replace.\n\n**Files:**\n- Create: src/scoutmb/adapters/files/atomic.py\n- Modify: pdf_to_scouts.py (write_attendees_csv), scout_schedule_cli.py (report/email writers)\n- Test: tests/unit/test_atomic_write.py\n\n**Acceptance Criteria:**\n- Write raising mid-render leaves original byte-identical\n- Success replaces atomically; no .tmp remains\n- write_attendees_csv preserves the exact 7-column header order\n\n**Verify:** `uv run pytest tests/unit/test_atomic_write.py -q`\n\n```json:metadata\n{\"files\":[\"src/scoutmb/adapters/files/atomic.py\",\"pdf_to_scouts.py\",\"scout_schedule_cli.py\",\"tests/unit/test_atomic_write.py\"],\"verifyCommand\":\"uv run pytest tests/unit/test_atomic_write.py -q\",\"acceptanceCriteria\":[\"success replaces, no tmp\",\"failure preserves original\",\"header order unchanged\"],\"modelTier\":\"careful\",\"notes\":\"Check each header/column order against current code before replacing the writer body.\"}\n```"
+    },
+    {
+      "id": 14,
+      "subject": "Task 14: UiSettings explicit data_root (close Hazard 1)",
+      "status": "pending",
+      "blockedBy": [10],
+      "description": "**Goal:** Data paths resolve explicitly, never from __file__, so the Slice-2 package move cannot relocate user data.\n\n**Files:**\n- Create: src/scoutmb/ui/settings.py\n- Modify: ui/server.py (:24-41), pyproject.toml (+platformdirs), uv.lock\n- Test: tests/unit/test_ui_settings.py\n\n**Acceptance Criteria:**\n- Order: explicit -> SCOUTMB_DATA_DIR -> platformdirs -> cwd (dev only)\n- ui/server.py derives no DATA path from __file__ (static path may stay)\n- Test proves relocating the module does not move the data root; app still starts\n\n**Verify:** `uv run pytest tests/unit/test_ui_settings.py -q`\n\n```json:metadata\n{\"files\":[\"src/scoutmb/ui/settings.py\",\"ui/server.py\",\"pyproject.toml\",\"tests/unit/test_ui_settings.py\"],\"verifyCommand\":\"uv run pytest tests/unit/test_ui_settings.py -q\",\"acceptanceCriteria\":[\"explicit wins\",\"env used without arg\",\"dev falls back to cwd\",\"root independent of module location\"],\"modelTier\":\"careful\"}\n```"
+    },
+    {
+      "id": 15,
+      "subject": "Task 15: Copy-only legacy migration",
+      "status": "pending",
+      "blockedBy": [14],
+      "description": "**Goal:** Migrate the one live install's data from app/ to data/ - copy, verify, mark; never move/delete; idempotent; collision-safe; explanatory old-root marker.\n\n**Files:**\n- Create: bootstrap/migrate.py\n- Modify: bootstrap/paths.py (data_dir), bootstrap/main.py (call migration, export SCOUTMB_DATA_DIR)\n- Test: tests/unit/test_migrate.py\n\n**Acceptance Criteria:**\n- Copies scouts.csv, pdf-uploads/, runs/; never deletes/moves originals\n- Idempotent via .migrated; verifies each copy; collision writes <name>.legacy\n- Old root gets marker; launcher exports SCOUTMB_DATA_DIR\n\n**Verify:** `uv run pytest tests/unit/test_migrate.py -q`\n\n```json:metadata\n{\"files\":[\"bootstrap/migrate.py\",\"bootstrap/paths.py\",\"bootstrap/main.py\",\"tests/unit/test_migrate.py\"],\"verifyCommand\":\"uv run pytest tests/unit/test_migrate.py -q\",\"acceptanceCriteria\":[\"copies all\",\"originals retained\",\"idempotent\",\"collision writes .legacy\",\"no-legacy is no-op\",\"exports SCOUTMB_DATA_DIR\"],\"modelTier\":\"careful\",\"notes\":\"Snapshot the one real install's app/ to external storage before this ships.\"}\n```"
+    },
+    {
+      "id": 16,
+      "subject": "Gate 1: Characterization & correctness go/no-go",
+      "status": "pending",
+      "blockedBy": [2, 3, 6, 11, 12, 13, 15],
+      "description": "**Goal:** One reproducible offline run proving Slice 1 complete: characterization green, offline enforced, identity fixed, atomic writes, migration proven, privacy clean.\n\n**Files:** (aggregation only - no new production code)\n\n**Acceptance Criteria:**\n- ruff/format/mypy clean; full suite green under -m 'not live_service and not playwright'\n- check_private_data reports 0 findings; verify_corpus reproduces the numbers\n- Two same-named attendees stay separate; no failed write truncates a prior file; migration keeps originals\n\n**Verify:** `uv sync --locked && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest -m \"not live_service and not playwright\" --cov=src/scoutmb --cov-branch -q && uv run python tools/check_private_data.py tests && uv run python tools/verify_corpus.py raw_data`\n\n```json:metadata\n{\"files\":[],\"verifyCommand\":\"uv run pytest -m 'not live_service and not playwright' --cov=src/scoutmb --cov-branch -q && uv run python tools/check_private_data.py tests\",\"acceptanceCriteria\":[\"all green\",\"0 private-data findings\",\"identity separate\",\"atomic preserves\",\"migration keeps originals\"],\"modelTier\":\"careful\",\"notes\":\"GATE. NO-GO blocks Slice 2; no conditional waiver. Snapshot the live install's app/ before Slice 2.\"}\n```"
+    }
+  ]
+}
