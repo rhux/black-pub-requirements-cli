@@ -13,7 +13,9 @@ import argparse
 import asyncio
 import csv
 import html
+import io
 import json
+import os
 import random
 import re
 import sys
@@ -643,12 +645,28 @@ def attendee_filename_stem(scout_name: str, output_id: str) -> str:
     return f"{safe_slug(scout_name)}-{str(output_id).replace('-', '')}"
 
 
+def atomic_write_text(path: Path, content: str, encoding: str = "utf-8-sig") -> None:
+    """Render-first, same-dir temp, fsync, atomic replace. A failed write never truncates
+    the previous file. (Full D11 contract — exclusive temp, parent-dir fsync — is Slice 2.)"""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with tmp.open("w", encoding=encoding, newline="") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)  # noqa: PTH105 - the failure test monkeypatches os.replace;
+        #                        Path.replace would defeat that injection. Keep os.replace.
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def write_csv(path: Path, records: list[Any], fieldnames: list[str]) -> None:
-    with path.open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        for record in records:
-            writer.writerow(asdict(record))
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for record in records:
+        writer.writerow(asdict(record))
+    atomic_write_text(path, buffer.getvalue())
 
 
 
@@ -1002,8 +1020,8 @@ def write_email_reports(output_dir: Path, scouts: list[dict[str, Any]]) -> Path:
         if missing_count:
             output_id = run_identity.output_id(AttendeeId.parse(attendee_id, scout_name))
             slug = attendee_filename_stem(scout_name, output_id)
-            (emails_dir / f"{slug}.txt").write_text(body_text, encoding="utf-8")
-            (emails_dir / f"{slug}.html").write_text(body_html, encoding="utf-8")
+            atomic_write_text(emails_dir / f"{slug}.txt", body_text, encoding="utf-8")
+            atomic_write_text(emails_dir / f"{slug}.html", body_html, encoding="utf-8")
 
         csv_rows.append(
             {
@@ -1018,10 +1036,11 @@ def write_email_reports(output_dir: Path, scouts: list[dict[str, Any]]) -> Path:
             }
         )
 
-    with (emails_dir / "missing_requirements.csv").open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(csv_rows)
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(csv_rows)
+    atomic_write_text(emails_dir / "missing_requirements.csv", buffer.getvalue())
 
     return emails_dir
 
@@ -1692,7 +1711,8 @@ tr:hover td { background: var(--panel-alt); }
 </body>
 </html>
 '''
-    path.write_text(
+    atomic_write_text(
+        path,
         template.replace("__REPORT_DATA__", json_for_html(report_data)),
         encoding="utf-8",
     )
@@ -1725,8 +1745,10 @@ def write_outputs(
                 "errors": result.errors,
             }
         )
-    (output_dir / "scouts.json").write_text(
-        json.dumps(nested, indent=2, ensure_ascii=False), encoding="utf-8"
+    atomic_write_text(
+        output_dir / "scouts.json",
+        json.dumps(nested, indent=2, ensure_ascii=False),
+        encoding="utf-8",
     )
 
     write_csv(
@@ -1745,10 +1767,11 @@ def write_outputs(
         for result in results
         for error in result.errors
     ]
-    with (output_dir / "errors.csv").open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=["scout_name", "attendee_id", "error"])
-        writer.writeheader()
-        writer.writerows(error_rows)
+    error_buffer = io.StringIO()
+    error_writer = csv.DictWriter(error_buffer, fieldnames=["scout_name", "attendee_id", "error"])
+    error_writer.writeheader()
+    error_writer.writerows(error_rows)
+    atomic_write_text(output_dir / "errors.csv", error_buffer.getvalue())
 
     safe_html_name = Path(html_name).name or "report.html"
     if not safe_html_name.lower().endswith(".html"):
@@ -1770,9 +1793,7 @@ def write_outputs(
         "html_report": safe_html_name if generate_html else None,
         "email_report_dir": email_report_dir,
     }
-    (output_dir / "summary.json").write_text(
-        json.dumps(summary, indent=2), encoding="utf-8"
-    )
+    atomic_write_text(output_dir / "summary.json", json.dumps(summary, indent=2), encoding="utf-8")
 
 
 async def async_main(

@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import csv
 import glob
+import io
+import os
 import re
 import sys
 from dataclasses import asdict, dataclass
@@ -445,6 +447,23 @@ def extract_pdf(
     return attendees, errors
 
 
+def atomic_write_text(path: Path, content: str, encoding: str = "utf-8-sig") -> None:
+    """Render-first, same-dir temp, fsync, atomic replace. A failed write never truncates
+    the previous file. (Full D11 contract — exclusive temp, parent-dir fsync — is Slice 2.)
+
+    A copy of scout_schedule_cli.py's helper of the same name: pdf_to_scouts.py must not
+    import scout_schedule_cli (that would pull Playwright into the PDF stage)."""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with tmp.open("w", encoding=encoding, newline="") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)  # noqa: PTH105 - keep os.replace so failure injection works
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def write_attendees_csv(path: Path, attendees: Sequence[ExtractedAttendee]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
@@ -456,39 +475,41 @@ def write_attendees_csv(path: Path, attendees: Sequence[ExtractedAttendee]) -> N
         "PDF Page",
         "QR Decode Method",
     ]
-    with path.open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fieldnames)
-        writer.writeheader()
-        for attendee in attendees:
-            writer.writerow(
-                {
-                    "Attendee Name": attendee.attendee_name,
-                    "Registrant Type": attendee.registrant_type,
-                    "QR Code Contents": attendee.qr_data,
-                    "Name as Printed": attendee.name_as_printed,
-                    "Source PDF": attendee.source_pdf,
-                    "PDF Page": attendee.pdf_page,
-                    "QR Decode Method": attendee.qr_decode_method,
-                }
-            )
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    for attendee in attendees:
+        writer.writerow(
+            {
+                "Attendee Name": attendee.attendee_name,
+                "Registrant Type": attendee.registrant_type,
+                "QR Code Contents": attendee.qr_data,
+                "Name as Printed": attendee.name_as_printed,
+                "Source PDF": attendee.source_pdf,
+                "PDF Page": attendee.pdf_page,
+                "QR Decode Method": attendee.qr_decode_method,
+            }
+        )
+    atomic_write_text(path, buffer.getvalue())
 
 
 def write_errors_csv(path: Path, errors: Sequence[ExtractionError]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = ["Source PDF", "PDF Page", "Attendee Name", "Registrant Type", "Error"]
-    with path.open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fieldnames)
-        writer.writeheader()
-        for error in errors:
-            writer.writerow(
-                {
-                    "Source PDF": error.source_pdf,
-                    "PDF Page": error.pdf_page,
-                    "Attendee Name": error.attendee_name,
-                    "Registrant Type": error.registrant_type,
-                    "Error": error.error,
-                }
-            )
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    for error in errors:
+        writer.writerow(
+            {
+                "Source PDF": error.source_pdf,
+                "PDF Page": error.pdf_page,
+                "Attendee Name": error.attendee_name,
+                "Registrant Type": error.registrant_type,
+                "Error": error.error,
+            }
+        )
+    atomic_write_text(path, buffer.getvalue())
 
 
 def main(
