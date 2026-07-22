@@ -34,8 +34,12 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
             requirements += 1
             flags[str((row.get("COMPLETED_REQ_FLAG"), row.get("COMPLETED_CLASS_FLAG")))] += 1
             shapes[number_shape(row.get("REQ_NBR_WEB_DISPLAY") or "")] += 1
-    return {"raw_payloads": len(payloads), "requirements": requirements,
-            "flag_combos": dict(flags), "number_shapes": dict(shapes)}
+    return {
+        "raw_payloads": len(payloads),
+        "requirements": requirements,
+        "flag_combos": dict(flags),
+        "number_shapes": dict(shapes),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         s = summarize_run(run)
         print(f"{run.name}: {s['requirements']} requirements, {s['raw_payloads']} payloads")
         for combo, n in sorted(s["flag_combos"].items()):
-            print(f"    flags {combo}: {n}")          # the 5 (REQ, CLASS) combinations
+            print(f"    flags {combo}: {n}")  # the 5 (REQ, CLASS) combinations
         for shape, n in sorted(s["number_shapes"].items(), key=lambda kv: -kv[1]):
             print(f"    shape {shape!r}: {n}")
     return 0

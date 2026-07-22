@@ -31,11 +31,13 @@ def test_corpus_flags_a_substring_name(tmp_path):
 
 
 def test_corpus_flags_an_id_in_a_filename_without_echoing_it(tmp_path):
-    leak_id = "88" + "880001"                       # not a literal, and synthetic anyway
-    (tmp_path / f"{leak_id}-report.html").write_text(f'<tr data-attendee="{leak_id}">', encoding="utf-8")
+    leak_id = "88" + "880001"  # not a literal, and synthetic anyway
+    (tmp_path / f"{leak_id}-report.html").write_text(
+        f'<tr data-attendee="{leak_id}">', encoding="utf-8"
+    )
     findings = scan_corpus([tmp_path], names=set(), ids={leak_id})
-    assert findings                                  # matched (filename + attribute)
-    assert all(leak_id not in f"{path} {reason}" for path, reason in findings)   # redacted
+    assert findings  # matched (filename + attribute)
+    assert all(leak_id not in f"{path} {reason}" for path, reason in findings)  # redacted
 
 
 def test_corpus_flags_a_surname_fragment(tmp_path):

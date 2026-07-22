@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 import pytest_socket
-
 from tools.check_private_data import load_corpus_identifiers, scan_corpus, scan_patterns
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]

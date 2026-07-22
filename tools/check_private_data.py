@@ -86,7 +86,7 @@ def scan_corpus(roots: list[Path], names: set[str], ids: set[str]) -> list[tuple
         if text is not None:
             blob += "\n" + text
         if any(value in blob for value in exact):
-            findings.append((_redact(path, exact), "corpus-exact"))   # never echo the value
+            findings.append((_redact(path, exact), "corpus-exact"))  # never echo the value
             continue
         matched_frags = [p for p, rx in frag_res.items() if rx.search(blob)]
         if matched_frags:
@@ -97,8 +97,12 @@ def scan_corpus(roots: list[Path], names: set[str], ids: set[str]) -> list[tuple
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("roots", nargs="+", type=Path)
-    parser.add_argument("--corpus", type=Path, default=None,
-                        help="Private corpus dir; enables real-value cross-reference when present.")
+    parser.add_argument(
+        "--corpus",
+        type=Path,
+        default=None,
+        help="Private corpus dir; enables real-value cross-reference when present.",
+    )
     args = parser.parse_args(argv)
 
     findings = scan_patterns(args.roots)

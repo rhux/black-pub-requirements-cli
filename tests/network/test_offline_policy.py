@@ -6,7 +6,7 @@ from scoutmb.network_policy import ExternalNetworkBlocked, assert_egress_allowed
 
 
 def test_non_loopback_socket_is_blocked():
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 - pytest-socket's raised type is not public API
         socket.create_connection(("93.184.216.34", 80), timeout=1)  # example.com IP
 
 
@@ -24,4 +24,4 @@ def test_live_gateway_requires_two_part_opt_in(monkeypatch):
 
 def test_opt_in_allows_the_real_host(monkeypatch):
     monkeypatch.setenv("SCOUTMB_ALLOW_LIVE_SERVICE", "1")
-    assert_egress_allowed("scoutingevent.com") is None
+    assert assert_egress_allowed("scoutingevent.com") is None  # noqa: B015 - documents the None return

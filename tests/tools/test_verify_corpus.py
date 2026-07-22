@@ -9,11 +9,24 @@ def test_number_shape_collapses_values():
 
 
 def test_summary_emits_only_aggregates(tmp_path):
-    raw = tmp_path / "raw"; raw.mkdir()
-    (raw / "avery-archer-sched.json").write_text(json.dumps({
-        "status": {"status": 1}, "data": [{
-            "REQ_NBR_WEB_DISPLAY": "#3b", "REQ_DESCR": "Avery secret text",
-            "COMPLETED_REQ_FLAG": "1", "COMPLETED_CLASS_FLAG": "0"}]}), encoding="utf-8")
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "avery-archer-sched.json").write_text(
+        json.dumps(
+            {
+                "status": {"status": 1},
+                "data": [
+                    {
+                        "REQ_NBR_WEB_DISPLAY": "#3b",
+                        "REQ_DESCR": "Avery secret text",
+                        "COMPLETED_REQ_FLAG": "1",
+                        "COMPLETED_CLASS_FLAG": "0",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     summary = summarize_run(tmp_path)
     blob = json.dumps(summary)
     assert summary["requirements"] == 1
