@@ -5,7 +5,7 @@
   "slice": "1 of 4 (READY)",
   "planDigest": {
     "algorithm": "sha256",
-    "value": "bbafc0eac3fff33c9ddd523427f06f76361cad141d8dfbe13e053df8daf50c1a",
+    "value": "bf5f7483a1621fe4c5cfdfdba8bf49651c987c9ba737c49622aa4f3fb6f2593a",
     "mismatchBehavior": "If the plan .md changed, regenerate this sidecar before executing."
   },
   "lastUpdated": "2026-07-22T00:00:00Z",

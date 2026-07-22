@@ -529,9 +529,16 @@ def requirement_payload(rows: list[dict[str, Any]] | None = None) -> dict[str, A
 
 
 def schedule_payload(classes: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    # Field names MUST match what process_scout reads at scout_schedule_cli.py:515-529:
+    # CLASS_NAME (raw), CLASS_NAME_ONLY (display), CLASS_NBR, classP4ID, PERIOD_NAME,
+    # CLASS_STIME, STIME, LOCATION_ROOM_NAME, HAS_REQ, CLASS_COMPLETED. The attendee_id
+    # is NOT read from the payload — it comes from the request's post_data (form_values).
     default = {
-        "classP4ID": "2000001", "CLASS_NAME": "Chess", "CLASS_NBR": "26MB1",
-        "CLASS_COMPLETED": "0", "HAS_REQUIREMENTS": "1", "attendeeID": "90000001",
+        "classP4ID": "2000001",
+        "CLASS_NAME": "MoTuWeTh - Chess - 26MB1 (Pavilion)",
+        "CLASS_NAME_ONLY": "Chess", "CLASS_NBR": "26MB1",
+        "PERIOD_NAME": "A Block", "CLASS_STIME": "09:00 AM", "STIME": "09:00:00",
+        "LOCATION_ROOM_NAME": "Pavilion", "HAS_REQ": "1", "CLASS_COMPLETED": "0",
     }
     return {"status": {"status": 1}, "data": classes or [default]}
 ```
@@ -1194,12 +1201,25 @@ import scout_schedule_cli as cli  # noqa: E402
 from tests.factories.payloads import requirement_payload, schedule_payload  # noqa: E402
 
 
+class _Request:
+    # process_scout reads schedule_response.request.post_data (:480) and form_values
+    # extracts attendeeID from it — that is the source of attendee_id, NOT the payload.
+    def __init__(self, post_data: str = "attendeeID=90000001"):
+        self.post_data = post_data
+
+
 class _Resp:
-    def __init__(self, payload): self._p = payload
+    def __init__(self, payload, post_data: str = "attendeeID=90000001"):
+        self._p = payload
+        self.request = _Request(post_data)
     async def json(self): return self._p
 
 
 class _Page:
+    # process_scout calls these on the page BEFORE navigate (:472-476); the fake must
+    # provide them or the test raises AttributeError before reaching the payload.
+    def set_default_timeout(self, _ms): return None
+    def on(self, _event, _cb): return None
     async def evaluate(self, *a, **k): return None
     async def wait_for_timeout(self, _ms): return None
     async def close(self): return None
@@ -1715,12 +1735,19 @@ def atomic_write_text(path: Path, content: str, encoding: str = "utf-8-sig") -> 
 
 (`src/scoutmb/adapters/__init__.py` and `.../files/__init__.py` are empty.)
 
-- [ ] **Step 4: Route the writers through it.** In `pdf_to_scouts.py`, render
-  `write_attendees_csv` to a string via `io.StringIO` + `csv.writer` (preserving the exact
-  header), then `atomic_write_text(path, buffer.getvalue())`. In `scout_schedule_cli.py`,
-  wrap the report and email `.write_text` calls the same way. **Check each header/column
-  order against the current code before replacing** — the attendee CSV header is a
-  contract `scout_schedule_cli.py` consumes.
+- [ ] **Step 4: Route the writers through it, preserving exact structure.**
+  - `pdf_to_scouts.py:write_attendees_csv` currently uses `csv.DictWriter` with the 7
+    fieldnames `["Attendee Name","Registrant Type","QR Code Contents","Name as Printed",
+    "Source PDF","PDF Page","QR Decode Method"]` and a per-row dict mapping (`:450-473`).
+    Render into an `io.StringIO` with the **same `DictWriter` and the same field mapping**
+    (not `csv.writer`), keep the `path.parent.mkdir(...)`, then
+    `atomic_write_text(path, buffer.getvalue())` (default `utf-8-sig` matches). Do the same
+    for `write_errors_csv` (`:476`).
+  - In `scout_schedule_cli.py`, `write_csv` also uses `utf-8-sig` — render via its existing
+    `DictWriter`/`asdict` path into a buffer, then `atomic_write_text`. The report and email
+    writers use plain `utf-8` — wrap those `.write_text` calls as
+    `atomic_write_text(path, rendered, encoding="utf-8")`.
+  - **The header characterization in Tasks 9 and 16 guards these — run them after each edit.**
 
 - [ ] **Step 5: Run the suite** (the CSV-header characterization from Task 9 guards order)
 
@@ -1881,14 +1908,15 @@ never move or delete; idempotent; collision-safe; leave an explanatory old-root 
 **Acceptance Criteria:**
 - [ ] Copies `scouts.csv`, `pdf-uploads/`, `runs/` from `app/` to `data/`
 - [ ] Never deletes/moves originals; idempotent via `.migrated`; verifies each copy
-- [ ] Collision writes `<name>.legacy` instead of overwriting
+- [ ] Collision writes `<name>.legacy`; a **second** collision writes `<name>.legacy-2` and
+      **never deletes** the existing `.legacy`
 - [ ] Old root gets an explanatory marker; launcher exports `SCOUTMB_DATA_DIR`
 
 **Verify:** `uv run pytest tests/unit/test_migrate.py -q`
 
 **Steps:**
 
-- [ ] **Step 1: RED tests** — copies-all, originals-retained, idempotent, collision-writes-alongside, no-legacy-is-noop. (Build a fake `app/{scouts.csv,pdf-uploads,runs/2026-.../summary.json}` in `tmp_path`.)
+- [ ] **Step 1: RED tests** — copies-all, originals-retained, idempotent, collision-writes-alongside, double-collision-never-deletes, no-legacy-is-noop. (Build a fake `app/{scouts.csv,pdf-uploads,runs/2026-.../summary.json}` in `tmp_path`.)
 
 ```python
 # tests/unit/test_migrate.py
@@ -1934,6 +1962,17 @@ def test_collision_writes_alongside(tmp_path):
     assert (data / "scouts.csv.legacy").read_text(encoding="utf-8").startswith("Attendee Name")
 
 
+def test_double_collision_never_deletes_existing_legacy(tmp_path):
+    """A second migration (marker removed) must not delete the first .legacy."""
+    app, data = _legacy(tmp_path); data.mkdir(parents=True, exist_ok=True)
+    (data / "scouts.csv").write_text("pre", encoding="utf-8")
+    migrate_legacy_data(app, data)                       # -> scouts.csv.legacy
+    (data / MIGRATION_MARKER).unlink()                   # simulate a re-run
+    migrate_legacy_data(app, data)                       # -> scouts.csv.legacy-2
+    assert (data / "scouts.csv.legacy").exists()         # first preserved copy survives
+    assert (data / "scouts.csv.legacy-2").exists()       # second collision preserved separately
+
+
 def test_no_legacy_is_noop(tmp_path):
     data = tmp_path / "data"; migrate_legacy_data(tmp_path / "app", data)
     assert not data.exists() or not any(data.iterdir())
@@ -1977,9 +2016,15 @@ def migrate_legacy_data(app_dir: Path, data_dir: Path) -> dict[str, object] | No
         src = app_dir / name
         dst = data_dir / name
         if dst.exists():
-            dst = data_dir / f"{name}.legacy"; collisions.append(name)
-            if dst.exists():
-                shutil.rmtree(dst) if dst.is_dir() else dst.unlink()
+            # Preserve every prior copy — NEVER delete an existing .legacy. Pick the first
+            # free .legacy / .legacy-2 / .legacy-3 ... name instead.
+            collisions.append(name)
+            candidate = data_dir / f"{name}.legacy"
+            suffix = 1
+            while candidate.exists():
+                suffix += 1
+                candidate = data_dir / f"{name}.legacy-{suffix}"
+            dst = candidate
         if is_dir:
             shutil.copytree(src, dst)
             if _count(src) != _count(dst):
@@ -2057,7 +2102,7 @@ optional-capability absence.
 - [ ] `load_inputs` pinned for CSV, XLSX, JSON, and text, including every header alias in `first_matching_key`
 - [ ] `expand_pdf_inputs` pinned for a file, a directory, a glob, and `--recursive`
 - [ ] `decode_embedded_qr`/`extract_pdf` pinned against a **generated** synthetic PDF (raster QR); the rendered-fallback path noted for extension
-- [ ] The exact 7 attendee columns (`Attendee Name`/`Registrant Type`/`QR Code Contents`/source/page/method) asserted literally
+- [ ] The exact 7 attendee columns asserted literally: `Attendee Name`, `Registrant Type`, `QR Code Contents`, `Name as Printed`, `Source PDF`, `PDF Page`, `QR Decode Method`
 - [ ] Core-only import: `load_csv` works without `openpyxl`/`fitz`/`cv2` importable (optional-capability absence)
 
 **Verify:** `uv sync --extra pdf && uv run pytest tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py -q`
@@ -2178,29 +2223,36 @@ def test_expand_pdf_inputs_file_dir_glob(tmp_path):
 def test_embedded_qr_decodes_from_a_generated_pdf(tmp_path):
     token = "https://scoutingevent.com/mobile/?t=TESTTOKEN0001"
     p = build_schedule_pdf(tmp_path / "s.pdf", name="Avery Archer", registrant="Youth", qr_value=token)
-    attendees, errors = pdf.extract_pdf(p, render_dpis=[144], strict=False, normalize=True)
+    # Real signature (pdf_to_scouts.py:382): extract_pdf(pdf_path, dpis, normalize_case, debug_dir)
+    attendees, errors = pdf.extract_pdf(p, dpis=[144], normalize_case=False, debug_dir=None)
     assert errors == []
-    assert attendees[0].qr_value == token
+    assert attendees[0].qr_data == token          # field is qr_data, not qr_value
     # Rendered-fallback path (vector QR -> decode_rendered_qr) is a follow-up row; note it.
 
 
 def test_attendee_csv_has_exact_seven_columns(tmp_path):
     import csv
     from pdf_to_scouts import ExtractedAttendee, write_attendees_csv
-    a = ExtractedAttendee(name="Avery Archer", registrant_type="Youth",
-                          qr_value="https://example.invalid/?t=TESTTOKEN0001",
-                          source_pdf="s.pdf", page_number=1, decode_method="embedded")
+    # Real ExtractedAttendee fields (pdf_to_scouts.py:27-35): attendee_name, name_as_printed,
+    # registrant_type, qr_data, source_pdf, pdf_page, qr_decode_method.
+    a = ExtractedAttendee(
+        attendee_name="Avery Archer", name_as_printed="Avery Archer", registrant_type="Youth",
+        qr_data="https://example.invalid/?t=TESTTOKEN0001",
+        source_pdf="s.pdf", pdf_page=1, qr_decode_method="embedded",
+    )
     out = tmp_path / "scouts.csv"
     write_attendees_csv(out, [a])
     with out.open(encoding="utf-8-sig", newline="") as fh:
         header = next(csv.reader(fh))
+    # Real header (pdf_to_scouts.py:450-458) — DictWriter, 7 columns in this exact order:
     assert header == ["Attendee Name", "Registrant Type", "QR Code Contents",
-                      "Source PDF", "Page", "Decode Method"]
+                      "Name as Printed", "Source PDF", "PDF Page", "QR Decode Method"]
 ```
 
-> **Note:** verify `extract_pdf`'s real signature/return shape and `ExtractedAttendee`'s
-> real fields against the current `pdf_to_scouts.py` before finalizing — adjust the calls
-> to match. This is characterization; the code is the authority.
+> **Signatures verified against `pdf_to_scouts.py`** (a `/codex` review caught the earlier
+> draft's wrong parameter and field names). Still confirm `extract_page_identity` parses
+> the builder's page text ("Attendee Information" / "Name …" / "Registrant …") — if not,
+> adjust the builder's layout to what `value_after_label` expects. This is characterization.
 
 - [ ] **Step 4: Run + complete the tables from observed output, then commit**
 
