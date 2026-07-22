@@ -489,7 +489,9 @@ async def process_scout(
     scout: ScoutInput,
     args: argparse.Namespace,
     raw_dir: Path,
+    run_identity: RunIdentity | None = None,
 ) -> ScoutResult:
+    run_identity = run_identity or RunIdentity()
     context: BrowserContext = await browser.new_context(ignore_https_errors=True)
 
     if not args.allow_dead_assets:
@@ -522,7 +524,8 @@ async def process_scout(
 
         schedule_payload = await schedule_response.json()
         raw_dir.mkdir(parents=True, exist_ok=True)
-        slug = safe_slug(result.name)
+        output_id = run_identity.output_id(AttendeeId.parse(attendee_id, result.name))
+        slug = attendee_filename_stem(result.name, output_id)
         (raw_dir / f"{slug}-schedule.json").write_text(
             json.dumps(schedule_payload, indent=2, ensure_ascii=False), encoding="utf-8"
         )
@@ -630,6 +633,14 @@ async def process_scout(
 def safe_slug(value: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "-", value.strip()).strip("-").lower()
     return slug or "unknown-scout"
+
+
+def attendee_filename_stem(scout_name: str, output_id: str) -> str:
+    """Readable, collision-free filename stem: name slug + the FULL per-run output UUID
+    (hyphens stripped). The full UUID — never a truncation — guarantees distinct attendees
+    get distinct filenames. Never the raw attendee_id (a bearer token that must not appear
+    in a shareable filename)."""
+    return f"{safe_slug(scout_name)}-{str(output_id).replace('-', '')}"
 
 
 def write_csv(path: Path, records: list[Any], fieldnames: list[str]) -> None:
@@ -962,6 +973,7 @@ def write_email_reports(output_dir: Path, scouts: list[dict[str, Any]]) -> Path:
     emails_dir = output_dir / "emails"
     emails_dir.mkdir(parents=True, exist_ok=True)
     missing = build_missing_requirements(scouts)
+    run_identity = RunIdentity()
 
     fieldnames = [
         "scout_name", "attendee_id", "status", "merit_badge_count",
@@ -988,7 +1000,8 @@ def write_email_reports(output_dir: Path, scouts: list[dict[str, Any]]) -> Path:
         body_html = render_email_html(scout_name, badge_groups) if missing_count else ""
 
         if missing_count:
-            slug = safe_slug(scout_name)
+            output_id = run_identity.output_id(AttendeeId.parse(attendee_id, scout_name))
+            slug = attendee_filename_stem(scout_name, output_id)
             (emails_dir / f"{slug}.txt").write_text(body_text, encoding="utf-8")
             (emails_dir / f"{slug}.html").write_text(body_html, encoding="utf-8")
 
@@ -1777,6 +1790,7 @@ async def async_main(
         await progress_callback({"type": "batch_start", "total": len(scouts)})
     results: list[ScoutResult] = []
 
+    run_identity = RunIdentity()
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
             headless=not args.headed, channel=getattr(args, "channel", None) or None
@@ -1796,7 +1810,7 @@ async def async_main(
                     await progress_callback(
                         {"type": "scout_start", "index": index, "total": len(scouts), "name": label}
                     )
-                result = await process_scout(browser, scout, args, raw_dir)
+                result = await process_scout(browser, scout, args, raw_dir, run_identity)
                 results.append(result)
                 print(
                     f"    attendeeID={result.attendee_id or 'unknown'}, "
