@@ -87,11 +87,19 @@ uv python install 3.12
 | `tests/conftest.py` | Offline enforcement + fixture tripwire |
 | `src/scoutmb/network_policy.py` | Application-level egress guard |
 | `tools/verify_corpus.py`, `tools/check_private_data.py` | Local aggregate corpus check; PII scanner |
-| `tests/factories/`, `tests/fixtures/synthetic/` | Deterministic synthetic test data |
+| `tests/factories/`, `tests/fakes/` | Deterministic synthetic test data + shared fakes |
 | `tests/characterization/` | Pins legacy behavior of the flat modules |
-| `src/scoutmb/errors.py`, `src/scoutmb/core/identity.py` | Typed errors; attendee + per-run output identity |
-| `src/scoutmb/ui/settings.py` | `UiSettings` with explicit `data_root` |
-| `bootstrap/migrate.py` | Copy-only legacy migration |
+| `src/scoutmb/errors.py`, `src/scoutmb/network_policy.py` | Test/offline-guard support (dev-installed; **not** shipped by the launcher) |
+| `scout_schedule_cli.py` (in-place) | Gains `AttendeeId`/`RunIdentity`/`attendee_filename_stem`/`atomic_write_text` — the fix helpers live in the shipped flat script |
+| `pdf_to_scouts.py` (in-place) | Gains its own `atomic_write_text` |
+| `ui/server.py` (in-place) | Gains `UiSettings` (stdlib OS-dir resolution, no new dep) |
+| `bootstrap/migrate.py` | Copy-only + SHA-256 legacy migration |
+
+**Why helpers live in the flat scripts, not `src/scoutmb`:** the launcher's `source_sync.py`
+ships the flat scripts and `ui/`, **not** `src/scoutmb`. Slice 1 is in-place fixes before the
+restructure, so the fix code must live where it already ships. `src/scoutmb` in Slice 1 holds
+only test/offline-guard support (imported by tests, which run in the dev env where the package
+is `uv sync`-installed). Slice 2 relocates the helpers into `scoutmb` *with* launcher wiring.
 
 ---
 
@@ -180,12 +188,13 @@ exclude = ["bootstrap", "raw_data", "docs", "tests"]
 target-version = "py312"
 line-length = 100
 src = ["src", "tests", "tools"]
-# The legacy flat scripts are characterized in Slice 1 and moved/rewritten in Slice 2.
-# Excluding them keeps ruff from reformatting code that is about to move AND preserves the
-# line numbers this plan's characterization tasks reference. They re-enter ruff in Slice 2.
+# The legacy flat scripts are characterized in Slice 1 and moved/rewritten in Slice 2; the
+# bootstrap package is stdlib-only legacy rewritten in Slice 3/4. Excluding both keeps ruff
+# from reformatting code about to move, preserves the line numbers this plan references, and
+# avoids failing on pre-existing PTH violations (open()/os.replace in bootstrap). They
+# re-enter ruff in their owning slice. New Slice-1 code (src/scoutmb, tools, tests) is linted.
 extend-exclude = [
-    "scout_schedule_cli.py", "pdf_to_scouts.py", "ui/server.py", "run_app.py",
-    "bootstrap/build.spec",
+    "scout_schedule_cli.py", "pdf_to_scouts.py", "ui/server.py", "run_app.py", "bootstrap",
 ]
 exclude = [".venv", "raw_data"]
 
@@ -1412,34 +1421,44 @@ git commit -m "test: characterize process_scout via monkeypatch and pin CSV head
 
 ---
 
-### Task 10: Core identity module (attendee ID + per-run UUIDv4 output identity)
+### Task 10: Attendee identity + per-run UUIDv4 output identity (in the flat script)
 
 **Goal:** Typed identity: `AttendeeId` fails closed on blank; `RunIdentity` assigns a
 stable-within-run UUIDv4 per attendee for **output**; the raw ID never enters a filename.
 
+> **Where this lives (decided after review):** Slice 1 is *in-place fixes before the
+> restructure*, and the code that uses these helpers — `scout_schedule_cli.py` — is a
+> **flat script the launcher ships via `source_sync.py`**. `src/scoutmb` is **not** shipped.
+> So the helpers are defined **inside `scout_schedule_cli.py`**, not in `src/scoutmb`, or the
+> installed app would `ModuleNotFoundError` on launch. Slice 2 moves them into
+> `scoutmb.core.identity` *together with* the launcher wiring, under parity.
+
 **Files:**
-- Create: `src/scoutmb/core/__init__.py`, `src/scoutmb/core/identity.py`
-- Modify: `src/scoutmb/errors.py` (add `MissingAttendeeId`)
+- Modify: `scout_schedule_cli.py` (add `MissingAttendeeId`, `AttendeeId`, `RunIdentity` near the top)
 - Test: `tests/unit/test_identity.py`
 
 **Acceptance Criteria:**
 - [ ] `AttendeeId.parse("  ")` raises `MissingAttendeeId`
 - [ ] `RunIdentity.output_id(aid)` returns a v4 UUID, stable within the instance, distinct per attendee
 - [ ] `output_id` never contains the raw attendee ID
-- [ ] `mypy --strict src/scoutmb/core/identity.py` passes
+- [ ] No production import of `scoutmb` is introduced (the launcher does not ship it)
 
-**Verify:** `uv run pytest tests/unit/test_identity.py -q && uv run mypy --strict src/scoutmb/core/identity.py`
+**Verify:** `uv sync --locked --all-extras && uv run pytest tests/unit/test_identity.py -q`
 
 **Steps:**
 
-- [ ] **Step 1: RED test**
+- [ ] **Step 1: RED test** (imports from the flat script, not `scoutmb`)
 
 ```python
 # tests/unit/test_identity.py
+import sys
 import uuid
+from pathlib import Path
+
 import pytest
-from scoutmb.core.identity import AttendeeId, RunIdentity
-from scoutmb.errors import MissingAttendeeId
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scout_schedule_cli import AttendeeId, MissingAttendeeId, RunIdentity  # noqa: E402
 
 
 def test_blank_attendee_id_fails_closed():
@@ -1467,39 +1486,18 @@ def test_two_runs_are_unlinkable():
     assert a != b
 ```
 
-- [ ] **Step 2: Run RED**, expect `ModuleNotFoundError: scoutmb.core.identity`.
+- [ ] **Step 2: Run RED**, expect `ImportError: cannot import name 'AttendeeId'`.
 
-- [ ] **Step 3: Implement**
-
-Add to `src/scoutmb/errors.py`:
+- [ ] **Step 3: Implement — add to `scout_schedule_cli.py`** (near the existing dataclasses,
+  after the imports; the module already imports `uuid`? if not, add `import uuid`):
 
 ```python
-class MissingAttendeeId(ScoutmbError):
+class MissingAttendeeId(RuntimeError):
+    """An attendee record arrived without the ID we use as identity."""
+
     def __init__(self, scout_name: str = "") -> None:
         self.scout_name = scout_name
         super().__init__(f"No attendee_id for {scout_name or 'an unnamed attendee'}")
-```
-
-```python
-# src/scoutmb/core/__init__.py
-```
-
-```python
-# src/scoutmb/core/identity.py
-"""Attendee identity and per-run output identity.
-
-The display name is NOT identity: two attendees can share one, and merging them
-corrupts both. Internal keying uses the upstream attendee ID (fail closed if blank).
-Shareable OUTPUT identity is a full UUIDv4 assigned per attendee per run, so filenames
-and reports never carry the bearer-token attendee ID.
-"""
-
-from __future__ import annotations
-
-import uuid
-from dataclasses import dataclass, field
-
-from scoutmb.errors import MissingAttendeeId
 
 
 @dataclass(frozen=True, slots=True)
@@ -1507,7 +1505,7 @@ class AttendeeId:
     value: str
 
     @classmethod
-    def parse(cls, raw: str, scout_name: str = "") -> AttendeeId:
+    def parse(cls, raw: str, scout_name: str = "") -> "AttendeeId":
         cleaned = str(raw or "").strip()
         if not cleaned:
             raise MissingAttendeeId(scout_name)
@@ -1528,17 +1526,21 @@ class RunIdentity:
         return existing
 ```
 
-- [ ] **Step 4: GREEN + strict mypy**
+  `dataclass`/`field` are already imported in `scout_schedule_cli.py`. `mypy files=["src","tools"]`
+  does not cover the flat scripts, so there is no strict-mypy step here; the flat scripts are
+  characterized, not type-gated, in Slice 1.
+
+- [ ] **Step 4: GREEN**
 
 ```bash
-uv run pytest tests/unit/test_identity.py -q && uv run mypy --strict src/scoutmb/core/identity.py
+uv sync --locked --all-extras && uv run pytest tests/unit/test_identity.py -q
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/scoutmb/core tests/unit/test_identity.py src/scoutmb/errors.py
-git commit -m "feat: typed AttendeeId (fail closed) + per-run UUIDv4 output identity"
+git add scout_schedule_cli.py tests/unit/test_identity.py
+git commit -m "feat: attendee identity + per-run UUIDv4 output identity (in the flat script)"
 ```
 
 ---
@@ -1734,7 +1736,7 @@ from tests.factories.records import make_requirement  # noqa: E402
 
 def test_stem_hides_the_raw_id_and_carries_the_full_uuid():
     stem = attendee_filename_stem("Avery Archer", "1234abcd-ef00-4000-8000-000000000000")
-    assert stem == "avery-archer-1234abcdef00400080000000000000"  # full 32 hex, no hyphens
+    assert stem == "avery-archer-1234abcdef0040008000000000000000"  # full 32 hex, no hyphens
 
 
 def test_stem_distinct_for_distinct_output_ids():
@@ -1805,9 +1807,9 @@ def attendee_filename_stem(scout_name: str, output_id: str) -> str:
     return f"{safe_slug(scout_name)}-{str(output_id).replace('-', '')}"
 ```
 
-- [ ] **Step 4: Fix the raw side in `process_scout`.** Import at the top of the module:
-  `from scoutmb.core.identity import AttendeeId, RunIdentity`. Add a parameter
-  `run_identity: RunIdentity | None = None` to `process_scout`; at the top of its body add
+- [ ] **Step 4: Fix the raw side in `process_scout`.** `AttendeeId`/`RunIdentity` are defined
+  in this same module (Task 10) — **no import needed**, and no `scoutmb` dependency. Add a
+  parameter `run_identity: RunIdentity | None = None` to `process_scout`; at the top of its body add
   `run_identity = run_identity or RunIdentity()`. After `attendee_id` is confirmed non-blank
   (it raises at `:482` otherwise) and `result.name` is set (`:486`), compute
   `output_id = run_identity.output_id(AttendeeId.parse(attendee_id, result.name))` and
@@ -1864,9 +1866,13 @@ git commit -m "fix: collision-free raw and email filenames via per-run UUID (no 
 > does not claim full D11.
 
 **Files:**
-- Create: `src/scoutmb/adapters/__init__.py`, `src/scoutmb/adapters/files/__init__.py`, `src/scoutmb/adapters/files/atomic.py`
-- Modify: `pdf_to_scouts.py` (`write_attendees_csv`), `scout_schedule_cli.py` (report/email writers)
+- Modify: `scout_schedule_cli.py` (add `atomic_write_text`; route `write_csv`, report, email files, and `missing_requirements.csv`), `pdf_to_scouts.py` (add its own `atomic_write_text`; route `write_attendees_csv`/`write_errors_csv`)
 - Test: `tests/unit/test_atomic_write.py`
+
+> **Location (flat-scripts decision):** `atomic_write_text` is defined **in each shipped flat
+> script**, not in `src/scoutmb` (which the launcher does not ship). The two copies are ~10
+> lines and diverge in Slice 2 when they move behind a `FileStore` port. `pdf_to_scouts.py`
+> must not import `scout_schedule_cli` (that would pull Playwright into the PDF stage).
 
 **Acceptance Criteria:**
 - [ ] A failure **during the write** (injected `os.fsync`/`replace` failure or a raising
@@ -1884,8 +1890,13 @@ git commit -m "fix: collision-free raw and email filenames via per-run UUID (no 
 ```python
 # tests/unit/test_atomic_write.py
 import os
+import sys
+from pathlib import Path
+
 import pytest
-from scoutmb.adapters.files.atomic import atomic_write_text
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scout_schedule_cli import atomic_write_text  # noqa: E402
 
 
 def test_success_replaces_and_roundtrips_encoding(tmp_path):
@@ -1923,60 +1934,57 @@ def test_failure_during_replace_preserves_original(tmp_path, monkeypatch):
 
 - [ ] **Step 2: Run RED**, expect `ModuleNotFoundError`.
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 2: Run RED**, expect `ImportError: cannot import name 'atomic_write_text'`.
+
+- [ ] **Step 3: Implement — add this to `scout_schedule_cli.py` AND (a copy) to `pdf_to_scouts.py`**
+  (`os`/`Path` are already imported in both; if not, add them):
 
 ```python
-# src/scoutmb/adapters/files/atomic.py
-"""Atomic single-file writes: render first, temp in the same dir, fsync, os.replace.
-
-A half-written scouts.csv or report is worse than no new file — it destroys a season
-of work that only exists because someone scanned a stack of PDFs.
-"""
-
-from __future__ import annotations
-
-import os
-from pathlib import Path
-
-
 def atomic_write_text(path: Path, content: str, encoding: str = "utf-8-sig") -> None:
+    """Render-first, same-dir temp, fsync, atomic replace. A failed write never truncates
+    the previous file. (Full D11 contract — exclusive temp, parent-dir fsync — is Slice 2.)"""
     tmp = path.with_name(path.name + ".tmp")
     try:
-        with open(tmp, "w", encoding=encoding, newline="") as fh:
+        with tmp.open("w", encoding=encoding, newline="") as fh:
             fh.write(content)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        os.replace(tmp, path)  # noqa: PTH105 - the failure test monkeypatches os.replace;
+        #                        Path.replace would defeat that injection. Keep os.replace.
     finally:
-        Path(tmp).unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
 ```
 
-(`src/scoutmb/adapters/__init__.py` and `.../files/__init__.py` are empty.)
+  The `# noqa: PTH105` is required: ruff's PTH105 would rewrite `os.replace` to
+  `Path.replace`, and Task 13's failure test monkeypatches `os.replace` — the rewrite would
+  make that injection a no-op and the test would pass vacuously.
 
 - [ ] **Step 4: Route the writers through it, preserving exact structure.**
-  - `pdf_to_scouts.py:write_attendees_csv` currently uses `csv.DictWriter` with the 7
-    fieldnames `["Attendee Name","Registrant Type","QR Code Contents","Name as Printed",
-    "Source PDF","PDF Page","QR Decode Method"]` and a per-row dict mapping (`:450-473`).
-    Render into an `io.StringIO` with the **same `DictWriter` and the same field mapping**
-    (not `csv.writer`), keep the `path.parent.mkdir(...)`, then
-    `atomic_write_text(path, buffer.getvalue())` (default `utf-8-sig` matches). Do the same
-    for `write_errors_csv` (`:476`).
-  - In `scout_schedule_cli.py`, `write_csv` also uses `utf-8-sig` — render via its existing
-    `DictWriter`/`asdict` path into a buffer, then `atomic_write_text`. The report and email
-    writers use plain `utf-8` — wrap those `.write_text` calls as
-    `atomic_write_text(path, rendered, encoding="utf-8")`.
-  - **The header characterization in Tasks 9 and 16 guards these — run them after each edit.**
+  - `pdf_to_scouts.py:write_attendees_csv` (`:448`) and `write_errors_csv` (`:476`) use
+    `csv.DictWriter` with a fixed 7-field / 5-field header and a per-row dict mapping.
+    Render into an `io.StringIO` with the **same `DictWriter` and field mapping** (not
+    `csv.writer`), keep `path.parent.mkdir(...)`, then `atomic_write_text(path, buf.getvalue())`.
+  - `scout_schedule_cli.py`:
+    - `write_csv` (`:600`) uses `utf-8-sig` — render its `DictWriter`/`asdict` rows into a
+      buffer, then `atomic_write_text`.
+    - `scouts.json`/`summary.json` (`utf-8`) and the report/email `.txt`/`.html` — wrap each
+      `.write_text` as `atomic_write_text(path, rendered, encoding=...)` (matching the
+      original encoding: `utf-8` for json/report/email, `utf-8-sig` for csv).
+    - **`errors.csv`** (`:1679`) and **`missing_requirements.csv`** (`write_email_reports`,
+      `:952`) are currently direct `DictWriter` streams — render each into a buffer and route
+      through `atomic_write_text` too, or the "email files atomic" goal is only half met.
+  - **Tasks 9 and 16 pin these headers — run them after each edit.**
 
-- [ ] **Step 5: Run the suite** (the CSV-header characterization from Task 9 guards order)
+- [ ] **Step 5: Run the suite**
 
 ```bash
-uv run pytest tests/ -q
+uv sync --locked --all-extras && uv run pytest tests/ -q
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/scoutmb/adapters pdf_to_scouts.py scout_schedule_cli.py tests/unit/test_atomic_write.py
+git add pdf_to_scouts.py scout_schedule_cli.py tests/unit/test_atomic_write.py
 git commit -m "fix: atomic single-file writes so a failed run preserves prior artifacts"
 ```
 
@@ -1987,28 +1995,36 @@ git commit -m "fix: atomic single-file writes so a failed run preserves prior ar
 **Goal:** Data paths resolve explicitly, never from `__file__`, so the Slice-2 package move
 cannot relocate user data.
 
+> **Location (flat-scripts decision):** `UiSettings` is defined **inline in the shipped
+> `ui/server.py`**, not in `src/scoutmb/ui` (unshipped). It uses a **stdlib** platform-dir
+> helper (mirroring `bootstrap/paths.py`) — **no `platformdirs` dependency**, so nothing new
+> needs adding to `requirements.txt` or the launcher. Slice 2 moves it to
+> `scoutmb.ui.settings` and can adopt `platformdirs` then.
+
 **Files:**
-- Create: `src/scoutmb/ui/__init__.py`, `src/scoutmb/ui/settings.py`
-- Modify: `ui/server.py` (`:24-41`)
+- Modify: `ui/server.py` (add `UiSettings` + `_platform_data_root`; rewire `:24-41`)
 - Test: `tests/unit/test_ui_settings.py`
 
 **Acceptance Criteria:**
-- [ ] Order: explicit arg → `SCOUTMB_DATA_DIR` → `platformdirs` OS location → `Path.cwd()` **only** when `dev_mode`
-- [ ] With neither an arg nor the env var and `dev_mode=False`, resolution is `platformdirs`, **not** `cwd`
+- [ ] Order: explicit arg → `SCOUTMB_DATA_DIR` → OS data location (stdlib) → `Path.cwd()` **only** when `dev_mode`
+- [ ] With neither an arg nor the env var and `dev_mode=False`, resolution is the OS data location, **not** `cwd`
 - [ ] `ui/server.py` derives no DATA path from `__file__` (static-asset path may stay — it locates code)
-- [ ] A test proves relocating the module does not move the data root
+- [ ] No `platformdirs` / `scoutmb` production dependency is introduced
 - [ ] The app starts and `GET /api/status` returns 200 (Step 5)
 
 **Verify:** `uv sync --locked --all-extras && uv run pytest tests/unit/test_ui_settings.py -q`
 
 **Steps:**
 
-- [ ] **Step 1: RED test**
+- [ ] **Step 1: RED test** (imports `UiSettings` from the shipped `ui.server`)
 
 ```python
 # tests/unit/test_ui_settings.py
+import sys
 from pathlib import Path
-from scoutmb.ui.settings import UiSettings
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from ui.server import UiSettings  # noqa: E402
 
 
 def test_explicit_wins(tmp_path, monkeypatch):
@@ -2027,7 +2043,7 @@ def test_dev_mode_falls_back_to_cwd(tmp_path, monkeypatch):
     assert UiSettings.resolve(dev_mode=True).data_root == tmp_path
 
 
-def test_no_env_no_dev_uses_platformdirs_not_cwd(tmp_path, monkeypatch):
+def test_no_env_no_dev_uses_os_location_not_cwd(tmp_path, monkeypatch):
     """A misconfigured production launch must land in the OS data dir, never cwd."""
     monkeypatch.delenv("SCOUTMB_DATA_DIR", raising=False)
     monkeypatch.chdir(tmp_path)
@@ -2047,38 +2063,36 @@ def test_root_independent_of_module_location(tmp_path, monkeypatch):
     assert Path(__file__).parent not in s.data_root.parents
 ```
 
-- [ ] **Step 2: Run RED**, expect `ModuleNotFoundError: scoutmb.ui`.
+- [ ] **Step 2: Run RED**, expect `ImportError: cannot import name 'UiSettings'`.
 
-- [ ] **Step 3: Implement** (uses `platformdirs`; add it to `dependencies` in `pyproject.toml` and re-lock)
-
-```python
-# src/scoutmb/ui/__init__.py
-```
+- [ ] **Step 3: Implement — add `UiSettings` + a stdlib platform-dir helper to `ui/server.py`**
+  (no new dependency; mirrors `bootstrap/paths.py`):
 
 ```python
-# src/scoutmb/ui/settings.py
-"""Where the UI reads/writes user data. NEVER derive a data path from __file__ —
-that ties irreplaceable data to the package's on-disk location, so moving or
-reinstalling the package silently relocates or destroys it (Hazard 1)."""
-
-from __future__ import annotations
-
-import os
-from dataclasses import dataclass
-from pathlib import Path
-
-import platformdirs
-
 APP_NAME = "ScoutingMeritBadges"
 DATA_DIR_ENV = "SCOUTMB_DATA_DIR"
 
 
+def _platform_data_root() -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base) / APP_NAME / "data"
+    elif sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME / "data"
+    return Path.home() / ".local" / "share" / APP_NAME / "data"
+
+
 @dataclass(frozen=True, slots=True)
 class UiSettings:
+    """Where the UI reads/writes user data. NEVER derive a data path from __file__ —
+    that ties irreplaceable data to the code's on-disk location, so moving or reinstalling
+    silently relocates or destroys it (Hazard 1)."""
+
     data_root: Path
 
     @classmethod
-    def resolve(cls, data_root: Path | None = None, dev_mode: bool = False) -> UiSettings:
+    def resolve(cls, data_root: Path | None = None, dev_mode: bool = False) -> "UiSettings":
         if data_root is not None:
             return cls(Path(data_root))
         env = os.environ.get(DATA_DIR_ENV)
@@ -2086,19 +2100,26 @@ class UiSettings:
             return cls(Path(env))
         if dev_mode:
             return cls(Path.cwd())
-        return cls(Path(platformdirs.user_data_dir(APP_NAME)) / "data")
+        return cls(_platform_data_root())
 
     @property
-    def scouts_csv(self) -> Path: return self.data_root / "scouts.csv"
+    def scouts_csv(self) -> Path:
+        return self.data_root / "scouts.csv"
+
     @property
-    def pdf_uploads_dir(self) -> Path: return self.data_root / "pdf-uploads"
+    def pdf_uploads_dir(self) -> Path:
+        return self.data_root / "pdf-uploads"
+
     @property
-    def runs_dir(self) -> Path: return self.data_root / "runs"
+    def runs_dir(self) -> Path:
+        return self.data_root / "runs"
 
     def ensure_dirs(self) -> None:
         self.data_root.mkdir(parents=True, exist_ok=True)
         self.runs_dir.mkdir(parents=True, exist_ok=True)
 ```
+
+  `dataclass` and `sys`/`os`/`Path` are already imported in `ui/server.py` (add any missing).
 
 - [ ] **Step 4: Rewire `ui/server.py:24-41`.** Replace the `REPO_ROOT`/`SCOUTS_CSV`/… block:
 
@@ -2111,11 +2132,11 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"  # locates CODE, not dat
 SETTINGS.ensure_dirs()
 ```
 
-  Resolution order is then: `SCOUTMB_DATA_DIR` (set by the launcher in production) →
-  `platformdirs` OS location → `cwd` **only** when `SCOUTMB_DEV` is explicitly set. This
-  is the fix for the earlier `dev_mode = not SCOUTMB_DATA_DIR` heuristic, which made *every*
-  env-less launch a `cwd` launch and never reached `platformdirs`. Keep the `sys.path` insert
-  for now (removed in Slice 2). The repo-root dev workflow runs with `SCOUTMB_DEV=1`.
+  Resolution order is then: `SCOUTMB_DATA_DIR` (set by the launcher in production) → the
+  stdlib OS data location → `cwd` **only** when `SCOUTMB_DEV` is explicitly set. This fixes
+  the earlier `dev_mode = not SCOUTMB_DATA_DIR` heuristic, which made *every* env-less launch
+  a `cwd` launch and never reached the OS location. Keep the `sys.path` insert for now
+  (removed in Slice 2). The repo-root dev workflow runs with `SCOUTMB_DEV=1`.
 
 - [ ] **Step 5: Run tests + smoke the app** (start it and actually hit `/api/status`)
 
@@ -2127,7 +2148,7 @@ SCOUTMB_DEV=1 uv run python run_app.py --browser   # UI loads; GET /api/status r
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/scoutmb/ui ui/server.py pyproject.toml uv.lock tests/unit/test_ui_settings.py
+git add ui/server.py tests/unit/test_ui_settings.py
 git commit -m "fix: resolve UI data paths explicitly, never from __file__ (Hazard 1)"
 ```
 
