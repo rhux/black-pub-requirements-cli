@@ -8,7 +8,7 @@
     "value": "dcb9625c8e019f43dff94f2d1c49f53e98056d4956f95d2f058431fa4b096a78",
     "mismatchBehavior": "If the plan .md changed, regenerate this sidecar before executing."
   },
-  "lastUpdated": "2026-07-22T21:55:54Z",
+  "lastUpdated": "2026-07-22T21:57:33Z",
   "tasks": [
     {
       "id": 1,
@@ -74,7 +74,7 @@
     {
       "id": 8,
       "subject": "Task 8: Characterize inference (consumers, non-mutation, id() selection)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         5
       ],
@@ -83,7 +83,7 @@
     {
       "id": 9,
       "subject": "Task 9: Characterize process_scout, loaders, CSV headers",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         5
       ],
