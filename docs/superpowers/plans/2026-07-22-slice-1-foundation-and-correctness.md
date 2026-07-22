@@ -39,6 +39,36 @@ Playwright, FastAPI.
 3. Run each task's Verify command; the task is done only when the expected output is seen.
 4. Never commit `raw_data/`, generated private reports, or unrelated changes.
 5. Run the PII sweep (Task 5) before committing anything that touches `tests/`.
+6. **Characterization imports the legacy module, which imports Playwright + openpyxl at
+   module scope (`scout_schedule_cli.py:27-28`).** Any task that imports
+   `scout_schedule_cli` (Tasks 4, 7, 8, 9, 11, 12, 16, 17, 18, 19) must run after
+   `uv sync --locked --all-extras`, not the bare `uv sync --locked`. Making those imports
+   lazy is a Slice-2 change; Slice 1 characterizes the module as-is, with its real deps
+   installed.
+7. **Leave every task's new files lint-clean.** Before each commit run
+   `uv run ruff check --fix <new files>` and `uv run ruff format <new files>` scoped to the
+   files that task created — never `git add -A` and never a repo-wide format after Task 2.
+   Gate 1 runs `ruff format --check .` and will fail on any unformatted snippet.
+8. **`raw_data/` is a local-only, developer-run corpus.** Commands that pass `--corpus
+   raw_data` (Tasks 5, 6, Gate 1) run on the developer's machine where the gitignored corpus
+   exists; in CI the corpus is absent and those checks degrade to pattern-only (the conftest
+   and tools handle this). This is a private-corpus augmentation, not a hosted-CI gate.
+
+## Scope honesty (narrowed after a /codex review)
+
+Slice 1 makes **in-place, characterization-guarded** fixes before any restructure. It does
+**not** fully discharge every KEEP decision — those complete in later slices:
+
+- **Identity (D3/D14/D25):** Slice 1 fixes *grouping* (Task 11) and *output filenames*
+  (Task 12) only. The raw `attendee_id`/QR tokens still appear in `scouts.json`, the CSVs,
+  and the email CSV; **replacing those columns with the per-run UUID is Slice 2**, where
+  outputs move behind versioned schemas.
+- **Atomic writes (D11):** Slice 1 gives the user-facing writers (`scouts.csv`, report,
+  emails) temp+fsync+`os.replace`. **Exclusive same-dir temp, parent-directory fsync, a
+  documented post-replace durability result, and routing *every* JSON/CSV/raw artifact are
+  Slice 2.**
+- **Migration (D5):** Slice 1 does copy-only migration **with per-file SHA-256
+  verification**. Staging, resumability, and the marker-ordering contract are Slice 3.
 
 ## Prerequisite: a 3.12 interpreter
 
@@ -77,19 +107,28 @@ uv python install 3.12
 
 **Acceptance Criteria:**
 - [ ] `.python-version` is `3.12`; `requires-python = ">=3.12"`; ruff `target-version = "py312"`
-- [ ] `uv sync --locked` succeeds and `uv run python -c "import sys;assert sys.version_info[:2]==(3,12)"` passes
+- [ ] `src/scoutmb/__init__.py` and `tools/__init__.py` exist so `uv sync` can build the
+      package and `mypy files=["src","tools"]` has real paths to check
+- [ ] `uv sync --locked` succeeds and `uv run python -c "import scoutmb, sys;assert sys.version_info[:2]==(3,12)"` passes
 - [ ] `uv run ruff check .` and `uv run mypy` exit 0 (nothing strictly typed yet)
 - [ ] No test job in CI yet (Task 7 adds it)
 
-**Verify:** `uv sync --locked && uv run ruff check . && uv run mypy && uv run python -c "import sys;assert sys.version_info[:2]==(3,12);print('py312 ok')"`
+**Verify:** `uv sync --locked && uv run ruff check . && uv run mypy && uv run python -c "import scoutmb, sys;assert sys.version_info[:2]==(3,12);print('py312 ok')"`
 
 **Steps:**
 
-- [ ] **Step 1: Pin the interpreter**
+- [ ] **Step 1: Pin the interpreter and create the package skeleton**
 
 ```bash
 uv python pin 3.12
+mkdir -p src/scoutmb tools
+printf '"""scoutmb — Scout merit-badge schedule and requirement extraction."""\n' > src/scoutmb/__init__.py
+printf '"""Developer tools (corpus verification, privacy scanning, baselines)."""\n' > tools/__init__.py
 ```
+
+> `src/scoutmb/__init__.py` must exist now: `[tool.hatch.build.targets.wheel] packages =
+> ["src/scoutmb"]` and `[tool.mypy] files = ["src","tools"]` both fail if the directories
+> are missing. Task 3 adds modules alongside this `__init__.py`; it does not recreate it.
 
 - [ ] **Step 2: Write `pyproject.toml`**
 
@@ -125,6 +164,7 @@ dev = [
     "pytest-asyncio>=0.24,<1",
     "pytest-socket>=0.7,<1",
     "hypothesis>=6.112,<7",
+    "httpx>=0.27,<1",          # Starlette TestClient (Task 19) needs it
     "ruff>=0.8,<1",
     "mypy>=1.13,<2",
     "pyyaml>=6,<7",
@@ -140,7 +180,14 @@ exclude = ["bootstrap", "raw_data", "docs", "tests"]
 target-version = "py312"
 line-length = 100
 src = ["src", "tests", "tools"]
-exclude = [".venv", "raw_data", "bootstrap/build.spec"]
+# The legacy flat scripts are characterized in Slice 1 and moved/rewritten in Slice 2.
+# Excluding them keeps ruff from reformatting code that is about to move AND preserves the
+# line numbers this plan's characterization tasks reference. They re-enter ruff in Slice 2.
+extend-exclude = [
+    "scout_schedule_cli.py", "pdf_to_scouts.py", "ui/server.py", "run_app.py",
+    "bootstrap/build.spec",
+]
+exclude = [".venv", "raw_data"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "PTH", "RET", "ARG", "TID"]
@@ -193,14 +240,14 @@ uv sync --locked
 - [ ] **Step 5: Verify**
 
 ```bash
-uv run ruff check . && uv run mypy && uv run python -c "import sys;assert sys.version_info[:2]==(3,12);print('py312 ok')"
+uv run ruff check . && uv run mypy && uv run python -c "import scoutmb, sys;assert sys.version_info[:2]==(3,12);print('py312 ok')"
 ```
 Expected: `All checks passed!`, `Success: no issues found`, `py312 ok`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add pyproject.toml .python-version uv.lock .gitignore
+git add pyproject.toml .python-version uv.lock .gitignore src/scoutmb/__init__.py tools/__init__.py
 git commit -m "build: uv/ruff/mypy/pytest scaffold pinned to Python 3.12"
 ```
 
@@ -217,9 +264,9 @@ build job yet (pytest with zero tests exits non-zero; `src/scoutmb` barely exist
 **Acceptance Criteria:**
 - [ ] Valid YAML; jobs `lint`, `types`, `lock` only; Python 3.12
 - [ ] `lock` job fails if `uv.lock` is out of date
-- [ ] `ruff format` applied as a separate formatting-only commit
+- [ ] `ruff format --check .` passes (the excluded legacy scripts are not touched)
 
-**Verify:** `uv run python -c "import yaml,pathlib;yaml.safe_load(pathlib.Path('.github/workflows/ci.yml').read_text());print('valid')"`
+**Verify:** `uv run python -c "import yaml,pathlib;yaml.safe_load(pathlib.Path('.github/workflows/ci.yml').read_text());print('valid')" && uv run ruff format --check .`
 
 **Steps:**
 
@@ -263,12 +310,18 @@ uv run python -c "import yaml,pathlib;yaml.safe_load(pathlib.Path('.github/workf
 ```
 Expected: `valid`
 
-- [ ] **Step 3: Apply formatting as its own commit**
+- [ ] **Step 3: Ensure the tracked files format-clean, scoped (no `git add -A`)**
+
+The legacy flat scripts are excluded from ruff (Task 1), so `ruff format` only touches
+`src`/`tools`/`tests`. Format just what exists, then confirm the check passes:
 
 ```bash
-uv run ruff format .
-git add -A && git commit -m "style: apply ruff format (formatting only)"
+uv run ruff format src tools
+uv run ruff format --check .
 ```
+Expected: `--check` reports all files already formatted (nothing to commit if already clean).
+Per-task formatting (execution rule 7) keeps every later task clean; there is no repo-wide
+format commit.
 
 - [ ] **Step 4: Commit the workflow**
 
@@ -286,15 +339,17 @@ an application-level network policy exists, and `scoutingevent.com` needs a two-
 opt-in (`live_service` marker + env var).
 
 **Files:**
-- Create: `src/scoutmb/__init__.py`, `src/scoutmb/network_policy.py`
+- Create: `src/scoutmb/network_policy.py`, `src/scoutmb/errors.py`
 - Create: `tests/conftest.py` (network half; fixture-tripwire half added in Task 5)
 - Create: `tests/network/test_offline_policy.py`
 
+(`src/scoutmb/__init__.py` already exists from Task 1 — do not recreate it.)
+
 **Acceptance Criteria:**
-- [ ] A default test opening a non-loopback socket fails
-- [ ] Loopback (`127.0.0.1`) is allowed
+- [ ] A default test that **connects** to a non-loopback host fails
+- [ ] Creating/binding a loopback socket is allowed (so FastAPI `TestClient` and local fakes work)
 - [ ] `network_policy.assert_egress_allowed(host)` raises `ExternalNetworkBlocked` for a
-      real host unless the two-part opt-in is set
+      real host unless the two-part opt-in (`SCOUTMB_ALLOW_LIVE_SERVICE`) is set
 - [ ] `uv run pytest -m "not live_service" -q` passes with zero real network use
 
 **Verify:** `uv run pytest tests/network -q`
@@ -339,12 +394,7 @@ uv run pytest tests/network -q
 ```
 Expected: import error / failures (module + conftest missing).
 
-- [ ] **Step 3: Implement the policy**
-
-```python
-# src/scoutmb/__init__.py
-"""scoutmb — Scout merit-badge schedule and requirement extraction."""
-```
+- [ ] **Step 3: Implement the policy** (`src/scoutmb/__init__.py` already exists from Task 1)
 
 ```python
 # src/scoutmb/network_policy.py
@@ -401,7 +451,14 @@ class ExternalNetworkBlocked(ScoutmbError):
 
 ```python
 # tests/conftest.py
-"""Offline enforcement. The fixture-safety tripwire is added in Task 5."""
+"""Offline enforcement. The fixture-safety tripwire is added in Task 5.
+
+Uses pytest-socket in *host-restriction* mode, NOT full disable_socket: connections to
+any host other than loopback raise, while socket creation and loopback bind stay allowed.
+That keeps FastAPI TestClient (in-process ASGI) and local fake services working while
+still blocking real egress. Full disable_socket would break the loopback-bind test and can
+break asyncio loop internals on Windows.
+"""
 
 from __future__ import annotations
 
@@ -409,13 +466,18 @@ import pytest_socket
 
 
 def pytest_runtest_setup(item):
-    """Block all sockets except loopback, unless the test is marked live_service."""
     if item.get_closest_marker("live_service"):
-        pytest_socket.enable_socket()
+        pytest_socket.enable_socket()  # opt-in tests may reach the real service
         return
+    # connect() to anything but loopback raises SocketConnectBlockedError;
+    # creation/bind are untouched, so loopback servers and TestClient still work.
     pytest_socket.socket_allow_hosts(["127.0.0.1", "::1"], allow_unix_socket=True)
-    pytest_socket.disable_socket(allow_unix_socket=True)
 ```
+
+> `socket_allow_hosts` guards `connect`; it does not replace `socket.socket`, so
+> `socket.socket(AF_INET); bind(("127.0.0.1", 0))` in the loopback test succeeds while
+> `create_connection(("93.184.216.34", 80))` raises. Do **not** also call `disable_socket` —
+> that would block the loopback test and asyncio socketpairs.
 
 - [ ] **Step 5: Run GREEN**
 
@@ -427,7 +489,7 @@ Expected: 4 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/scoutmb/__init__.py src/scoutmb/network_policy.py src/scoutmb/errors.py tests/conftest.py tests/network/test_offline_policy.py
+git add src/scoutmb/network_policy.py src/scoutmb/errors.py tests/conftest.py tests/network/test_offline_policy.py
 git commit -m "test: enforce offline-by-default with loopback allowance and live opt-in"
 ```
 
@@ -444,11 +506,18 @@ rows, choice thresholds, same-name attendees). No committed fixture derives from
 
 **Acceptance Criteria:**
 - [ ] `make_requirement`/`make_class` return valid records; tests override only the field under test
-- [ ] `schedule_payload`/`requirement_payload` mirror the real API field names
-      (`classP4ID`, `MDM_LKP_BADGE_REQ_ID`, `REQ_NBR_WEB_DISPLAY`, `COMPLETED_REQ_FLAG`, …)
-- [ ] Factories are importable without the heavy optional deps (openpyxl/cv2/fitz)
+- [ ] `schedule_payload`/`requirement_payload` mirror the real API field names read by
+      `process_scout` (`classP4ID`, `CLASS_NAME_ONLY`, `HAS_REQ`, `MDM_LKP_BADGE_REQ_ID`,
+      `REQ_NBR_WEB_DISPLAY`, `COMPLETED_REQ_FLAG`, …)
+- [ ] `REQUIREMENT_NUMBER_SHAPES` lists all 18 observed shapes
 
-**Verify:** `uv run pytest tests/factories -q` (add a trivial smoke test) and `uv run python -c "from tests.factories.payloads import requirement_payload; print(len(requirement_payload()['data']))"`
+> **Note:** `records.py` imports `scout_schedule_cli` for `ClassRecord`/`RequirementRecord`,
+> which imports Playwright + openpyxl at module scope. So this task's verify (and every later
+> task that touches the factories or the legacy module) runs after
+> `uv sync --locked --all-extras`, per execution rule 6. There is **no** "core-only import"
+> claim in Slice 1 — that becomes true only after the Slice-2 lazy-import refactor.
+
+**Verify:** `uv sync --locked --all-extras && uv run pytest tests/factories -q`
 
 **Steps:**
 
@@ -910,6 +979,8 @@ def main(argv: list[str] | None = None) -> int:
     for run in sorted(p for p in args.corpus.iterdir() if p.is_dir()):
         s = summarize_run(run)
         print(f"{run.name}: {s['requirements']} requirements, {s['raw_payloads']} payloads")
+        for combo, n in sorted(s["flag_combos"].items()):
+            print(f"    flags {combo}: {n}")          # the 5 (REQ, CLASS) combinations
         for shape, n in sorted(s["number_shapes"].items(), key=lambda kv: -kv[1]):
             print(f"    shape {shape!r}: {n}")
     return 0
@@ -925,8 +996,10 @@ if __name__ == "__main__":
 uv run pytest tests/tools/test_verify_corpus.py -q
 uv run python tools/verify_corpus.py raw_data
 ```
-Expected: each run reports **4858 requirements / 120 payloads**. If different, update the
-spec (the numbers are the claim under test), not the tool.
+Expected: each run reports **4858 requirements / 120 payloads** and prints all 5 flag
+combos (including the 309-row `(None, None)`). Run locally where `raw_data/` exists
+(execution rule 8). If counts differ, update the spec (the numbers are the claim under
+test), not the tool.
 
 - [ ] **Step 5: Commit**
 
@@ -952,7 +1025,7 @@ a property test that it never raises, and add the `test` job to CI now that test
 - [ ] Hypothesis: `requirement_path` never raises on arbitrary strings
 - [ ] CI `test` job on ubuntu + windows
 
-**Verify:** `uv run pytest tests/characterization/test_requirement_path.py -q`
+**Verify:** `uv sync --locked --all-extras && uv run pytest tests/characterization/test_requirement_path.py -q`
 
 **Steps:**
 
@@ -992,10 +1065,13 @@ from scout_schedule_cli import requirement_path  # noqa: E402
         ("#5.Option.D.(3)(a)", None, ("5", "option", "d", "3", "a"), "5"),
         ("#5.Option.A(1)", None, ("5", "option", "a", "1"), "5"),
         ("#5..Opt.A.(1)", None, ("5", "opt", "a", "1"), "5"),
+        ("#4..Aaa.A.(1)", None, ("4", "aaa", "a", "1"), "4"),  # 18th distinct shape
         ("#(c)", "7", ("7", "c"), "7"),
         # SUSPECT: label row becomes a CHILD of the prior requirement. Unresolved.
         ("Note.", "7", ("7", "note"), "7"),
         # SUSPECT: empty number AND empty description (402 real rows). Unresolved.
+        # The two rows below are ONE shape ("") in two contexts (no top / inherited top),
+        # not two of the 18 shapes — they exercise the top-level-inheritance branch.
         ("", None, (), None),
         ("", "7", (), "7"),
     ],
@@ -1031,7 +1107,10 @@ uv run pytest tests/characterization/test_requirement_path.py -q
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
       - run: uv python install 3.12
-      - run: uv sync --locked
+      # --all-extras: the characterization suite imports scout_schedule_cli, which imports
+      # Playwright + openpyxl at module scope. raw_data/ is absent in CI, so the corpus
+      # layer of the privacy scanner degrades to pattern-only automatically.
+      - run: uv sync --locked --all-extras
       - run: uv run pytest --cov --cov-report=term-missing -q
 ```
 
@@ -1478,10 +1557,20 @@ behavior change, RED-tested first.
 **Acceptance Criteria:**
 - [ ] Two attendees, same name, different IDs → two separate groups
 - [ ] `build_missing_requirements` returns `{attendee_id: {"display_name": str, "badges": {...}}}`
-- [ ] An attendee with a blank ID does not silently merge with another blank-ID attendee
 - [ ] KNOWN_DEFECT test removed; all other characterization tests pass (shape-updated where needed)
 
-**Verify:** `uv run pytest tests/ -q`
+> **Scope note:** this fixes *grouping* identity only. Stripping the raw `attendee_id`/QR
+> tokens from the output columns of `scouts.json`/`classes.csv`/`requirements.csv`/the email
+> CSV is **Slice 2** (outputs move behind versioned schemas there). Slice 1 does not claim
+> full D3/D14/D25.
+>
+> **Blank IDs:** a blank `attendee_id` cannot reach `build_missing_requirements` in practice
+> — `process_scout` fails that scout closed at `scout_schedule_cli.py:482`. The helper's
+> blank branch is therefore defensive; it keys on `scout_name` (matching the degenerate
+> pre-fix behavior) rather than fabricating identity, and is not separately tested because it
+> is unreachable through the production path.
+
+**Verify:** `uv sync --locked --all-extras && uv run pytest tests/ -q`
 
 **Steps:**
 
@@ -1521,12 +1610,18 @@ def test_same_named_attendees_stay_separate():
 ```python
 def _attendee_key_for(item: dict[str, Any]) -> str:
     """Grouping identity: the attendee ID, never the display name. Two attendees can
-    share a name; merging them silently corrupts both. A blank ID falls back to a
-    stable per-row marker so blanks do not collapse together."""
+    share a name; merging them silently corrupts both.
+
+    A blank attendee_id cannot occur through the production path (process_scout fails a
+    scout closed at :482 when the schedule request has no attendeeID), so the blank branch
+    is defensive only. It keys on scout_name — which does not fragment a single scout across
+    its requirements the way requirement_id would, and does not depend on id(item), which is
+    unstable across the dict copies this function makes.
+    """
     attendee_id = str(item.get("attendee_id") or "").strip()
     if attendee_id:
         return attendee_id
-    return f"unresolved-{item.get('qr_url') or item.get('requirement_id') or id(item)}"
+    return f"name:{str(item.get('scout_name') or '')}"
 ```
 
 - [ ] **Step 4: Rekey the four sites**
@@ -1612,12 +1707,13 @@ here — noted as a follow-up.
 - Test: `tests/unit/test_output_filenames.py`
 
 **Acceptance Criteria:**
-- [ ] `attendee_filename_stem(name, output_id)` = `f"{safe_slug(name)}-{output_id[:8]}"` (hyphens stripped); no raw attendee ID
+- [ ] `attendee_filename_stem(name, output_id)` = `f"{safe_slug(name)}-{output_id (hyphens stripped)}"`
+      — the **full** 32-hex UUID, not a truncation, so it is genuinely collision-free; no raw attendee ID
 - [ ] Two same-named, different-ID attendees → **distinct raw filenames** (via `process_scout`) and **distinct email filenames** (via `write_email_reports`)
 - [ ] `process_scout`'s new `run_identity` param defaults to `None` and self-creates, so Task 9's characterization calls keep working unchanged
 - [ ] Stable within a run
 
-**Verify:** `uv run pytest tests/unit/test_output_filenames.py -q`
+**Verify:** `uv sync --locked --all-extras && uv run pytest tests/unit/test_output_filenames.py -q`
 
 **Steps:**
 
@@ -1636,9 +1732,9 @@ from scout_schedule_cli import attendee_filename_stem  # noqa: E402
 from tests.factories.records import make_requirement  # noqa: E402
 
 
-def test_stem_hides_the_raw_id_and_is_readable():
+def test_stem_hides_the_raw_id_and_carries_the_full_uuid():
     stem = attendee_filename_stem("Avery Archer", "1234abcd-ef00-4000-8000-000000000000")
-    assert stem == "avery-archer-1234abcd"
+    assert stem == "avery-archer-1234abcdef00400080000000000000"  # full 32 hex, no hyphens
 
 
 def test_stem_distinct_for_distinct_output_ids():
@@ -1657,22 +1753,56 @@ def test_email_reports_do_not_collide_for_same_named_attendees(tmp_path):
     txt = sorted((tmp_path / "emails").glob("avery-archer-*.txt"))
     # Two same-named attendees -> two distinct email files, not one overwritten file.
     assert len(txt) == 2 and txt[0].name != txt[1].name
+
+
+def test_process_scout_raw_filenames_are_distinct_for_same_named(monkeypatch, tmp_path):
+    """The raw side (inside process_scout) must also not collide. Reuses the Task 9 fakes."""
+    import asyncio
+
+    from tests.factories.payloads import requirement_payload, schedule_payload
+    # _Browser/_Resp/_Page from Task 9's test module; import or redefine minimal versions here.
+    from tests.characterization.test_process_scout import _Browser, _Resp  # noqa: E402
+
+    async def name(page, fb):
+        return fb
+    async def post(page, aid, cpid):
+        return requirement_payload()
+    monkeypatch.setattr(cli, "discover_name", name)
+    monkeypatch.setattr(cli, "post_requirement", post)
+
+    async def run(attendee_id):
+        async def nav(page, url, t):
+            return _Resp(schedule_payload(), post_data=f"attendeeID={attendee_id}")
+        monkeypatch.setattr(cli, "navigate_and_trigger_schedule", nav)
+        scout = cli.ScoutInput(name="Avery Archer", url="https://example.invalid/?t=TESTTOKEN0001")
+        args = __import__("argparse").Namespace(
+            timeout=45, request_delay_ms=0, allow_dead_assets=True, headed=False, channel=None)
+        await cli.process_scout(_Browser(), scout, args, tmp_path)
+
+    asyncio.run(run("90000001"))
+    asyncio.run(run("90000002"))
+    schedules = sorted(tmp_path.glob("avery-archer-*-schedule.json"))
+    assert len(schedules) == 2 and schedules[0].name != schedules[1].name
 ```
 
 > The email test only asserts distinctness if both scouts have missing requirements. Ensure
 > the synthetic requirement is incomplete (the factory default `completed_requirement=False`
-> satisfies this) so `missing_count > 0` and the files are written.
+> satisfies this) so `missing_count > 0` and the files are written. The raw test drives two
+> `process_scout` runs with distinct `attendeeID`s and asserts two distinct `-schedule.json`
+> names.
 
 - [ ] **Step 2: Run RED**, expect `ImportError: attendee_filename_stem` (then, once the
-  helper exists, the email-collision test fails because `:935` still uses `safe_slug(name)`).
+  helper exists, both collision tests fail because `:490`/`:935` still use `safe_slug`).
 
 - [ ] **Step 3: Add the helper after `safe_slug`**
 
 ```python
 def attendee_filename_stem(scout_name: str, output_id: str) -> str:
-    """Readable, collision-free filename stem. Uses the per-run output UUID, never the
-    raw attendee_id (a bearer token that must not appear in shareable filenames)."""
-    return f"{safe_slug(scout_name)}-{str(output_id).replace('-', '')[:8]}"
+    """Readable, collision-free filename stem: name slug + the FULL per-run output UUID
+    (hyphens stripped). The full UUID — never a truncation — guarantees distinct attendees
+    get distinct filenames. Never the raw attendee_id (a bearer token that must not appear
+    in a shareable filename)."""
+    return f"{safe_slug(scout_name)}-{str(output_id).replace('-', '')}"
 ```
 
 - [ ] **Step 4: Fix the raw side in `process_scout`.** Import at the top of the module:
@@ -1721,10 +1851,17 @@ git commit -m "fix: collision-free raw and email filenames via per-run UUID (no 
 
 ---
 
-### Task 13: Atomic single-file writes
+### Task 13: Atomic single-file writes (user-facing writers)
 
-**Goal:** A failed write never truncates the previous file. `scouts.csv`, the report, and
-email files write via temp + `os.replace`.
+**Goal:** A failed write never truncates the previous file. The **user-facing** writers —
+`scouts.csv`, the report, and email files — write via same-dir temp + fsync + `os.replace`.
+
+> **Scope (narrowed — see "Scope honesty"):** Slice 1 covers the writers whose loss hurts a
+> user directly. The **full D11 contract** — exclusive same-dir temp, parent-directory fsync,
+> a documented post-replace indeterminate-durability result, and routing *every* remaining
+> JSON/CSV/raw artifact (`scouts.json`, `summary.json`, `errors.csv`, the raw payloads at
+> `:490`/`:554`) — is **Slice 2**, where the writers move behind a `FileStore` port. Task 13
+> does not claim full D11.
 
 **Files:**
 - Create: `src/scoutmb/adapters/__init__.py`, `src/scoutmb/adapters/files/__init__.py`, `src/scoutmb/adapters/files/atomic.py`
@@ -1732,37 +1869,57 @@ email files write via temp + `os.replace`.
 - Test: `tests/unit/test_atomic_write.py`
 
 **Acceptance Criteria:**
-- [ ] A write raising mid-render leaves the original byte-identical
-- [ ] A successful write replaces atomically; no `.tmp` remains on either path
-- [ ] `write_attendees_csv` preserves the exact 7-column header order
+- [ ] A failure **during the write** (injected `os.fsync`/`replace` failure or a raising
+      render) leaves the original file byte-identical and leaves no `.tmp` behind
+- [ ] A successful write replaces atomically and preserves bytes/encoding exactly (a
+      `utf-8-sig` writer round-trips through a `utf-8-sig` read)
+- [ ] `write_attendees_csv` preserves its exact 7-column `DictWriter` header and row mapping
 
-**Verify:** `uv run pytest tests/unit/test_atomic_write.py -q`
+**Verify:** `uv sync --locked --all-extras && uv run pytest tests/unit/test_atomic_write.py -q`
 
 **Steps:**
 
-- [ ] **Step 1: RED test**
+- [ ] **Step 1: RED tests** (encoding round-trip + failure injected *during* the write)
 
 ```python
 # tests/unit/test_atomic_write.py
+import os
 import pytest
 from scoutmb.adapters.files.atomic import atomic_write_text
 
 
-def test_success_replaces_and_leaves_no_tmp(tmp_path):
-    p = tmp_path / "scouts.csv"; p.write_text("old", encoding="utf-8")
-    atomic_write_text(p, "new")
-    assert p.read_text(encoding="utf-8") == "new"
+def test_success_replaces_and_roundtrips_encoding(tmp_path):
+    p = tmp_path / "scouts.csv"
+    p.write_text("old", encoding="utf-8-sig")
+    atomic_write_text(p, "new")                      # default encoding is utf-8-sig
+    assert p.read_text(encoding="utf-8-sig") == "new"   # read with the SAME codec
     assert list(tmp_path.glob("*.tmp")) == []
 
 
-def test_failure_preserves_original(tmp_path):
-    p = tmp_path / "scouts.csv"; p.write_text("irreplaceable", encoding="utf-8")
-    def boom(): raise RuntimeError("render failed")
-    with pytest.raises(RuntimeError):
-        atomic_write_text(p, boom())
-    assert p.read_text(encoding="utf-8") == "irreplaceable"
-    assert list(tmp_path.glob("*.tmp")) == []
+def test_plain_utf8_roundtrips(tmp_path):
+    p = tmp_path / "report.html"
+    atomic_write_text(p, "<html>x</html>", encoding="utf-8")
+    assert p.read_text(encoding="utf-8") == "<html>x</html>"
+
+
+def test_failure_during_replace_preserves_original(tmp_path, monkeypatch):
+    p = tmp_path / "scouts.csv"
+    p.write_text("irreplaceable", encoding="utf-8-sig")
+
+    def boom(_src, _dst):
+        raise OSError("replace failed")
+    monkeypatch.setattr(os, "replace", boom)
+
+    with pytest.raises(OSError):
+        atomic_write_text(p, "new content that must not land")
+    assert p.read_text(encoding="utf-8-sig") == "irreplaceable"   # original intact
+    assert list(tmp_path.glob("*.tmp")) == []                     # temp cleaned up
 ```
+
+> The failure test injects the fault **inside** `atomic_write_text` (at `os.replace`), so it
+> exercises a real atomic stage — unlike evaluating a `boom()` argument before the call,
+> which tests nothing. Reading with `utf-8-sig` (matching the writer) avoids a spurious BOM
+> mismatch.
 
 - [ ] **Step 2: Run RED**, expect `ModuleNotFoundError`.
 
@@ -1836,12 +1993,13 @@ cannot relocate user data.
 - Test: `tests/unit/test_ui_settings.py`
 
 **Acceptance Criteria:**
-- [ ] Order: explicit arg → `SCOUTMB_DATA_DIR` → `platformdirs` → `Path.cwd()` only in dev mode
+- [ ] Order: explicit arg → `SCOUTMB_DATA_DIR` → `platformdirs` OS location → `Path.cwd()` **only** when `dev_mode`
+- [ ] With neither an arg nor the env var and `dev_mode=False`, resolution is `platformdirs`, **not** `cwd`
 - [ ] `ui/server.py` derives no DATA path from `__file__` (static-asset path may stay — it locates code)
 - [ ] A test proves relocating the module does not move the data root
-- [ ] The app still starts and `/api/status` responds
+- [ ] The app starts and `GET /api/status` returns 200 (Step 5)
 
-**Verify:** `uv run pytest tests/unit/test_ui_settings.py -q`
+**Verify:** `uv sync --locked --all-extras && uv run pytest tests/unit/test_ui_settings.py -q`
 
 **Steps:**
 
@@ -1867,6 +2025,14 @@ def test_dev_mode_falls_back_to_cwd(tmp_path, monkeypatch):
     monkeypatch.delenv("SCOUTMB_DATA_DIR", raising=False)
     monkeypatch.chdir(tmp_path)
     assert UiSettings.resolve(dev_mode=True).data_root == tmp_path
+
+
+def test_no_env_no_dev_uses_platformdirs_not_cwd(tmp_path, monkeypatch):
+    """A misconfigured production launch must land in the OS data dir, never cwd."""
+    monkeypatch.delenv("SCOUTMB_DATA_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    root = UiSettings.resolve(dev_mode=False).data_root
+    assert root != tmp_path and "ScoutingMeritBadges" in str(root)
 
 
 def test_derived_paths_hang_off_root(tmp_path):
@@ -1934,17 +2100,28 @@ class UiSettings:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
 ```
 
-- [ ] **Step 4: Rewire `ui/server.py:24-41`** — replace the `REPO_ROOT`/`SCOUTS_CSV`/… block
-  with a `UiSettings.resolve(dev_mode=not os.environ.get("SCOUTMB_DATA_DIR"))` and derive
-  `SCOUTS_CSV`/`PDF_UPLOADS_DIR`/`RUNS_DIR` from it; keep `STATIC_DIR` from `__file__`
-  (it locates code, not data) with a comment; call `SETTINGS.ensure_dirs()`. Keep the
-  `sys.path` insert for now — it is removed in Slice 2.
+- [ ] **Step 4: Rewire `ui/server.py:24-41`.** Replace the `REPO_ROOT`/`SCOUTS_CSV`/… block:
 
-- [ ] **Step 5: Run tests + smoke the app**
+```python
+SETTINGS = UiSettings.resolve(dev_mode=bool(os.environ.get("SCOUTMB_DEV")))
+SCOUTS_CSV = SETTINGS.scouts_csv
+PDF_UPLOADS_DIR = SETTINGS.pdf_uploads_dir
+RUNS_DIR = SETTINGS.runs_dir
+STATIC_DIR = Path(__file__).resolve().parent / "static"  # locates CODE, not data — OK to keep
+SETTINGS.ensure_dirs()
+```
+
+  Resolution order is then: `SCOUTMB_DATA_DIR` (set by the launcher in production) →
+  `platformdirs` OS location → `cwd` **only** when `SCOUTMB_DEV` is explicitly set. This
+  is the fix for the earlier `dev_mode = not SCOUTMB_DATA_DIR` heuristic, which made *every*
+  env-less launch a `cwd` launch and never reached `platformdirs`. Keep the `sys.path` insert
+  for now (removed in Slice 2). The repo-root dev workflow runs with `SCOUTMB_DEV=1`.
+
+- [ ] **Step 5: Run tests + smoke the app** (start it and actually hit `/api/status`)
 
 ```bash
-uv run pytest tests/ -q
-uv run python run_app.py --browser   # loads, /api/status responds; Ctrl-C
+uv sync --locked --all-extras && uv run pytest tests/unit/test_ui_settings.py -q
+SCOUTMB_DEV=1 uv run python run_app.py --browser   # UI loads; GET /api/status returns 200; Ctrl-C
 ```
 
 - [ ] **Step 6: Commit**
@@ -1956,10 +2133,12 @@ git commit -m "fix: resolve UI data paths explicitly, never from __file__ (Hazar
 
 ---
 
-### Task 15: Copy-only legacy migration
+### Task 15: Copy-only legacy migration with SHA-256 verification
 
-**Goal:** Migrate the one live install's data from `app/` to `data/` — copy, verify, mark;
-never move or delete; idempotent; collision-safe; leave an explanatory old-root marker.
+**Goal:** Migrate the one live install's data from `app/` to `data/` — copy, **SHA-256
+verify**, mark; never move or delete; idempotent; collision-safe; leave an explanatory
+old-root marker. Because this wires into the *live* `bootstrap/main.py`, the one real
+dataset migrates hash-verified from the start. (Staging/resumability is Slice 3.)
 
 **Files:**
 - Create: `bootstrap/migrate.py`
@@ -1968,7 +2147,8 @@ never move or delete; idempotent; collision-safe; leave an explanatory old-root 
 
 **Acceptance Criteria:**
 - [ ] Copies `scouts.csv`, `pdf-uploads/`, `runs/` from `app/` to `data/`
-- [ ] Never deletes/moves originals; idempotent via `.migrated`; verifies each copy
+- [ ] Never deletes/moves originals; idempotent via `.migrated`
+- [ ] **Every copied file is SHA-256-verified** against its source; the marker records `"verification": "sha256"`
 - [ ] Collision writes `<name>.legacy`; a **second** collision writes `<name>.legacy-2` and
       **never deletes** the existing `.legacy`
 - [ ] Old root gets an explanatory marker; launcher exports `SCOUTMB_DATA_DIR`
@@ -1977,7 +2157,7 @@ never move or delete; idempotent; collision-safe; leave an explanatory old-root 
 
 **Steps:**
 
-- [ ] **Step 1: RED tests** — copies-all, originals-retained, idempotent, collision-writes-alongside, double-collision-never-deletes, no-legacy-is-noop. (Build a fake `app/{scouts.csv,pdf-uploads,runs/2026-.../summary.json}` in `tmp_path`.)
+- [ ] **Step 1: RED tests** — copies-all, originals-retained, idempotent, collision-writes-alongside, double-collision-never-deletes, no-legacy-is-noop, hash-verified. (Build a fake `app/{scouts.csv,pdf-uploads,runs/2026-.../summary.json}` in `tmp_path`.)
 
 ```python
 # tests/unit/test_migrate.py
@@ -2037,6 +2217,17 @@ def test_double_collision_never_deletes_existing_legacy(tmp_path):
 def test_no_legacy_is_noop(tmp_path):
     data = tmp_path / "data"; migrate_legacy_data(tmp_path / "app", data)
     assert not data.exists() or not any(data.iterdir())
+
+
+def test_copies_are_hash_verified_and_recorded(tmp_path):
+    import hashlib, json
+    app, data = _legacy(tmp_path)
+    report = migrate_legacy_data(app, data)
+    assert report["verification"] == "sha256"
+    src = (app / "scouts.csv").read_bytes()
+    dst = (data / "scouts.csv").read_bytes()
+    assert hashlib.sha256(src).hexdigest() == hashlib.sha256(dst).hexdigest()
+    assert json.loads((data / MIGRATION_MARKER).read_text())["verification"] == "sha256"
 ```
 
 - [ ] **Step 2: Run RED**, expect `ModuleNotFoundError: bootstrap.migrate`.
@@ -2048,10 +2239,14 @@ def test_no_legacy_is_noop(tmp_path):
 """One-time COPY of legacy app/ user data into data/. Never moves or deletes.
 
 One install exists with a season of real records. If this migration is wrong, the
-data must still be where it always was."""
+data must still be where it always was. Every copied file is verified by SHA-256, not
+just size — the data is irreplaceable, and hashing it is cheap. Staging, resumability,
+and the marker-ordering contract are Slice 3 hardening; Slice 1 copies + hash-verifies.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import time
@@ -2061,8 +2256,21 @@ MIGRATION_MARKER = ".migrated"
 _ITEMS = [("scouts.csv", False), ("pdf-uploads", True), ("runs", True)]
 
 
-def _count(path: Path) -> int:
-    return sum(1 for c in path.rglob("*") if c.is_file())
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_tree(src: Path, dst: Path) -> None:
+    """Every file under src has a byte-identical (SHA-256) twin under dst."""
+    src_files = sorted(p for p in src.rglob("*") if p.is_file())
+    for src_file in src_files:
+        dst_file = dst / src_file.relative_to(src)
+        if not dst_file.is_file() or _sha256(src_file) != _sha256(dst_file):
+            raise RuntimeError(f"migration hash verify failed for {src_file.relative_to(src)}")
 
 
 def migrate_legacy_data(app_dir: Path, data_dir: Path) -> dict[str, object] | None:
@@ -2088,16 +2296,15 @@ def migrate_legacy_data(app_dir: Path, data_dir: Path) -> dict[str, object] | No
             dst = candidate
         if is_dir:
             shutil.copytree(src, dst)
-            if _count(src) != _count(dst):
-                raise RuntimeError(f"migration verify failed for dir {name}")
+            _verify_tree(src, dst)
         else:
             shutil.copy2(src, dst)
-            if src.stat().st_size != dst.stat().st_size:
-                raise RuntimeError(f"migration verify failed for file {name}")
+            if _sha256(src) != _sha256(dst):
+                raise RuntimeError(f"migration hash verify failed for {name}")
         copied.append(dst.name)
     report = {"migrated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "source": str(app_dir), "copied": copied, "collisions": collisions,
-              "originals_retained": True}
+              "verification": "sha256", "originals_retained": True}
     (data_dir / MIGRATION_MARKER).write_text(json.dumps(report, indent=2), encoding="utf-8")
     (app_dir / "MOVED-README.txt").write_text(
         "This folder's data was copied to the app's data directory. Originals are "
@@ -2116,11 +2323,13 @@ def migrate_legacy_data(app_dir: Path, data_dir: Path) -> dict[str, object] | No
 
 ```bash
 uv run pytest tests/unit/test_migrate.py -q
-WORK=$(mktemp -d); mkdir -p "$WORK/app/runs/x" "$WORK/app/pdf-uploads"
+export WORK=$(mktemp -d); mkdir -p "$WORK/app/runs/x" "$WORK/app/pdf-uploads"
 echo "Attendee Name,QR Code Contents" > "$WORK/app/scouts.csv"
-uv run python -c "from pathlib import Path; from bootstrap.migrate import migrate_legacy_data as m; import os; r=Path(os.environ['WORK']); print(m(r/'app', r/'data')); print('original kept:', (r/'app'/'scouts.csv').is_file())" WORK="$WORK"
+uv run python -c "from pathlib import Path; from bootstrap.migrate import migrate_legacy_data as m; import os; r=Path(os.environ['WORK']); print(m(r/'app', r/'data')); print('original kept:', (r/'app'/'scouts.csv').is_file())"
 ```
-Expected: report dict prints; `original kept: True`.
+Expected: report dict prints (with `"verification": "sha256"`); `original kept: True`.
+The `WORK` assignment is **exported before** `uv run` so `os.environ['WORK']` resolves —
+placing `WORK=…` after `python -c` would make it an argument, not an env var.
 
 - [ ] **Step 6: Commit**
 
@@ -2166,7 +2375,7 @@ optional-capability absence.
 - [ ] The exact 7 attendee columns asserted literally: `Attendee Name`, `Registrant Type`, `QR Code Contents`, `Name as Printed`, `Source PDF`, `PDF Page`, `QR Decode Method`
 - [ ] Core-only import: `load_csv` works without `openpyxl`/`fitz`/`cv2` importable (optional-capability absence)
 
-**Verify:** `uv sync --extra pdf && uv run pytest tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py -q`
+**Verify:** `uv sync --locked --all-extras && uv run pytest tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py -q`
 
 **Steps:**
 
@@ -2193,14 +2402,22 @@ def build_schedule_pdf(path: Path, *, name: str, registrant: str, qr_value: str)
 
     doc = fitz.open()
     page = doc.new_page()
+    # value_after_label(lines, "Attendee Information") returns the line AFTER the label, so
+    # the name/registrant values must be on their own separate lines beneath the labels
+    # (pdf_to_scouts.py:176-192). Each insert_text at a distinct y is a separate text line.
     page.insert_text((72, 72), "Attendee Information")
-    page.insert_text((72, 96), f"Name {name}")
-    page.insert_text((72, 120), f"Registrant {registrant}")
-    page.insert_image(fitz.Rect(72, 150, 372, 450), stream=png)
+    page.insert_text((72, 96), name)
+    page.insert_text((72, 120), "Registrant")
+    page.insert_text((72, 144), registrant)
+    page.insert_image(fitz.Rect(72, 170, 372, 470), stream=png)
     doc.save(path)
     doc.close()
     return path
 ```
+
+> The `numpy` import is unused above — drop it (ruff `F401`). Verify the two labels
+> (`"Attendee Information"`, `"Registrant"`) against `extract_page_identity` before running;
+> `value_after_label` matches the label line then takes the next non-empty line.
 
 - [ ] **Step 2: Input-matrix characterization** (harness + representative rows; complete the
   alias/format table from observed `load_inputs` output — this is characterization)
@@ -2219,6 +2436,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import scout_schedule_cli as cli  # noqa: E402
 
 
+# load_inputs (scout_schedule_cli.py:210) keeps ONLY urls starting with this prefix;
+# anything else is silently dropped and an all-dropped file raises ValueError. Every
+# fixture URL must therefore be a real scoutingevent.com/mobile URL (synthetic token).
+QR = "https://scoutingevent.com/mobile/?t=TESTTOKEN0001"
+
+
 def _csv(tmp_path, header, row):
     p = tmp_path / "in.csv"
     p.write_text(header + "\n" + row + "\n", encoding="utf-8")
@@ -2231,28 +2454,31 @@ def _csv(tmp_path, header, row):
         ("Attendee Name,QR Code Contents", "Avery Archer"),
         ("Name,QR Code Contents", "Avery Archer"),          # alias
         ("attendee name,qr code contents", "Avery Archer"),  # case/alias
-        # Complete this table with every alias first_matching_key accepts,
-        # from observed load_inputs behavior. This is characterization.
+        # These three rows are complete and runnable. Optionally extend with any further
+        # alias `first_matching_key` accepts (read it in scout_schedule_cli.py); each added
+        # row is one more characterization assertion.
     ],
 )
 def test_csv_header_aliases(tmp_path, header, expected_name_field):
-    path = _csv(tmp_path, header, "Avery Archer,https://example.invalid/?t=TESTTOKEN0001")
+    path = _csv(tmp_path, header, f"Avery Archer,{QR}")
     scouts = cli.load_inputs(path, sheet_name="Scouts Only", include_adults=True)
     assert scouts[0].name == expected_name_field
 
 
-def test_json_and_text_loaders(tmp_path):
+def test_json_loader(tmp_path):
     j = tmp_path / "in.json"
-    j.write_text(json.dumps([{"Attendee Name": "Avery Archer",
-                              "QR Code Contents": "https://example.invalid/?t=TESTTOKEN0001"}]),
+    j.write_text(json.dumps([{"Attendee Name": "Avery Archer", "QR Code Contents": QR}]),
                  encoding="utf-8")
     assert cli.load_inputs(j, "Scouts Only", True)[0].name == "Avery Archer"
 
 
 def test_adult_filtering_default(tmp_path):
+    # An adult-only file: excluded -> everything filtered -> load_inputs RAISES ValueError
+    # (scout_schedule_cli.py:219 "No ScoutingEvent QR URLs found"); included -> 1 scout.
     path = _csv(tmp_path, "Attendee Name,Registrant Type,QR Code Contents",
-                "Adult Leader,Adult,https://example.invalid/?t=TESTTOKEN0002")
-    assert cli.load_inputs(path, "Scouts Only", include_adults=False) == []
+                f"Adult Leader,Adult,{QR}")
+    with pytest.raises(ValueError):
+        cli.load_inputs(path, "Scouts Only", include_adults=False)
     assert len(cli.load_inputs(path, "Scouts Only", include_adults=True)) == 1
 ```
 
@@ -2351,47 +2577,89 @@ payloads. (The loopback **fake service** and real-Playwright-surface check are S
 # tests/characterization/test_scoutingevent_contract.py
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import scout_schedule_cli as cli  # noqa: E402
-from tests.factories.payloads import requirement_payload, requirement_row, schedule_payload  # noqa: E402
-# _Browser/_Ctx/_Page/_Resp/_args helpers: import or duplicate from test_process_scout.
+from tests.characterization.test_process_scout import _Browser, _Resp  # noqa: E402
+from tests.factories.payloads import requirement_payload, schedule_payload  # noqa: E402
+
+
+def _args():
+    return argparse.Namespace(timeout=45, request_delay_ms=0, allow_dead_assets=True,
+                              headed=False, channel=None)
+
+
+def _class(p4id, completed, has_req="1"):
+    # Field names process_scout actually reads (scout_schedule_cli.py:515-529).
+    return {"classP4ID": p4id, "CLASS_NAME": f"MoTuWeTh - Chess - {p4id}",
+            "CLASS_NAME_ONLY": "Chess", "CLASS_NBR": "26MB1", "PERIOD_NAME": "A Block",
+            "CLASS_STIME": "09:00 AM", "STIME": "09:00:00", "LOCATION_ROOM_NAME": "Pav",
+            "HAS_REQ": has_req, "CLASS_COMPLETED": completed}
+
+
+def _install(monkeypatch, schedule, requirement=None, post=None):
+    async def nav(page, url, t):
+        return _Resp(schedule)
+    async def name(page, fb):
+        return fb
+    async def default_post(page, aid, cpid):
+        return requirement or requirement_payload()
+    monkeypatch.setattr(cli, "navigate_and_trigger_schedule", nav)
+    monkeypatch.setattr(cli, "discover_name", name)
+    monkeypatch.setattr(cli, "post_requirement", post or default_post)
 
 
 async def test_dedup_prefers_completed_duplicate(monkeypatch, tmp_path):
-    dup = schedule_payload([
-        {"classP4ID": "2000001", "CLASS_NAME": "Chess", "CLASS_NBR": "26MB1",
-         "CLASS_COMPLETED": "0", "HAS_REQUIREMENTS": "1", "attendeeID": "90000001"},
-        {"classP4ID": "2000001", "CLASS_NAME": "Chess", "CLASS_NBR": "26MB1",
-         "CLASS_COMPLETED": "1", "HAS_REQUIREMENTS": "1", "attendeeID": "90000001"},
-    ])
-    # monkeypatch navigate->dup, discover_name->fallback, post_requirement->requirement_payload()
-    # assert the single retained class has class_completed True (:510 "prefer completed").
-    ...
+    _install(monkeypatch, schedule_payload([_class("2000001", "0"), _class("2000001", "1")]))
+    scout = cli.ScoutInput(name="Avery Archer", url="https://example.invalid/?t=TESTTOKEN0001")
+    result = await cli.process_scout(_Browser(), scout, _args(), tmp_path)
+    # One class survives dedup, and it is the COMPLETED duplicate (:510).
+    assert len(result.classes) == 1
+    assert result.classes[0].class_completed is True
+
+
+async def test_multiple_and_no_requirement_classes(monkeypatch, tmp_path):
+    _install(monkeypatch, schedule_payload([_class("2000001", "0"), _class("2000002", "0", has_req="0")]))
+    scout = cli.ScoutInput(name="Avery Archer", url="https://example.invalid/?t=TESTTOKEN0001")
+    result = await cli.process_scout(_Browser(), scout, _args(), tmp_path)
+    assert len(result.classes) == 2  # both classes recorded regardless of HAS_REQ
 
 
 async def test_terminal_error_accumulates_without_raising(monkeypatch, tmp_path):
-    # monkeypatch post_requirement to raise a terminal error; assert result.errors non-empty,
-    # no exception propagates, and other classes still process.
-    ...
+    async def boom(page, aid, cpid):
+        raise RuntimeError("requirement endpoint down")
+    _install(monkeypatch, schedule_payload([_class("2000001", "0")]), post=boom)
+    scout = cli.ScoutInput(name="Avery Archer", url="https://example.invalid/?t=TESTTOKEN0001")
+    result = await cli.process_scout(_Browser(), scout, _args(), tmp_path)
+    # The class is still recorded; the requirement failure is captured, not raised.
+    assert len(result.classes) == 1
+    assert any("requirement request failed" in e for e in result.errors)
 
 
-def test_current_behavior_on_missing_field():
-    # A requirement_row() missing COMPLETED_REQ_FLAG -> pin what the legacy mapper does TODAY
-    # (e.g. coerces to False). Drift-fail-closed is a Slice 2 intentional change, not here.
-    row = requirement_row(); row.pop("COMPLETED_REQ_FLAG")
-    payload = requirement_payload([row])
-    assert "data" in payload  # replace with the pinned legacy projection once observed
+async def test_missing_completed_flag_coerces_to_false(monkeypatch, tmp_path):
+    """Pin CURRENT behavior: truthy(None) is False, so a missing flag reads incomplete.
+    Fail-closed drift handling is a Slice-2 intentional change, not here."""
+    row = {"MDM_LKP_BADGE_REQ_ID": "r1", "MDM_LKP_BADGE_REQ_TYPE_ID": "1",
+           "MERIT_BADGE_NAME": "Chess", "REQ_NBR_WEB_DISPLAY": "#1", "REQ_DESCR": "x",
+           "REQ_ON_EVENT": "1", "PRESENT_DAYS": "MoTuWeTh"}  # no COMPLETED_REQ_FLAG
+    _install(monkeypatch, schedule_payload([_class("2000001", "0")]),
+             requirement=requirement_payload([row]))
+    scout = cli.ScoutInput(name="Avery Archer", url="https://example.invalid/?t=TESTTOKEN0001")
+    result = await cli.process_scout(_Browser(), scout, _args(), tmp_path)
+    assert result.requirements[0].completed_requirement is False
 ```
 
-> Fill the `...` bodies using the same `_Browser`/monkeypatch harness as Task 9, and pin
-> the exact observed outputs. This characterizes today's contract; do not change production.
+> These are complete and runnable. If an observed value differs (e.g. an error-string
+> substring), correct the expectation from the run — this is characterization, the code is
+> the authority. Do not change production.
 
 - [ ] **Step 2: Run + commit**
 
 ```bash
+uv sync --locked --all-extras
 uv run pytest tests/characterization/test_scoutingevent_contract.py -q
 git add tests/characterization/test_scoutingevent_contract.py
 git commit -m "test: characterize ScoutingEvent payload/dedup/retry contract (A8, monkeypatch)"
@@ -2416,35 +2684,150 @@ writes) so schemas are pinned against legacy output.
 - [ ] `parse_args` defaults pinned for both CLIs; the UI's default `Namespace` field values pinned
 - [ ] `test_request_count_growth_is_bounded`: process_scout issues 1 schedule request + 1 requirement request per requirement-bearing class (hard assertion), captured by `measure_baseline.py`
 
-**Verify:** `uv run pytest tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py -q`
+**Verify:** `uv sync --locked --all-extras && uv run pytest tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py -q`
 
 **Steps:**
 
-- [ ] **Step 1: Artifact-schema characterization** — build a synthetic `list[ScoutResult]`
-  from the factories, run `write_outputs` into `tmp_path`, and assert the header/keys/
-  structure of each artifact. Parse `report.html`'s injected JSON and assert its shape.
-- [ ] **Step 2: Interface-defaults characterization** — `parse_args([])`-equivalent for
-  each CLI (note: `scout_schedule_cli.parse_args` currently takes no `argv`; call it as-is
-  and pin the `Namespace`); pin the UI's hand-built `Namespace` field defaults from
-  `ui/server.py`.
-- [ ] **Step 3: Baseline** — a `RequestCountingSession`-style counter (increment on each
-  monkeypatched `navigate_and_trigger_schedule`/`post_requirement`) asserts the exact
-  request count for a 2-class synthetic scout; `tools/measure_baseline.py` writes
-  `build/baseline.json` (machine class, counts, no wall-time gate yet).
+- [ ] **Step 1: Artifact-schema characterization**
 
 ```python
-# tests/performance/test_baseline.py (representative)
+# tests/characterization/test_artifact_matrix.py
+from __future__ import annotations
+
+import csv
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scout_schedule_cli import ScoutResult, write_outputs  # noqa: E402
+from tests.factories.records import make_class, make_requirement  # noqa: E402
+
+
+def _results():
+    r = ScoutResult(name="Avery Archer", qr_url="https://example.invalid/?t=TESTTOKEN0001",
+                    attendee_id="90000001")
+    r.classes.append(make_class())
+    r.requirements.append(make_requirement())
+    return [r]
+
+
+def test_output_artifact_schemas(tmp_path):
+    out = tmp_path / "2026-07-19_2139"
+    write_outputs(out, _results(), generate_html=True, generate_email_report=False)
+
+    with (out / "errors.csv").open(encoding="utf-8-sig", newline="") as fh:
+        assert next(csv.reader(fh)) == ["scout_name", "attendee_id", "error"]
+
+    scouts = json.loads((out / "scouts.json").read_text(encoding="utf-8"))
+    assert set(scouts[0]) == {"name", "qr_url", "attendee_id", "classes", "requirements", "errors"}
+
+    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    assert {"scouts_processed", "classes", "requirements", "html_report"} <= set(summary)
+
+
+def test_report_html_embeds_parseable_json(tmp_path):
+    out = tmp_path / "run"
+    write_outputs(out, _results(), generate_html=True, generate_email_report=False)
+    html = (out / "report.html").read_text(encoding="utf-8")
+    m = re.search(r'<script[^>]*type="application/json"[^>]*>(.*?)</script>', html, re.S)
+    assert m, "report embeds a application/json data block"
+    json.loads(m.group(1))  # the injected payload parses
+```
+
+- [ ] **Step 2: Interface-defaults characterization** (monkeypatch `sys.argv` — `parse_args`
+  takes no `argv` and requires `--input`, so calling it "as-is" under pytest would consume
+  pytest's argv or exit)
+
+```python
+# tests/characterization/test_interface_matrix.py
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import scout_schedule_cli as cli  # noqa: E402
+
+
+def test_schedule_cli_defaults(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["scout_schedule_cli.py", "--input", "scouts.csv"])
+    args = cli.parse_args()
+    assert args.input == Path("scouts.csv")
+    assert args.no_html is False          # HTML on by default
+    assert args.sheet == "Scouts Only"    # pin the observed defaults; correct from the run
+
+
+def test_schedule_cli_exposes_the_fields_the_ui_namespace_mirrors(monkeypatch):
+    """ui/server.py hand-builds a Namespace with these fields; async_main reads them. Pin
+    that the CLI parser produces the same attribute set, so the Slice-2 ScrapeConfig can be
+    parity-checked against one contract."""
+    monkeypatch.setattr(sys, "argv", ["scout_schedule_cli.py", "--input", "scouts.csv"])
+    args = cli.parse_args()
+    for field in ("input", "sheet", "output", "headed", "timeout", "no_html", "html_name"):
+        assert hasattr(args, field), f"parse_args must expose {field}"
+```
+
+> The UI builds its `Namespace` inline in `ui/server.py:start_schedule_download`; there is
+> nothing importable to assert directly without a refactor (that refactor is Slice 2). Pinning
+> that `parse_args()` exposes the same field set is the parity anchor. Correct the field list
+> against the observed `parse_args` output and the UI's construction.
+
+- [ ] **Step 3: Request-count baseline**
+
+```python
+# tests/performance/test_baseline.py
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import scout_schedule_cli as cli  # noqa: E402
+from tests.characterization.test_process_scout import _Browser, _Resp  # noqa: E402
+from tests.factories.payloads import requirement_payload, schedule_payload  # noqa: E402
+
+
 async def test_request_count_growth_is_bounded(monkeypatch, tmp_path):
     counts = {"schedule": 0, "requirement": 0}
-    # monkeypatch navigate_and_trigger_schedule (++schedule) and post_requirement (++requirement)
-    # run process_scout on a 2-requirement-bearing-class synthetic schedule
-    # assert counts == {"schedule": 1, "requirement": 2}
-    ...
+
+    async def nav(page, url, t):
+        counts["schedule"] += 1
+        return _Resp(schedule_payload([
+            {"classP4ID": "2000001", "CLASS_NAME_ONLY": "Chess", "CLASS_NBR": "26MB1",
+             "HAS_REQ": "1", "CLASS_COMPLETED": "0"},
+            {"classP4ID": "2000002", "CLASS_NAME_ONLY": "Art", "CLASS_NBR": "26MB2",
+             "HAS_REQ": "1", "CLASS_COMPLETED": "0"}]))
+
+    async def name(page, fb):
+        return fb
+
+    async def post(page, aid, cpid):
+        counts["requirement"] += 1
+        return requirement_payload()
+
+    monkeypatch.setattr(cli, "navigate_and_trigger_schedule", nav)
+    monkeypatch.setattr(cli, "discover_name", name)
+    monkeypatch.setattr(cli, "post_requirement", post)
+
+    scout = cli.ScoutInput(name="Avery Archer", url="https://example.invalid/?t=TESTTOKEN0001")
+    args = argparse.Namespace(timeout=45, request_delay_ms=0, allow_dead_assets=True,
+                              headed=False, channel=None)
+    await cli.process_scout(_Browser(), scout, args, tmp_path)
+    # 1 schedule request + 1 requirement request per requirement-bearing class. Hard bound.
+    assert counts == {"schedule": 1, "requirement": 2}
 ```
+
+  `tools/measure_baseline.py` runs the same flow and writes `build/baseline.json`
+  (`{"machine_class": ..., "schedule_requests": 1, "requirement_requests_per_class": 1}`),
+  the "before" reference for the Slice-4 performance gate. No wall-time threshold yet.
 
 - [ ] **Step 4: Run + commit**
 
 ```bash
+uv sync --locked --all-extras
 uv run pytest tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py -q
 uv run python tools/measure_baseline.py --output build/baseline.json
 git add tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py tools/measure_baseline.py
@@ -2465,27 +2848,124 @@ behavior, including insecure/incomplete web behavior, as `preserve` /
 - Create: `tests/characterization/test_bootstrap_matrix.py`, `tests/characterization/test_local_web_matrix.py`, `tests/characterization/test_run_lifecycle_matrix.py`
 
 **Acceptance Criteria:**
-- [ ] Bootstrap: `marker.is_environment_valid`, `paths.get_paths`, and `_acquire_lock` (mtime lock) pinned for present/absent/invalid marker and lock-held/stale cases
-- [ ] Local web (FastAPI `TestClient`, in-process — no real socket): `/api/health`, `/api/status`, `/api/scouts` responses pinned; the current upload/download/report-open behavior pinned and **classified** (structural fix is Slice 2/B9)
-- [ ] Run lifecycle: pause/resume/cancel and the SSE event stream shape pinned for the current operation model
-- [ ] Static UI: the server-emitted SSE event contract the JS depends on is pinned; JS-only flows (progress/quiet/error rendering) are documented observations, not asserted
+- [ ] Bootstrap: `paths.get_paths` and `marker.is_environment_valid` pinned for present/absent/invalid marker (importing `bootstrap.marker`/`bootstrap.paths` directly, **never** `bootstrap.main`, which pulls `winreg`)
+- [ ] Local web (`TestClient`, in-process, `SCOUTMB_DEV=1` + a `tmp_path` data root so no installed dataset is touched): `/api/health`, `/api/status`, `/api/scouts` responses pinned
+- [ ] Run lifecycle: pin that the API exposes **pause/resume only** and has **no cancel endpoint** (an absence characterization, so a Slice-2 cancel addition is a visible change)
+- [ ] Static UI: the server-emitted SSE event `type` values the JS consumes are pinned; JS-only rendering is a documented observation, not asserted
 
-**Verify:** `uv run pytest tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py -q`
+**Verify:** `uv sync --locked --all-extras && SCOUTMB_DEV=1 uv run pytest tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py -q`
 
 **Steps:**
 
-- [ ] **Step 1: Bootstrap characterization** — stdlib-only; import `bootstrap.marker`,
-  `bootstrap.paths` directly (avoid importing `bootstrap.webview2` — its module-level
-  `import winreg` breaks off-Windows; the fix is Slice 4). Pin marker validity + `_acquire_lock`.
-- [ ] **Step 2: Local-web characterization** — `from ui import server` (via the existing
-  `sys.path` shim), drive `fastapi.testclient.TestClient(server.app)`; pin the JSON of the
-  read routes and the current status of the state-changing routes. Add a comment marking
-  the insecure/incomplete cases `intentional-change` (fixed structurally in Slice 2).
-- [ ] **Step 3: Run-lifecycle + SSE characterization** — exercise pause/resume/cancel
-  through the current operation API and pin the emitted event sequence shape.
+- [ ] **Step 1: Bootstrap characterization** — stdlib-only, importing only the leaf modules:
+
+```python
+# tests/characterization/test_bootstrap_matrix.py
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Import ONLY the leaf modules. bootstrap.main imports bootstrap.webview2, whose
+# module-level `import winreg` fails off-Windows; the winreg fix is Slice 4.
+from bootstrap import marker, paths  # noqa: E402
+
+
+def test_get_paths_uses_the_override_root(monkeypatch, tmp_path):
+    monkeypatch.setenv("SCOUTMB_BOOTSTRAP_ROOT", str(tmp_path))
+    p = paths.get_paths()
+    assert tmp_path in p.app_dir.parents or p.app_dir == tmp_path / "app"
+
+
+def test_missing_marker_is_invalid(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCOUTMB_BOOTSTRAP_ROOT", str(tmp_path))
+    p = paths.get_paths()
+    p.ensure_dirs()
+    req = tmp_path / "requirements.txt"; req.write_text("fastapi\n", encoding="utf-8")
+    assert marker.is_environment_valid(p, req) is False   # no marker -> invalid
+```
+
+> Confirm `AppPaths`'s real field names against `bootstrap/paths.py` before finalizing;
+> adjust the assertion to the actual attribute (`app_dir`/`data_dir`).
+
+- [ ] **Step 2: Local-web characterization** with `TestClient` (in-process ASGI, no real
+  socket — the host-restriction conftest allows it):
+
+```python
+# tests/characterization/test_local_web_matrix.py
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    # Point the UI at a throwaway data root so no installed dataset is read or mutated.
+    monkeypatch.setenv("SCOUTMB_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("SCOUTMB_DEV", raising=False)
+    import ui.server as server  # imported after env is set
+    return TestClient(server.app)
+
+
+def test_health_and_status(client):
+    assert client.get("/api/health").json() == {"status": "ok"}
+    body = client.get("/api/status").json()
+    assert body["scouts_csv_exists"] is False   # empty throwaway root
+
+
+def test_scouts_missing_is_404(client):
+    assert client.get("/api/scouts").status_code == 404
+```
+
+- [ ] **Step 3: Lifecycle + SSE + cancel-absence characterization**:
+
+```python
+# tests/characterization/test_run_lifecycle_matrix.py
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+
+def _routes():
+    import ui.server as server
+    return {getattr(r, "path", "") for r in server.app.routes}
+
+
+def test_pause_and_resume_exist_but_cancel_does_not(monkeypatch, tmp_path):
+    """Absence characterization: today there is pause/resume, NO cancel. A Slice-2 cancel
+    endpoint would therefore be a visible, reviewed addition — not a silent one."""
+    monkeypatch.setenv("SCOUTMB_DATA_DIR", str(tmp_path))
+    routes = _routes()
+    assert "/api/schedule-download/pause" in routes
+    assert "/api/schedule-download/resume" in routes
+    assert not any("cancel" in r for r in routes)
+
+
+def test_sse_event_types_the_frontend_consumes_are_stable():
+    """The static JS switches on these SSE `type` strings (ui/static/app.js). Pin the set the
+    server emits so Slice-2 changes to the event contract are caught."""
+    src = (Path(__file__).resolve().parents[2] / "scout_schedule_cli.py").read_text(encoding="utf-8")
+    for event_type in ("batch_start", "scout_start", "scout_done", "paused", "resumed"):
+        assert f'"type": "{event_type}"' in src or f"'type': '{event_type}'" in src
+```
+
+> Confirm the exact route paths against `ui/server.py` and the emitted event `type` strings
+> against `async_main`/the UI worker before finalizing. Correct any string from the source.
+
 - [ ] **Step 4: Run + commit**
 
 ```bash
+uv sync --locked --all-extras
 uv run pytest tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py -q
 git add tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py
 git commit -m "test: characterize bootstrap, local web, lifecycle, and static-UI contract (A10)"
@@ -2501,9 +2981,9 @@ migration proven, privacy clean.
 
 **Verify (all must pass):**
 ```bash
-uv sync --locked --extra pdf
+uv sync --locked --all-extras
 uv run ruff check . && uv run ruff format --check . && uv run mypy
-uv run pytest -m "not live_service and not playwright" --cov=src/scoutmb --cov-branch -q
+SCOUTMB_DEV=1 uv run pytest -m "not live_service and not playwright" --cov=src/scoutmb --cov-branch -q
 uv run python tools/check_private_data.py --corpus raw_data tests
 uv run python tools/verify_corpus.py raw_data
 ```
@@ -2525,11 +3005,22 @@ backup.
 
 ## Self-review
 
-**Spec coverage (this slice):** D4 (Task 1), CI (2,7), D9/D27 offline (3), D7 synthetic
-fixtures + tripwire (4,5), D12 corpus (6), **D8 full Phase A characterization (7,8,9 +
-16 input/PDF + 17 ScoutingEvent contract + 18 artifacts/interfaces/baseline + 19
-bootstrap/web/lifecycle/UI)**, D3/D25 identity (10,11,12), D11 atomic (13), D6
-data_root/Hazard-1 (14), D5 migration (15), D21 pre-refactor baseline (18).
+**Reviewed by /codex twice (2026-07-22).** The second pass found 23 issues; all confirmed
+concrete bugs were fixed and three KEEP-decision claims were narrowed by owner decision (see
+"Scope honesty"). Notably fixed: the module-scope Playwright/openpyxl import that blocked all
+characterization (execution rule 6 + `--all-extras`), the `disable_socket` loopback break
+(Task 3), the migration `.legacy` deletion (Task 15, now non-destructive + SHA-256), the
+`parse_args`-under-pytest bug (Task 18), the nonexistent cancel-endpoint test (Task 19, now
+an absence characterization), and the placeholder/ellipsis test bodies (Tasks 17–19, now
+complete and runnable).
+
+**Spec coverage (this slice), with honest scope:** D4 (Task 1), CI (2,7), D9/D27 offline —
+socket + app-policy layers only, **browser-subprocess egress + egress-denied CI are Slice 2**
+(3), D7 synthetic fixtures + tripwire (4,5), D12 corpus (6), **D8 full Phase A
+characterization (7,8,9,16,17,18,19)**, **D3/D25 partial — grouping + filenames only, output-
+column scrub is Slice 2** (10,11,12), **D11 partial — user-facing writers only, full atomic
+contract is Slice 2** (13), D6 data_root/Hazard-1 (14), **D5 — copy-only + SHA-256; staging/
+resumability is Slice 3** (15), D21 pre-refactor baseline (18).
 
 **Phase A completeness:** Tasks 16–19 fold the mega-plan's A7–A10 characterization into
 this slice, so every module Slice 2 moves (input/PDF, scraper, output writers, run
@@ -2553,5 +3044,14 @@ Tasks 11–12; `attendee_filename_stem(name, output_id)` (Task 12) matches both 
 `build_missing_requirements` returns `{attendee_id: {"display_name", "badges"}}` from Task
 11 and Task 12/`write_email_reports` read that shape.
 
-**Placeholder scan:** none; every code step carries complete code; every Verify names an
-exact command and expected output.
+**Placeholder scan:** no `...`/TODO/ellipsis test bodies remain — Tasks 16–19 carry complete,
+runnable code. Characterization tests that pin an exact legacy value carry a "correct the
+expectation from the observed run" note: that is inherent to characterization (you cannot
+know a legacy function's exact output without running it), not a deferred TODO. Verify
+commands all name an exact command and expected output.
+
+**Residual advisory (not blocking):** a few characterization expectations (e.g. specific
+`parse_args` defaults, SSE `type` strings, `AppPaths` field names) are pinned from my reading
+of the code and carry an explicit "confirm against source" note; the executor reconciles them
+on first run. This is the normal characterization loop, and each such spot is flagged inline
+rather than left blank.
