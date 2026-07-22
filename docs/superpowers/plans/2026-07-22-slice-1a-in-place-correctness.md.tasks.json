@@ -8,19 +8,19 @@
     "value": "dcb9625c8e019f43dff94f2d1c49f53e98056d4956f95d2f058431fa4b096a78",
     "mismatchBehavior": "If the plan .md changed, regenerate this sidecar before executing."
   },
-  "lastUpdated": "2026-07-22T00:00:00Z",
+  "lastUpdated": "2026-07-22T21:55:54Z",
   "tasks": [
     {
       "id": 1,
       "subject": "Task 1: Project tooling scaffold (uv, ruff, mypy, pytest, 3.12)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A Hatchling src/ project pinned to Python 3.12 that syncs reproducibly from uv.lock, with ruff/mypy/pytest/coverage configured. Zero production-source changes.\n\n**Files:**\n- Create: pyproject.toml, .python-version\n- Generate: uv.lock\n- Modify: .gitignore\n\n**Acceptance Criteria:**\n- .python-version is 3.12; requires-python >=3.12; ruff target-version py312\n- uv sync --locked succeeds; python reports 3.12\n- ruff check and mypy exit 0; no test job in CI yet\n\n**Verify:** `uv sync --locked && uv run ruff check . && uv run mypy && uv run python -c \"import sys;assert sys.version_info[:2]==(3,12);print('py312 ok')\"`\n\n```json:metadata\n{\"files\":[\"pyproject.toml\",\".python-version\",\"uv.lock\",\".gitignore\"],\"verifyCommand\":\"uv sync --locked && uv run ruff check . && uv run mypy\",\"acceptanceCriteria\":[\"py312 pinned\",\"uv sync --locked works\",\"ruff+mypy exit 0\",\"no test job yet\"],\"modelTier\":\"mechanical\"}\n```",
       "blockedBy": []
     },
     {
       "id": 2,
       "subject": "Task 2: Staged CI - lint, types, lock",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         1
       ],
@@ -29,7 +29,7 @@
     {
       "id": 3,
       "subject": "Task 3: Offline test enforcement",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         1
       ],
@@ -38,7 +38,7 @@
     {
       "id": 4,
       "subject": "Task 4: Synthetic factories and fixtures",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         1
       ],
@@ -47,7 +47,7 @@
     {
       "id": 5,
       "subject": "Task 5: Privacy scanner (patterns + corpus) and tripwire",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         4
       ],
@@ -56,7 +56,7 @@
     {
       "id": 6,
       "subject": "Task 6: Local corpus verification tool",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         4
       ],
@@ -65,7 +65,7 @@
     {
       "id": 7,
       "subject": "Task 7: Characterize requirement_path + add test CI job",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         5
       ],
