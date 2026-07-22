@@ -1,818 +1,989 @@
-# scoutmb: Restructure Design
+# ScoutMB Software Foundation Design
 
 **Date:** 2026-07-21
-**Status:** Approved design, pending implementation plan
-**Supersedes:** `docs/refactor-plan.md` (merged into this document)
-**Reviewed by:** Claude (self-review), OpenAI Codex (independent, against the codebase)
+**Status:** Engineering decisions locked; implementation plan must be regenerated against this revision
+**Supersedes:** `docs/refactor-plan.md` and the earlier revision of this specification
+**Related plan:** `docs/superpowers/plans/2026-07-21-scoutmb-foundation.md`
+**Review state:** Architecture, correctness, testing, performance, migration, and distribution decisions D1-D26 are recorded in the decision appendix
 
 ## Problem
 
-The repository began as a quick script and accreted into a real application: two CLI
-pipelines, a FastAPI web UI, a desktop launcher, and a 14-module self-bootstrapping
-Windows installer.
+ScoutMB began as a quick Python script. It is now an application with two data pipelines,
+a FastAPI web interface, a desktop launcher, and a self-bootstrapping installer. It exists
+because the legacy `scoutingevent.com` PHP and jQuery UI workflows are not reliable enough
+for the troop's operational needs.
 
-| Component | Lines (`wc -l`) | Role |
-| --- | --- | --- |
-| `scout_schedule_cli.py` | 1,798 | Stage 2: scrape, infer, report |
-| `pdf_to_scouts.py` | 579 | Stage 1: PDF to CSV |
-| `ui/server.py` | 339 | Local FastAPI app |
-| `ui/static/app.js` | 328 | Frontend |
-| `run_app.py` | 89 | Native-window entry point |
-| `bootstrap/` | 14 modules | Windows self-installing launcher |
+The current repository has useful behavior, but not yet a safe software foundation:
 
-There is no package, no `pyproject.toml`, no tests, no linter, no type checker, and no
-CI. Nothing pins current behavior. All line references below were verified against the
-current tree.
+| Component | Approximate size | Current responsibility |
+| --- | ---: | --- |
+| `scout_schedule_cli.py` | 1,798 lines | Browser acquisition, inference, and reporting |
+| `pdf_to_scouts.py` | 579 lines | PDF and QR extraction into CSV |
+| `ui/server.py` | 339 lines | Local FastAPI application |
+| `ui/static/app.js` | 328 lines | Browser UI |
+| `run_app.py` | 89 lines | Desktop entry point |
+| `bootstrap/` | 14 modules | Windows launcher, runtime, and source installation |
 
-### Correctness defects in shipped code
+The code works well enough to be valuable, but its boundaries allow silent data corruption,
+unsafe upgrades, hard-to-reproduce behavior, and tests that would otherwise need live access
+to a third-party service containing data about minors.
 
-1. **Attendee identity is the display name, not a stable ID.** Inference groups on
-   `(scout_name, class_p4_id)` (`:675`); `build_missing_requirements` builds `by_key` on
-   `(scout_name, class_p4_id, requirement_number)` (`:786`) and buckets output by
-   `scout_name` (`:838-840`); email lookup is `missing.get(scout_name)` (`:920`); email
-   filenames are `safe_slug(scout_name)` (`:935`); raw audit payloads are
-   `safe_slug(result.name)` (`:490`). **Two attendees with the same name have their
-   requirements merged and their output files overwritten.** `attendee_id` is read at
-   `:919` and then never used. At troop scale this is unlikely; at council-camp scale it
-   is probable, and the failure mode is a child being told they completed requirements
-   they did not.
-2. **Unreferenced background tasks.** `ui/server.py:162,223` call
-   `asyncio.create_task(worker())` without retaining the result; CPython holds only weak
-   references, so a long job can be collected mid-execution.
-3. **Four UI defects.** `stale.unlink()` without an `is_file()` guard (`:114-116`,
-   `IsADirectoryError` on a subdirectory); `os.startfile` (`:334`) is Windows-only;
-   `webbrowser.open` server-side (`:301`); unguarded `json.loads` at `:205`, `:296`,
-   `:311`.
-4. **`--quiet` is not honored** at `pdf_to_scouts.py:571`, despite guards at `:515`
-   and `:557`.
+### Confirmed correctness and structural defects
 
-### Structural defects
+The refactor must preserve the useful behavior while fixing these confirmed defects:
 
-5. **`scout_schedule_cli.py` has no internal boundaries.** One module holds argument
-   parsing, four input loaders, Playwright control, AJAX scraping, requirement-status
-   inference, email rendering, a 658-line embedded HTML string, and six output writers.
-6. **`process_scout` (141 lines) fuses browser control, retry policy, deduplication,
-   JSON-to-record mapping, and filesystem writes.**
-7. **`argparse.Namespace` is threaded into the scraping layer.** `ui/server.py:188-201`
-   hand-builds a fake Namespace with 12 fields, and the core defends itself with
-   `getattr(args, "channel", None)` (`:1726`) and `getattr(args, "email_report", False)`
-   (`:1779`) — options already silently default on the UI path.
-8. **Inference is untyped and closure-nested.** `annotate_requirement_statuses` takes and
-   returns `list[dict[str, Any]]` with a nested recursive `calculate`. It is invoked from
-   two consumers — HTML (`:981`) and email via `build_missing_requirements` (`:783`) —
-   *conditionally*, at `:1687` and `:1692` respectively. Under default configuration it
-   runs once.
-9. **`build_missing_requirements` keys bookkeeping on `id(item)`** (`:801`, `:807`,
-   `:808`, `:825`, `:835`). It is not a live defect — the dicts stay referenced by
-   `annotated` for the call's duration, so identities are stable — but it is fragile by
-   construction, invisible to a type checker, and **breaks the moment inference moves to
-   dataclasses**, which is exactly what the `inference/` decomposition does. The
-   ancestor-walk selection it implements must be re-expressed over explicit node indices
-   or an identity field before that move.
-10. **Two `sys.path` hacks.** `ui/server.py:25` inserts the repo root; `python_env.py:62`
-   patches the app directory into the embeddable Python's `._pth`.
-11. **Heavyweight imports block testing.** `scout_schedule_cli.py:27` imports `openpyxl`
-    at module scope, so importing even `requirement_path` requires every dependency.
-12. **`parse_args()` takes no `argv`** (`:88`), a hard prerequisite for CLI testing.
-13. **`print()` is the logging system** — 19 calls, nine `except Exception` sites, three
-    swallowing silently (`:363`, `:400`, `:468`).
-14. **Nondeterminism in business logic.** `time.strftime`/`datetime.now()` (`:1644-1645`),
-    `random.uniform` (`:1765`), `uuid4` (`ui/server.py:110,174`).
-15. **Untyped external payloads.** `scoutingevent.com` responses flow through as
-    `dict[str, Any]`; an upstream rename produces silently wrong completion status.
-16. **Duplication.** `DEFAULT_ADULT_TYPES` (`pdf_to_scouts.py:23`) is re-declared as a
-    literal set at `scout_schedule_cli.py:212`; header-alias lists appear three times.
-17. **User data commingled with replaceable source.** `scouts.csv`, `pdf-uploads/`, and
-    `runs/` live in the directory the launcher overwrites on each start.
+1. Display names are used as attendee identity in grouping, lookup, and filenames. Two
+   attendees with the same name can have requirements merged and output files overwritten.
+2. `ui/server.py` creates unreferenced background tasks that can disappear before work
+   completes.
+3. The UI has unsafe stale-file deletion, a Windows-only `os.startfile` path, a server-side
+   `webbrowser.open`, and unguarded JSON decoding.
+4. `--quiet` is not honored consistently.
+5. `scout_schedule_cli.py` combines argument parsing, four input loaders, browser control,
+   retry policy, response parsing, inference, templates, and output writers.
+6. `process_scout` combines browser state, retries, deduplication, mapping, and filesystem
+   writes.
+7. `argparse.Namespace` crosses into application logic; the UI constructs a synthetic
+   namespace and can silently omit newer options.
+8. Inference uses untyped dictionaries and internal object identity through `id(item)`.
+9. User data is stored next to replaceable application source.
+10. External JSON is trusted too far into the application, so an upstream schema change can
+    be interpreted as a legitimate incomplete requirement.
+11. Logging, timing, jitter, IDs, and output publication are not consistently controlled.
+12. The launcher synchronizes loose source files in place and has no transactional application
+    release boundary.
 
-### Claims explicitly retracted
+### Claims that must not be reintroduced
 
-Earlier drafts of this spec asserted three things that inspection disproves. Recorded so
-they are not reintroduced:
+- Inference copies its input dictionaries before mutation. It does not currently mutate
+  caller-owned dictionaries at its public boundary.
+- The HTML and email inference consumers currently receive the same shape. They still need
+  separate contract coverage because they are independently reachable.
+- `write_html_report` already accepts generated timestamps. Its caller owns the remaining
+  clock nondeterminism.
+- HMAC does not require special hardware. It was rejected here because a stable derived value
+  is unnecessary for shareable output and would remain linkable across runs.
 
-- **Inference does *not* mutate caller-owned dictionaries.** `:672` does
-  `annotated = [dict(item) for item in requirements]`; every later mutation targets a
-  copy. It is non-mutating at its public boundary.
-- **The two consumers do *not* receive differently-shaped input.** Both pass
-  `asdict(RequirementRecord)` rows — `:981` directly, `:1655` nested. `requirement_type_id`
-  is already coerced with `str(...)` at `:574`. There is no shape divergence to reconcile.
-- **`write_html_report` does *not* read the wall clock.** It accepts
-  `generated_at_local` and `generated_at_iso` as parameters (`:975`). The nondeterminism
-  lives in its caller.
+## What already exists
+
+This is a strangler refactor, not a rewrite. The implementation must reuse and characterize:
+
+- The current PDF extraction and QR decode paths, including embedded and rendered QR fallbacks.
+- The current CSV, JSON, text, and XLSX input formats and header aliases.
+- The current browser workflow and its proven login, cookie, CSRF, and legacy-site semantics.
+- The current requirement numbering, tree construction, completion, choice, and missing-work
+  inference behavior.
+- The current HTML, CSV, JSON, email, error, and summary outputs.
+- The current FastAPI and desktop workflows.
+- The current standard-library bootstrap modules and source-copy launcher bridge.
+- The gitignored `raw_data/` corpus as an optional local verification asset only.
+
+No replacement implementation is accepted until an implementation-neutral contract suite can
+run the legacy and new adapters against the same inputs and compare normalized outputs.
 
 ## Goals
 
-- A `src/`-layout package with typed boundaries, an injectable transport seam, a real
-  test suite, and standard Python tooling.
-- Correct attendee identity, so two same-named Scouts cannot corrupt each other's data.
-- Reproducible output, so behavior can be pinned by golden tests.
-- Resilience to upstream schema drift, with drift made visible rather than silent.
-- A launcher portable to macOS that can update the application safely.
-- Preserve the one existing installation's user data.
+- Prevent same-named attendees from sharing state or overwriting one another.
+- Put pure rules behind stable boundaries and all I/O behind adapters.
+- Preserve every intentional legacy behavior through an explicit behavior contract matrix.
+- Detect upstream schema and selector drift before it creates confidently wrong results.
+- Make output publication, installed-data migration, and application updates transactional and
+  recoverable.
+- Keep the e-mailed installer small while allowing required and optional capabilities to be
+  downloaded separately.
+- Make the default test suite deterministic, offline, and incapable of calling
+  `scoutingevent.com`.
+- Support Windows and macOS without requiring a system Python.
+- Add useful local diagnostics now and an OpenTelemetry-shaped seam for later, without making
+  the application depend on connectivity or telemetry infrastructure.
+- Leave the codebase easier to change through idiomatic Python packaging, typing, dependency
+  locking, and test-first migration.
 
-## Non-goals
+## NOT in scope
 
-- Rewriting the inference algorithm. It is characterized and preserved.
-- Shipping a signed macOS build. Notarization is a purchasing decision (Apple Developer
-  Program, USD 99/yr) tracked separately.
-- Replacing the frontend with a framework.
-- **Self-updating the launcher itself** — see "Update scope honesty" below.
+- Replacing or modifying `scoutingevent.com`; ScoutMB does not own that service.
+- Replacing the current requirement inference rules during the structural refactor. Suspected
+  defects are characterized first and fixed in separate behavior changes.
+- Replacing the frontend with a JavaScript framework.
+- Public distribution, multi-tenant operation, or support for troops other than the current
+  internal users in this cycle.
+- Launcher self-update. The application payload can update; launcher changes require a new
+  installer download.
+- Production OpenTelemetry export or a remote collector. This cycle supplies only the port,
+  no-op implementation, privacy contract, and spool interface.
+- Making Safari the default browser. Safari support remains experimental until a live,
+  read-only compatibility smoke test proves the legacy site works through `safaridriver`.
+- Signed update metadata, Developer ID signing, macOS notarization, key rotation, and signed
+  downgrade or freeze protection. This is decision D23 and is intentionally deferred while the
+  tool remains internal to the troop. Revisit it before broader distribution or a changed threat
+  model.
 
-## Constraints
+## Constraints and invariants
 
-- **Runtime target is Python 3.12.** `requires-python = ">=3.12"`, ruff
-  `target-version = "py312"`, mypy `--python-version 3.12`, 3.12 primary in CI. The dev
-  venv is 3.14; a 3.13/3.14-only API would ship broken with no diagnostic path.
-- **No real Scout data in the repository, ever.** QR URLs and attendee IDs are bearer
-  tokens for real minors' records. `/raw_data/` is gitignored (`.gitignore:13`).
-- **The launcher's audience is non-technical.** Double-click to run; never touch or
-  require a system Python.
-- **One installation exists in the wild, holding real user data.** Breaking the install
-  (requiring a re-run of setup) is acceptable. **Destroying its data is not.**
-- **The upstream API is not ours.** `scoutingevent.com` may change payload shape without
-  notice.
-
----
-
-## ⚠️ Coupled hazards — read before any code moves
-
-### Hazard 1 — `__file__`-derived data paths
-
-```python
-REPO_ROOT = Path(__file__).resolve().parent.parent   # ui/server.py:24
-SCOUTS_CSV = REPO_ROOT / "scouts.csv"                # :35
-PDF_UPLOADS_DIR = REPO_ROOT / "pdf-uploads"          # :36
-RUNS_DIR = REPO_ROOT / "runs"                        # :37
-```
-
-Today `__file__` is `app_dir/ui/server.py`, so `REPO_ROOT` resolves to `app_dir` and data
-lands beside the app. After a move to `scoutmb/ui/app.py`, `.parent.parent` silently
-becomes `app_dir/scoutmb` — **user data relocates inside the package directory.** Under
-wheel deployment this is worse still: the package lives at
-`venv/lib/site-packages/scoutmb/`, a directory `pip install --force-reinstall` replaces
-wholesale.
-
-**Fix:** `UiSettings` takes an explicit `data_root`, resolved in this order:
-
-1. Explicit constructor argument (tests, embedding)
-2. `SCOUTMB_DATA_DIR` environment variable (set by the launcher)
-3. Platform user-data directory
-4. `Path.cwd()` **only** in an explicit development mode
-
-`Path.cwd()` is not an acceptable production default — it depends on how a shortcut,
-terminal, or `.app` bundle launched the process. **Never derive data paths from
-`__file__`**, enforced by a lint rule and a regression test.
-
-### Hazard 2 — destructive install replacing a permissive sync
-
-`source_sync.py`'s docstring promises *"never a directory wipe — scouts.csv,
-pdf-uploads/, and runs/ live in the same app\ folder as user data and must survive
-untouched."* That comment is load-bearing. Wheel installation violates it — safely
-**only if** the package directory holds no user data, which is exactly what Hazard 1
-would break.
-
-### Hazard 3 — ordering
-
-The UI move (originally Phase 7) triggers Hazard 1, but the launcher does not export
-`SCOUTMB_DATA_DIR` until the bootstrap phase. In between, `bootstrap/main.py:55` starts
-the process with `cwd=paths.app_dir`, so `Path.cwd()` still commingles data with
-replaceable files. **Data-root resolution and legacy migration must land before the UI
-module moves**, not after. This reordering is reflected in the phase table.
-
----
-
-## Legacy migration
-
-One installation exists with real data at `app/{scouts.csv,pdf-uploads,runs}`. The
-migration is **copy-only, never move or delete**:
-
-1. If `data/` already contains a marker (`data/.migrated`), do nothing. Idempotent.
-2. Copy `app/scouts.csv`, `app/pdf-uploads/`, `app/runs/` into `data/`.
-3. Verify each copy (size and hash for files; recursive count for directories).
-4. Write `data/.migrated` recording source paths, timestamp, and file count.
-5. **Leave the originals in place.** `app/` is abandoned, not cleaned. If migration is
-   wrong, the data is still there.
-
-With a single known install, disk cost is irrelevant and deletion buys nothing. Manual
-cleanup is a later, optional step. Collision handling: if a destination already exists
-and differs, write alongside as `<name>.legacy` and record it in the marker rather than
-overwriting.
-
----
+1. **Python 3.12 is the shipped runtime.** Code, type checking, lint targets, and CI must reject
+   accidental reliance on Python 3.13 or 3.14 APIs.
+2. **No real Scout data enters git.** Names, attendee IDs, QR URLs, tokens, raw payloads,
+   locally derived corpora, logs, and checkpoints containing real identifiers remain private.
+3. **Default tests never call `scoutingevent.com`.** This is enforced, not documented as a
+   convention.
+4. **The launcher is for non-technical users.** Normal use is double-click, with no system
+   Python, terminal, or manual dependency repair.
+5. **The e-mailed installer remains small.** The compressed installer must be at most 18 MB.
+   This leaves room for the roughly one-third MIME encoding expansion and message headers under a
+   common 25 MB total-message limit. CI fails when the attachment artifact exceeds that budget.
+6. **One installed copy contains irreplaceable user data.** Reinstalling application code is
+   acceptable. Losing or silently replacing user data is not.
+7. **The upstream service is unowned and may drift without notice.** Missing and explicit-null
+   values are distinct at its boundary.
+8. **Shareable artifacts contain no upstream attendee IDs or token-bearing QR URLs.** Private
+   inputs, private acquisition checkpoints, and an explicitly requested sensitive export are
+   separate classes of data.
+9. **Every filesystem artifact is published atomically.** A failed write preserves the last
+   complete artifact.
+10. **Every installed application update preserves a known-good release.** No live environment
+    is mutated in place.
 
 ## Architecture
 
-### Package layout
+### Architectural style
 
+ScoutMB uses a small hexagonal architecture, also called ports and adapters, with a functional
+core. Features remain organized as vertical slices inside the application layer. It does not
+adopt the ceremony of a large Clean Architecture implementation.
+
+```text
+                     interfaces
+               +-------------------+
+               | CLI | Web | Desktop|
+               +----------+--------+
+                          |
+                          v
+               application features
+      +---------+----------+-----------+----------+
+      | ingest  | acquire  | inference | reporting|
+      +---------+----------+-----------+----------+
+                          |
+                          v
+                  pure domain core
+          models | identity | rules | schemas
+                          ^
+                          |
+                ports owned by the app
+                          |
+       +------------------+-------------------+
+       |                  |                   |
+       v                  v                   v
+ ScoutingEvent       filesystem/PDF     observability
+ browser adapter        adapters            adapter
 ```
-pyproject.toml   uv.lock   requirements.txt (generated, pinned — installer input)
+
+Dependency rules:
+
+- `core/` imports no browser, web, filesystem, environment, OpenTelemetry, PDF, or UI modules.
+- `features/` may import `core/` and application-owned port protocols.
+- `adapters/` implement ports and may import third-party frameworks.
+- `interfaces/` construct dependencies at the outside and call feature services.
+- CLI, web, and desktop interfaces call the same feature services and typed configuration.
+- Protocols exist only at real I/O or nondeterminism seams. Internal pure functions do not get
+  interface wrappers for symmetry.
+- Optional PDF and telemetry packages cannot be imported by the core installation path.
+- Architecture tests reject reverse imports and package cycles.
+
+### Target package layout
+
+The layout is a destination, not permission to create dozens of empty modules up front.
+Modules are split when they own a coherent subject or create a tested seam.
+
+```text
+pyproject.toml
+uv.lock
+requirements-launcher.txt       # generated from uv.lock, pinned with hashes
 src/scoutmb/
-  __init__.py  __main__.py  errors.py  config.py  clock.py  progress.py  logging_setup.py
+  __init__.py
+  __main__.py
+  config.py
+  errors.py
 
-  domain/      models.py      ScoutInput / ClassRecord / RequirementRecord / ScoutResult
-               identity.py    AttendeeKey — stable attendee identity (see below)
-               enums.py       RequirementStatus, SECTION_HEADER_TYPE_ID, ADULT_REGISTRANT_TYPES
-               text.py        clean_html_description
+  core/
+    models.py
+    identity.py
+    requirement_rules.py
+    output_schemas.py
 
-  inference/   PURE — no I/O; takes and returns dataclasses, never dicts
-               numbering.py   CHOICE_COUNT_WORDS, requirement_path, choice_requirement_count
-               tree.py        grouping, parent linking, header-stack fallback
-               status.py      the de-nested `calculate` closure
-               missing.py     build_missing_requirements
+  features/
+    ingest/
+    acquisition/
+    inference/
+    reporting/
 
-  inputs/      headers.py     norm_header, first_matching_key, alias lists
-               loaders.py     xlsx / csv / json / text        pipeline.py  load_inputs
+  ports/
+    scoutevent.py
+    storage.py
+    observability.py
 
-  scrape/      payloads.py       PURE mapping + anti-corruption layer + drift policy
-               ports.py          SchedulePort Protocol, ScheduleFetch
-               playwright_port.py  the only module that imports playwright
-               retry.py  raw_store.py  runner.py
+  adapters/
+    scoutevent/
+      gateway.py
+      playwright_session.py
+      safari_session.py
+      payloads.py
+      schema_profiles.py
+    files/
+    pdf/
+    telemetry/
 
-  reporting/   view_model.py  html.py  writers.py  summary.py
-               templates/report.{html,css,js}     ← the 658-line string, split three ways
+  interfaces/
+    cli/
+    web/
+    desktop.py
 
-  emails/      render.py  export.py  templates/email.html   (NOT `email/` — stdlib collision)
-  pdf/         discovery.py  identity.py  qr.py  extract.py  pipeline.py  export.py
-  storage/     csvio.py  jsonio.py  naming.py                (NOT `io/` — stdlib collision)
-  cli/         app.py  args_scrape.py  args_extract.py  args_ui.py  console.py
-  ui/          settings.py  app.py (create_app factory)  jobs.py  routes/  static/  desktop.py
+  resources/
+    report.html
+    report.css
+    report.js
 
-tests/{unit,contract,integration,fixtures,factories}/
-tools/scrub_fixtures.py  tools/verify_corpus.py
-bootstrap/     platforms/  manifest.py  migrate.py  update/  …    (repo root, outside the package)
+bootstrap/                       # standard library only; frozen separately
+tests/
+  unit/
+  contract/
+  integration/
+  packaging/
+  fixtures/                      # synthetic only
+tools/
 ```
 
-**No junk drawers.** Every module is named for a *subject*, never a *role*. A pre-commit
-hook rejects `utils.py`, `helpers.py`, and `common.py` under `src/`.
+Avoid `utils.py`, `helpers.py`, and `common.py`. Merge tiny modules into their closest subject
+when a seam does not justify a file.
 
-*Acknowledged tension:* this is roughly 35 modules for ~3,100 lines of application code,
-which is fine-grained. The split is justified where it creates a testable seam
-(`inference/`, `scrape/`) and is thinner justification elsewhere. Modules that stay under
-~40 lines after Phase 3 should be merged into their nearest subject sibling rather than
-kept for symmetry.
+### Application data flow
 
-`bootstrap/` **stays at the repo root**, outside the package: it runs before the
-application's dependencies exist, may import only the standard library, and is frozen
-separately. Add `[tool.hatch.build] exclude = ["bootstrap"]`.
+```text
+private input
+ PDF / CSV / JSON / XLSX / QR URL
+                 |
+                 v
+       validate and canonicalize
+                 |
+                 +----> private acquisition checkpoint
+                 |
+                 v
+       typed classes and requirements
+                 |
+                 v
+        pure inference and grouping
+                 |
+                 v
+       versioned external-output DTOs
+                 |
+                 v
+      temp write -> fsync -> atomic replace
+                 |
+                 v
+       completion manifest written last
+```
 
-### Attendee identity
+## Core contracts
 
-The root correctness fix. A stable `AttendeeKey` derived from `attendee_id` becomes the
-internal identity for grouping, lookup, and filenames; **`scout_name` is display data
-only.**
+### Attendee identity and privacy
 
-- Inference groups on `(attendee_key, class_p4_id)`.
-- `build_missing_requirements` keys on `attendee_key`.
-- Email and raw-payload filenames are `f"{safe_slug(name)}-{attendee_key.short}"`, so
-  they stay human-scannable while being collision-free.
-- `attendee_id` is a bearer token, so `AttendeeKey.short` is a **non-reversible digest
-  prefix**, never the raw ID — filenames must remain safe to share.
+Identity has two deliberately different forms:
 
-This is a **behavior change**, not a refactor: output filenames change. It therefore gets
-its own failing tests first and its own phase, and it lands **before** any code moves, so
-every characterization golden is captured against corrected identity rather than needing
-regeneration later.
+1. `UpstreamAttendeeId` is a typed sensitive identifier obtained from ScoutingEvent. It may
+   exist only inside the upstream adapter, in-memory processing, and private resumable
+   checkpoints. Its dataclass field uses `repr=False`. Missing upstream identity fails closed;
+   there is no `unresolved` identity bucket.
+2. `RunAttendeeId` is a full `uuid.uuid4()` value assigned once per attendee per run. It is
+   persisted in the private run checkpoint so a resume uses the same value. A separate run
+   assigns a new unrelated UUID.
 
-### Console entry point
+All grouping and lookup operations use the typed upstream identity while it is held in memory.
+All shareable DTOs and filenames use the run UUID. Display name is display data only.
 
-`[project.scripts] troop349 = "scoutmb.cli.app:main"`, with subcommands `extract-pdf`,
-`download`, and `ui`. Root shims re-export during migration and emit a **`FutureWarning`**
-naming `troop349` — `DeprecationWarning` is hidden by default and would be invisible to
-the one person who needs to see it. Shims are retained for **at least one released
-version**, not deleted in the same cycle they are introduced.
+Example filename:
 
-### Typed config replaces `Namespace` threading
+```text
+jane-doe-70ac7c2d-9f4d-49b5-aef0-54dbab722e4d.html
+```
 
-Frozen slotted dataclasses in `config.py`: `BrowserOptions`, `PacingOptions`,
-`InputOptions`, `ReportOptions`, composed into `ScrapeConfig` and `ExtractConfig`.
-`argparse` populates them in `cli/args_*.py`; **the `Namespace` never leaves that
-module.** `ui/server.py:188-201` collapses to a `ScrapeConfig(...)` construction, so a new
-option can no longer silently default on the UI path and both `getattr(args, …)` calls are
-deleted.
+The full UUID is used. UUID prefixes, attendee-ID hashes, HMACs, and UUIDv7 are not used.
+Tests inject an ID factory so golden output remains deterministic.
 
-Magic numbers become named fields: retry attempts (`range(1, 4)` at `:538`), backoff
-(`500 * attempt` at `:546`), jitter (`(0.5, 2.0)` at `:1765`).
+Sensitive data classes:
 
-`--quiet` leaves the config entirely and becomes global `-q`/`-v` verbosity, fixing
-`:571` by construction.
+| Class | Examples | Allowed location |
+| --- | --- | --- |
+| Upstream secret | QR URL/token, upstream attendee ID, raw response | Adapter memory, private input, private checkpoint |
+| Private local data | Scout name, source PDF path, diagnostic context | User data root, redacted logs where needed |
+| Shareable output | Run UUID, requirement summaries, generated reports | User-selected output directory |
+| Explicit sensitive export | Raw upstream IDs when operationally required | Separate command/flag with warning and restrictive filename |
+
+Generated artifacts and logs are scanned for upstream IDs, QR URLs, and known token shapes.
+
+### Typed configuration and path resolution
+
+`argparse.Namespace` is confined to CLI parsing. Frozen, slotted dataclasses hold browser,
+pacing, input, report, storage, and observability settings. Web and CLI code construct the same
+configuration types and call the same services.
+
+Production data-root precedence is exact:
+
+1. Explicit constructor argument for tests or embedding.
+2. `SCOUTMB_DATA_DIR`, interpreted as the exact data root.
+3. `platformdirs` user-data directory.
+4. `Path.cwd()` only when an explicit development flag is present.
+
+No production data path is derived from `__file__` or an accidental working directory. The
+launcher resolves settings once and passes the result into the application.
 
 ### Determinism
 
-Nondeterminism is injected **per-collaborator**, not bundled. An earlier draft proposed a
-single `RunContext` carrying clock, IDs, RNG, progress, and sleep; that is a service bag
-mixing unrelated concerns — progress reporting is not nondeterminism. Instead:
+Inject only the collaborators a feature actually needs:
 
-| Source | Location | Injected as |
-| --- | --- | --- |
-| `time.strftime` → `generated_at_local` | `:1644` | `Clock` |
-| `datetime.now()` → `generated_at_iso` | `:1645` | `Clock` |
-| `time.strftime` run IDs | `ui/server.py:65` | `Clock` |
-| `uuid4()` operation IDs | `ui/server.py:110,174` | `IdFactory` |
-| `random.uniform(0.5, 2.0)` pacing | `:1765` | `Jitter` |
-| `page.wait_for_timeout` in retry | `:546` | `Sleeper` |
+| Concern | Port or callable |
+| --- | --- |
+| Timestamps and deadlines | `Clock` |
+| Run and operation IDs | `IdFactory` |
+| Retry jitter | `RandomSource` |
+| Waiting | `Sleeper` |
+| Progress | `ProgressSink` |
 
-Each operation takes only what it needs. Retry needs `Sleeper`, not a clock; report
-writing needs `Clock`, not an RNG. Production pacing does not need to be seeded merely to
-make goldens deterministic — goldens use a fixed `Jitter` stub.
-
-`write_html_report` already accepts its timestamps as parameters (`:975`) and needs no
-change on this axis.
+There is no generic service bag. Output ordering, filenames, timestamps, random jitter, and
+serialization are controlled in tests.
 
 ### Requirement inference
 
-Decomposed rather than relocated, into `inference/{numbering,tree,status,missing}.py`.
-The boundary is **dataclasses in, dataclasses out** — no dicts cross it.
+Inference is a pure typed boundary. It accepts canonical dataclasses and returns canonical
+dataclasses. It performs no I/O and reads no clock or environment state.
 
-Both consumers (HTML at `:981`, email at `:783`) receive the same `asdict(RequirementRecord)`
-shape today and are pinned separately before unification — not because their shapes
-diverge (they do not), but because they are independently reachable code paths with
-different enclosing conditions (`:1687` vs `:1692`).
+The existing `id(item)` ancestor bookkeeping is replaced by explicit node indices. Before that
+change, characterization tests pin leaf selection, ancestor inclusion, section-header exclusion,
+the `(not used)` filter, duplicate numbers, repeated headers, empty paths, label rows, and both
+HTML and email consumers.
 
-**The `id()` dependency is the blocking prerequisite for `missing.py`.** Today
-`build_missing_requirements` selects actionable leaves and walks their still-incomplete
-ancestors using `dict[int, bool]` keyed on `id(item)` (`:801`, `:807`, `:808`, `:825`,
-`:835`). That works only because the dicts remain referenced by `annotated` for the
-call's duration — and it stops working the instant those dicts become frozen dataclasses,
-which are neither guaranteed-distinct by identity nor safe to key on that way.
+Suspect legacy behavior is documented and preserved until a separate failing test demonstrates
+the desired behavior. Structural movement and behavior correction do not share a change.
 
-The decomposition therefore re-expresses the ancestor walk over **explicit node indices**
-into the tree produced by `tree.py`, with `selected: dict[NodeIndex, bool]`. This is a
-structural rewrite of `:801-836`, not a copy, and it is the one place in the inference
-extraction where the code cannot move mechanically. It gets its own characterization
-tests covering leaf selection, ancestor inclusion, the `(not used)` filter, and the
-`requirement_type_id == "3"` section-header exclusion **before** the rewrite.
+### ScoutingEvent gateway
 
-### External payload handling
+The application owns a `ScoutEventGateway` port. The initial production adapter remains
+Playwright-backed because the old PHP/jQuery UI flow may rely on browser session, cookie, CSRF,
+or JavaScript behavior. Direct HTTP is allowed only after tests prove semantic equivalence.
 
-`scrape/payloads.py` is an anti-corruption layer with an explicit **severity policy**.
-"Record drift and continue" is unsafe as a blanket rule: silently continuing past a
-missing `classP4ID` or completion flag produces confidently wrong results, which is the
-exact failure this design exists to prevent.
-
-| Field class | Examples | On missing / wrong type |
-| --- | --- | --- |
-| **Critical identity/structure** | `data`, `status`, `classP4ID`, requirement ID | **Fail that scout/class**, record an error |
-| **Critical semantics** | `COMPLETED_REQ_FLAG`, `COMPLETED_CLASS_FLAG` | **Fail**, never coerce an unparseable value to false |
-| **Optional display** | `MERIT_BADGE_NAME`, `REQ_DESCR`, `PRESENT_DAYS` | Warn, record drift, continue with a placeholder |
-| **Unknown / added** | anything not in the known set | Ignore; aggregate as low-severity telemetry only |
-
-This resolves a contradiction in the previous draft, which said unknown fields are ignored
-while simultaneously requiring a test that an added field "reports drift."
-
-Each `SchemaDrift` carries: JSON path, severity, source operation, row identity
-(attendee key + class), and a redaction flag. Drift is deduplicated by
-`(path, severity, operation)` so one upstream rename produces one report line, not 4,858.
-Counts surface in `errors.csv` and `summary.json`.
-
-Flag coercion tolerates `"1"`, `"0"`, `""`, and `None` — the corpus contains 309 rows with
-`(None, None)` — and treats anything else as critical drift rather than falsy.
-
-`Mapping[str, Any]` appears only in `ports.py` and `payloads.py`. Declaring the upstream
-shape as a `TypedDict` was rejected: it encodes an assumption we cannot enforce and turns
-renames into silent `None`s.
-
-### `process_scout` splits at a `SchedulePort`
+The gateway returns an attendee-bound session instead of storing a mutable "current Scout":
 
 ```python
-class SchedulePort(Protocol):
-    async def open_scout(self, qr_url: str, fallback_name: str) -> ScheduleFetch: ...
-    async def fetch_requirements(self, attendee_id: str, class_p4_id: str) -> Mapping[str, Any]: ...
-    async def aclose(self) -> None: ...
+class ScoutSession(Protocol):
+    async def fetch_schedule(self) -> object: ...
+    async def fetch_requirements(self, class_p4_id: str) -> object: ...
+
+
+class ScoutEventGateway(Protocol):
+    def open_session(
+        self, qr_url: str, fallback_name: str
+    ) -> AsyncContextManager[ScoutSession]: ...
 ```
 
-Above it, `payloads.py` is pure and synchronous. A test loads a fixture and asserts a
-`list[ClassRecord]` — no browser, no async, no network. **This extraction makes roughly
-80% of the scraping logic testable.** Retry moves to `retry.py` with an injected
-`Sleeper`; raw writes move to a `RawPayloadStore` with a `NullRawStore` for tests.
+The `object` return type is intentional. The adapter must validate containers, fields, and types
+before producing core models. An annotation such as `Mapping[str, Any]` would falsely imply that
+the untrusted response is already a mapping.
 
-### The 658-line template → package data, three files, `str.replace()`
+Each attendee session owns its browser context and cookies. Sessions are closed through the
+async context manager even on cancellation or parse failure.
 
-The template uses **exactly one substitution** (`:1627`) — no f-string, no `.format()`.
-**No Jinja2.** It would add a runtime dependency that changes
-`marker.compute_requirements_hash`, and would require escaping every `{`/`}` across 206
-lines of CSS and 278 lines of JS full of `${…}` template literals. The doubled-brace email
-template at `:886-893` already demonstrates that corruption mode.
+### Timeout, retry, and checkpoint behavior
 
-Split into `templates/report.{html,css,js}`, loaded via `importlib.resources.files()` with
-an `lru_cache`. **Substitute CSS → JS → DATA, always DATA last** — scout data can contain
-the literal string `__REPORT_JS__` and survives JSON escaping, so data-last makes
-injection impossible. Assert no `__REPORT_` token remains, and test a scout named
-`__REPORT_JS__`.
+- Every external operation has connect/navigation and read/response timeouts plus a total
+  deadline.
+- Retry classification is explicit. Transient navigation failures, rate limits, and selected
+  server errors may retry. Authentication, validation, and schema errors do not.
+- Backoff is exponential with bounded jitter. `Retry-After` is honored only within the total
+  deadline and a configured maximum.
+- POST retries are allowed only for operations proven read-only or idempotent.
+- Browser/session reuse is bounded. Concurrency stays conservative and rate-aware.
+- Transport, clock, sleeper, and random source are injectable.
+- Errors are typed, carry stable error codes, and redact URLs, tokens, attendee IDs, and cookies.
 
-For `ui/static/`, `importlib.resources.files()` alone is insufficient: a `Traversable` is
-not guaranteed to be a real filesystem directory, which `StaticFiles` requires. Use
-`as_file()` bound to the app lifespan, and **test it from an installed wheel, not the
-source tree**, where the distinction is invisible.
+Acquired data is canonicalized immediately, then the remaining workflow runs locally. Private,
+per-attendee checkpoints record completion and the run UUID mapping. Resume skips completed
+attendees and never reuses identity from a different run.
 
-### Deployment
+### Schema and selector drift
 
-```
-<app root>/           # %LOCALAPPDATA%\ScoutingMeritBadges          (Windows)
-                      # ~/Library/Application Support/ScoutingMeritBadges  (macOS)
-  runtime/            # python-build-standalone — disposable
-  envs/               # A/B application environments (see below)
-    <version>/        # venv + installed wheel
-  current -> envs/<version>
-  data/               # scouts.csv, pdf-uploads/, runs/ — SCOUTMB_DATA_DIR points here
-  state/              # marker, browser channel, release cache, update throttle
-  logs/
-```
+The adapter maintains sanitized response fixture profiles and selector contracts. It validates:
 
-Standalone Python plus a normal venv is an ordinary Python environment, so the `._pth`
-patching at `python_env.py:47-69` disappears, as does `ui/server.py:25`.
+- required containers and fields;
+- absent fields separately from explicit `null`;
+- field types and permitted flag values;
+- required selectors, headings, and content types;
+- cross-field invariants;
+- a structural fingerprint that ignores volatile values.
 
-**Platform dispatch**, segregated by concern rather than one omnibus protocol:
+Drift severity is explicit:
 
-```
-bootstrap/platforms/
-  paths.py      app_root, python_exe, gui_python_exe
-  runtime.py    standalone runtime URL + extraction
-  browser.py    preferred Playwright channel
-  webview.py    ensure_webview  (WebView2 on Windows; no-op on macOS)
-  windows.py  macos.py   — concrete implementations, lazily imported
-```
-
-`webview2.py` has a module-level `import winreg` and evaluates `winreg.HKEY_*` at import;
-store hive *names* as strings and move the import into the function. `paths.py:33` does
-`os.environ["LOCALAPPDATA"]` — use `.get()` with a diagnosable error. Then `bootstrap`
-imports on every platform and only the registry test is skipped.
-
-`bootstrap/manifest.py` is the single source of truth for what the exe bundles, imported
-by `build.spec` (spec files execute as Python). `hiddenimports` becomes
-`collect_submodules("bootstrap")`.
-
-### Update scope honesty
-
-**This design updates the application, not the launcher.** `bootstrap/` is excluded from
-the wheel and frozen into the exe, so a downloaded wheel can never update the updater,
-platform dispatch, rollback logic, or the launcher itself. Launcher changes require the
-user to download a new exe. The feature is named **application self-update** throughout,
-and the launcher surfaces a "a newer setup is available" notice when the release manifest
-advertises a launcher version newer than its own.
-
-### Release bundle and integrity
-
-A release is **not a bare wheel**. It is a versioned bundle with a signed manifest:
-
-```
-release-<version>.json     # manifest: versions, asset names, sizes, SHA-256, min-launcher
-scoutmb-<version>.whl
-constraints-<platform>.txt # exported pinned resolution
-```
-
-Update rules, all mandatory:
-
-- **SHA-256 verified** against the manifest before any install; manifest signature
-  verified against a key bundled in the exe.
-- **Allowed asset names and maximum sizes** enforced; anything else is rejected.
-- **Downgrade prevention** — never install a version lower than the installed one unless
-  performing an explicit rollback.
-- **Atomic download** to a temp path, then rename.
-- Dependencies install from `constraints-<platform>.txt`, **not** from wheel metadata
-  ranges resolved live — otherwise the lockfile guarantee is discarded at the moment it
-  matters most.
-
-Without this, a corrupt or substituted artifact is arbitrary code execution on a
-volunteer's laptop.
-
-### A/B environments, health check, and rollback
-
-Retaining "the previous wheel" is insufficient once dependencies, Python, or Playwright
-have also moved; reinstalling an old wheel into a mutated venv can leave it broken. Instead:
-
-1. Build the candidate in `envs/<new-version>/` — a **fresh venv**, never a mutation of
-   the live one.
-2. **Smoke-test the candidate**: `python -c "import scoutmb"`, the existing
-   `SMOKE_TEST_IMPORTS` (with `"scoutmb"` added), and a Playwright browser-presence check.
-3. Switch `current` atomically only after the smoke test passes.
-4. **Health acknowledgement**: the application writes `state/health-ok-<version>` once it
-   has served its first request. The launcher treats a version with no acknowledgement
-   after two launches as failed, restores `current` to the last acknowledged version, and
-   logs the downgrade. The counter resets on acknowledgement.
-5. Retain the last known-good environment; prune older ones.
-
-"Launch succeeded" is thus explicitly defined, which it is not today —
-`bootstrap/main.py:53` merely `Popen`s and sleeps two seconds.
-
-**Update check** runs at most once per 24 hours (recorded in `state/`), bounded by a
-3-second timeout. Any failure is logged and the installed version launches anyway.
-**Startup never blocks on an update check** — the deployment environment is a Scout camp
-with unreliable connectivity.
-
-`PLAYWRIGHT_BROWSERS_PATH` is set under `state/`, and browsers are revalidated whenever
-the resolved `playwright` version changes — the package is version-coupled to its browser
-binaries, and skipping this yields an app that starts and then fails mid-scrape, offline.
-
----
-
-## Testing
-
-### TDD discipline
-
-**New code: strict red-green-refactor.** `AttendeeKey`, `SchedulePort`, `FakeSchedulePort`,
-`JobRegistry`, `ProgressSink`, `Clock`/`IdFactory`/`Jitter`/`Sleeper`, `payloads.py` drift
-policy, `errors.py`, platform modules, the update/rollback state machine, `manifest.py`,
-`migrate.py`, and the scrubber.
-
-**Deliberate behavior changes: strict red-green-refactor.** Attendee identity, the
-`no_html` → `generate_html` inversion, the `troop349` CLI surface, `-q`/`-v`, drift
-severity, and the report-opening change.
-
-**Code motion: characterization-first.** Pin behavior, then move. **Characterization tests
-pin bugs too** — where a test documents behavior believed wrong, it is committed as-is
-with a comment, and the fix is a separate change with its own failing test. Refactoring
-and bug-fixing never share a commit.
-
-### Sequencing that keeps CI green and RED real
-
-1. **Phase 1.** Characterization tests import the **flat modules** and pass.
-2. **Later phases, per module.** Write a one-line import test against the new path:
-   `from scoutmb.inference.numbering import requirement_path` → **RED** (`ImportError`).
-3. Move → **GREEN**.
-4. Re-point that module's characterization tests; delete the temporary import test.
-
-The RED step catches the failure where a characterization test silently keeps importing
-the old module and passes while proving nothing.
-
-### The TDD gap is much smaller than previously claimed
-
-An earlier draft accepted that `process_scout` could not be characterized before
-extraction. That was wrong. `navigate_and_trigger_schedule` (`:368`), `discover_name`
-(`:347`), and `post_requirement` (`:417`) are **module-level functions called by name** at
-`:479`, `:486`, and `:540`. Monkeypatching them is standard pytest practice, and
-`post_requirement` itself needs only a fake `page.evaluate`. `process_scout` therefore gets
-full characterization coverage — orchestration, retry, dedup, error accumulation, exact
-error strings — **before** the port extraction, with only a minimal fake for
-`browser.new_context`.
-
-The residual gap is the Playwright adapter internals themselves (selector chains, response
-matching). Those are covered by the tier-3 fake-site test, which **runs in CI** (below).
-A manual run against private data is not a repeatable regression test and is no longer
-part of the plan.
-
-### Playwright, three tiers
-
-1. **`FakeSchedulePort`** — runner, retry, dedup, mapping. Always runs.
-2. **`SimpleNamespace`** for `is_schedule_response` and `form_values`, which only read
-   attributes.
-3. **`@pytest.mark.playwright` against a local fake ScoutingEvent** — deterministic and
-   network-independent, so it **runs in CI** as a separate job, on adapter changes and
-   nightly. This is the only test that catches a stale selector in the `:384-397` fallback
-   chain; excluding it entirely would make omitting `playwright_port.py` from coverage
-   indefensible.
-
-**Do not mock `Page`/`Response` with `unittest.mock`.** The surface used is deep enough
-that the mock becomes the thing under test.
-
-### Fixture corpus
-
-`raw_data/` (local, gitignored) holds three real runs. Measured locally: each contains 22
-scouts, 98 classes, **4,858 requirements**, 120 raw payloads.
-
-**The three runs are identical in completion state** — across 4,858 shared rows,
-`2026-07-18_1835` → `2026-07-18_1938` → `2026-07-19_2139` show **zero** flag changes. The
-event (2026-07-06) had concluded.
-
-These counts are **locally measured and not independently verifiable in review**, since
-the corpus cannot leave the machine. `tools/verify_corpus.py` reproduces them and prints
-only aggregate counts — never names, IDs, or payload content — so the numbers can be
-re-checked without exporting anything.
-
-Consequences: **one run is the fixture corpus**; identical output across three runs is
-worth one determinism golden; **state transitions must be synthesized** by mutating
-completion flags over the real row structure.
-
-### Fixture safety
-
-Real data appears in **every** artifact: `classes.csv` carries `scout_name` and an 8-digit
-`attendee_id` per row; `report.html` contains 4,978 attendee-ID references. Zero
-`scoutingevent.com/mobile` URLs appear in generated reports, so QR bearer tokens do not
-propagate downstream.
-
-- `tools/scrub_fixtures.py` covers **all** artifacts and **filenames**.
-- **It verifies itself**: after substitution it scans output for every original name,
-  attendee ID, and QR token, including surname-level partial matches.
-- **Full TDD treatment** with deliberately leaky inputs: a name in a filename, an ID in an
-  HTML attribute, a name only in an email body, and a name that is a substring of another.
-- **Conftest tripwire**: fail if any file under `tests/fixtures/` contains a
-  `scoutingevent.com/mobile/` URL whose token doesn't start with `TESTTOKEN`.
-- **Pre-commit hook** rejecting `*.pdf` at the repo root.
-
-### Committed fixtures must be small
-
-The real `report.html` is **3,092,771 bytes**. Goldens use a **reduced 2–3 scout corpus**;
-HTML is asserted **structurally** by parsing the injected JSON payload, never by
-byte-comparing the document; CSV and JSON are compared in full.
-
-### Fixture PDFs are generated, not committed
-
-Commit the *builder*. PyMuPDF `insert_image` builds the page with the label/value layout
-`value_after_label` (`:176-186`) expects. A second variant draws the QR as vector content
-so `decode_embedded_qr` returns empty and the rendered fallback (`:365-380`) actually runs.
-QR generation uses `cv2.QRCodeEncoder` (OpenCV is already a runtime dependency), with
-`segno` as a test-only fallback if unavailable in the pinned build.
-
-### Required coverage
-
-| Area | Requirement |
+| Drift | Behavior |
 | --- | --- |
-| **Attendee identity** | Two same-named attendees: requirements stay separate, emails and raw files do not collide; slug-equivalent names; `AttendeeKey.short` is non-reversible |
-| `requirement_path` | All 18 observed shapes as a `parametrize` table |
-| Inference purity | Input dictionaries are not mutated (guards the copy at `:672`) |
-| Tree edge cases | Duplicate requirement numbers, repeated headers, empty paths (402 rows), label rows (375), out-of-order rows, parent-lookup collisions |
-| Completion flags | All 5 observed `(REQ, CLASS)` combinations, including 309 `(None, None)` |
-| Choice requirements | Every corpus wording, plus synthesized threshold crossings |
-| Inference consumers | HTML (`:981`) and email (`:783`) pinned **separately** |
-| Schema drift | Critical vs optional vs unknown fields; malformed containers; arbitrary JSON never raises |
-| Schedule payloads | Parsing tested, not only requirement payloads |
-| Dedup | "Prefer the completed duplicate" (`:510`), fixture written first |
-| Retry | Exactly 3 attempts at 500/1000/1500 ms |
-| CSV | Exact header rows (guards `__dataclass_fields__` order at `:1666`, `:1671`); `extrasaction` removal (`:602`) surfaces mismatches |
-| Loaders | All four formats, every header alias |
-| CLI | Defaults, all exit codes, invalid combinations, **CLI/UI config parity** |
-| PDF | Directory/glob ordering, corrupt PDFs, embedded and rendered QR paths, adult filtering, duplicate QRs, strict mode, debug output, stale error-file deletion, case normalization |
-| Atomicity | A failed extraction preserves the prior `scouts.csv` |
-| Template | No `__REPORT_` token survives; a scout named `__REPORT_JS__`; `</script>`, `&`, U+2028/U+2029 |
-| UI routes | Isolated app instances, concurrent-job rejection, **task retention**, cancellation, SSE disconnect/reconnect, registry cleanup, malformed summaries, worker exceptions |
-| Frontend | Upload, download, pause/resume, errors, report opening, button restoration |
-| Packaging | Installed-wheel resource resolution on Windows, macOS, Linux |
-| Bootstrap | Platform/arch selection, lock races, corrupt markers, first install, update throttle, offline start, **checksum failure**, interrupted install, health acknowledgement, rollback, rollback failure, dependency change, browser-version change |
-| Migration | Legacy `app/` → `data/` copy, idempotency, collision handling, reinstall survival |
-| Scrubber | Leaky-input suite |
+| Missing identity, structure, or completion semantics | Fail the attendee or class; open the circuit for repeated systemic failures |
+| Wrong type or impossible invariant | Fail closed and record a redacted diagnostic |
+| Missing optional display value | Continue with a visible placeholder and warning |
+| Unknown added field | Ignore for behavior; include only an aggregate drift count |
 
-`bootstrap/downloader.py` is **not** excluded from testing. Real internet calls are
-excluded; downloader behavior is tested against a local HTTP server or an injected opener.
+The application never updates parsers automatically. A separate, explicitly enabled, low-frequency,
+read-only canary may call the real site in staging and alert on drift. It is not part of default
+local or CI testing.
 
-### Coverage gates
+### External output schemas
 
-**Enforcement mechanism matters**: `pytest --cov` provides a single global `fail_under`,
-not a per-package table. Per-area floors are enforced by explicit
-`coverage report --include=<glob> --fail-under=<n>` invocations in CI, with **branch
-coverage enabled**.
+External artifacts use dedicated DTOs. They do not serialize internal dataclasses through
+`__dataclass_fields__` or `asdict()` as an accidental public schema.
 
-| Package | Floor |
-| --- | --- |
-| `inference/`, `scrape/payloads.py`, `domain/identity.py` | 95% |
-| `inputs/`, `emails/`, `storage/`, `cli/` | 90% |
-| `pdf/` | 80% |
-| `ui/` | 70% |
-| `bootstrap/` | 60% |
-| `scrape/playwright_port.py` | omitted — covered by the tier-3 CI job |
+- JSON and the run completion manifest contain `schema_version`.
+- CSV headers have fixed spelling and order; their schema version is recorded in the run manifest.
+- Writers emit only the current version.
+- Readers accept the current version and explicitly supported prior versions.
+- Future versions are rejected with a clear error.
+- Compatibility goldens cover version upgrades and intentional differences.
 
-The **75% global floor is a Phase-3 milestone, not the final target**; it rises to 85%
-once the UI and bootstrap suites land.
+The PDF-import CSV remains a private input artifact and preserves this exact seven-column order:
 
-### Do not test
+```text
+Attendee Name
+Registrant Type
+QR Code Contents
+Name as Printed
+Source PDF
+PDF Page
+QR Decode Method
+```
 
-`bootstrap/ui.py` (tkinter), `install_webview2` (runs an .exe), `install_chromium_fallback`
-(20-minute download), `desktop.py`'s webview launch, `build.spec`, `os.startfile`, and the
-report's CSS.
+Its model fields remain `attendee_name`, `name_as_printed`, `registrant_type`, `qr_data`,
+`source_pdf`, `pdf_page`, and `qr_decode_method`. Shareable reports replace any existing raw
+`attendee_id` field with `run_attendee_id` in the next schema version.
 
-### Enforced rules
+### Atomic artifact publication
 
-- **`pytest-socket` blocks all network** in the default suite.
-- `markers = ["playwright"]`, `addopts = "-m 'not playwright'"`.
+Every file writer follows one implementation-owned primitive:
 
-### Edge cases observed in real data
+1. Render and validate the complete content before touching the destination.
+2. Create a unique temporary file in the destination directory.
+3. Write, flush, and `fsync` the file.
+4. Atomically publish with `os.replace`.
+5. Clean the temporary file on every failure path.
 
-| Real input | Parses to | Assessment |
+Failure injection covers rendering, write, flush, fsync, and replace from inside the writer. A
+failed operation leaves the prior artifact byte-for-byte intact.
+
+For multi-file reports, individual artifacts are atomic and a versioned completion manifest is
+published last. Consumers treat a directory without a valid completion manifest as incomplete.
+
+### Report template contract
+
+The large embedded template moves to package resources without adding Jinja2. Static placeholder
+validation happens before data insertion:
+
+1. Verify the template contains exactly the expected CSS, JavaScript, and data placeholders.
+2. Substitute CSS and JavaScript.
+3. Serialize and escape JSON for a script element.
+4. Substitute data last.
+5. Parse the embedded JSON from the finished HTML and assert round-trip equality.
+
+Do not assert that no `__REPORT_` substring exists after data insertion; legitimate Scout data may
+contain that text. Test `</script>`, `&`, U+2028, U+2029, and data containing each placeholder.
+
+### Local diagnostics and future telemetry
+
+Local diagnostics are useful without telemetry:
+
+- structured, rotating local logs;
+- run IDs and stable error codes;
+- boundary context with automatic secret redaction;
+- a user-created sanitized diagnostic bundle;
+- no telemetry and no network export by default.
+
+Application code depends on an `ObservabilityPort`. The default is `NoopObservability`. Core code
+does not import OpenTelemetry. Event names and attributes are versioned and allowlisted; names,
+paths, upstream IDs, run attendee IDs, QR data, URLs, cookies, and tokens are forbidden.
+
+A `TelemetrySpool` protocol reserves the future offline-sync contract: bounded durable storage,
+event IDs, at-least-once delivery with deduplication, consent and configuration gates, and a
+non-blocking failure policy. A future optional capability may implement it with a SQLite outbox or
+OpenTelemetry Collector storage. That implementation is not part of this refactor.
+
+## Installed data and migration
+
+### Migration scope
+
+Migration safety is for the installed application's user data, not for moving source files around
+the repository. The legacy source is the installed `app/` directory containing `scouts.csv`,
+`pdf-uploads/`, and `runs/`. The destination is the resolved production data root.
+
+### Transaction contract
+
+```text
+discover legacy data
+        |
+        v
+hash source manifest (relative path, size, SHA-256)
+        |
+        v
+copy into unique sibling staging paths
+        |
+        v
+verify every staged byte and collision decision
+        |
+        v
+atomic per-artifact promotion
+        |
+        v
+write migration marker last
+        |
+        v
+leave legacy originals untouched
+```
+
+Required behavior:
+
+- Migration is copy-only. It never moves or deletes a legacy source.
+- Every file is verified with SHA-256. Directory counts alone are insufficient.
+- Staged files are flushed and `fsync`ed before verification and promotion; directory metadata is
+  synchronized where the platform supports it.
+- Existing unequal destinations are never overwritten. The imported copy receives the next unique
+  suffix such as `.legacy-1`, `.legacy-2`, and is recorded in the marker.
+- Staging paths are siblings of their final targets so `os.replace` stays on the same filesystem.
+- The migration marker is the commit record and is written only after every promotion succeeds.
+- Interrupted staging and promotion are safe to retry. Unique temp names prevent one run from
+  adopting another run's partial file.
+- The marker records source and destination roots, source hashes, final paths, collision names,
+  application version, and timestamp.
+- The old directory receives a small marker text file that explains the active data location and
+  tells an operator not to continue editing the legacy copy.
+
+### Post-cutover split-brain detection
+
+Leaving the source in place creates a risk that an old launcher or a person writes new data there.
+On every launch while the legacy directory exists:
+
+1. Hash the legacy source and compare it with the cutover manifest.
+2. If unchanged, continue.
+3. If changed, copy the changed legacy state into a uniquely named private recovery snapshot.
+4. Warn with the active data path and recovery snapshot path.
+5. Never overwrite or automatically merge active data.
+6. The application may block mutating operations until the user acknowledges the warning or chooses
+   an explicit recovery action.
+
+Tests cover changes before, during, and after cutover, including a legacy writer racing with the
+migration. The real installation is manually backed up before the first production migration.
+
+## Packaging, installation, and updates
+
+### Python project and lock contract
+
+- Use an explicit PEP 517 backend, initially Hatchling.
+- `uv.lock` is the canonical dependency resolution and is committed.
+- Development tools live in `[dependency-groups].dev`.
+- CI uses `uv sync --locked` and fails if `pyproject.toml` and `uv.lock` disagree.
+- `requirements-launcher.txt` is generated from the lock, pinned with hashes, and checked for drift.
+- Pre-commit and repository instructions tell contributors when lock and export files must change.
+
+The build contract is:
+
+1. `uv build` creates both sdist and wheel.
+2. Inspect both archives for expected package data and absence of `raw_data/`, private fixtures,
+   tests, logs, tokens, and secrets.
+3. Install the wheel in a clean temporary environment outside the repository.
+4. Verify imports, entry points, resources, and a minimal command.
+5. Build a wheel from the produced sdist and repeat the smoke test.
+
+### Foundation launcher bridge
+
+The foundation phase does not require replacing the current source-copy installer immediately.
+`source_sync` must copy `src/scoutmb/` to `app/scoutmb/`, and `bootstrap/build.spec` must include
+that package. A clean-root launcher health test proves the installed package imports and starts.
+
+This bridge is temporary. Versioned wheel or release-payload installation replaces it in the
+transactional release phase.
+
+### Thin installer and capability downloads
+
+The e-mailed installer contains only the launcher, standard-library bootstrap code, compact UI,
+and metadata needed to obtain a release. It does not contain a complete wheelhouse, browser, or
+PDF computer-vision stack.
+
+| Capability | Contents | Install behavior |
 | --- | --- | --- |
-| `#3b`, `#3(b)`, `6.a.1.` | `('3','b')`, `('6','a','1')` | correct |
-| `#(c)` | `('7','c')` | correct — documented malformed case |
-| `#2.Option.A.(1)` | `('2','option','a','1')` | correct; word becomes a token |
-| `#5..Opt.A.(1)` | `('5','opt','a','1')` | correct — punctuation ignored by construction |
-| `Note.` (375 rows) | `('7','note')` | **suspect** |
-| `''` (402 rows) | `()` | **suspect** — empty number *and* description |
+| Core application | UI, reporting, inference, CSV/JSON/XLSX support, `openpyxl` | Downloaded as immutable release payload on first install |
+| ScoutingEvent acquisition | Playwright Python package and adapter | Downloaded when acquisition is enabled; required for the main online workflow |
+| Browser fallback | Playwright Chromium binary | Downloaded only if a compatible system browser is unavailable or rejected |
+| PDF import | PyMuPDF, OpenCV, NumPy, PDF extraction adapter | Optional, separate feature download |
+| Telemetry | OpenTelemetry SDK/exporter and spool implementation | Future optional capability, not shipped now |
 
-Two open questions, settled by direct tests of tree construction once inference is
-decomposed:
+Downloads are immutable and versioned, support resume, verify size and SHA-256, and are cached.
+Runtime installation never resolves dependencies from PyPI. A controlled release location
+publishes the exact locked platform payload. After the first successful install, the last known-good
+release and installed capabilities work offline. A larger separately distributed offline kit may
+contain all payloads.
 
-1. **Label rows graft onto the preceding requirement.** `Note.` has no top-level number,
-   so the last-seen one is prepended, making a note a *child* of requirement 7. If
-   requirement 7 is a "Do TWO of the following" choice, the note enters the
-   satisfied-child arithmetic. **Hypothesis, not a confirmed defect.**
-2. **402 fully empty rows** collapse to path `()` and flow through the pipeline.
+### Transactional application releases
 
-Resolved, recorded to prevent re-investigation: `choice_requirement_count` handles
-`do|complete|choose|select|perform` (`:654`). Measured against every unique corpus
-description: **22 matched, 0 missed.** No defect.
+```text
+releases/
+  <version>/                 immutable application environment
+capabilities/
+  browser/<version>/         version-scoped fallback browser
+  pdf/<version>/             version-scoped optional feature
+state/
+  current.json               atomic pointer to active release
+  last-known-good.json
+  capability-references.json
+cache/
+data/                        user data, never inside a release
+logs/
+```
 
-Also recorded: `#2.Option.A.(1)` and `#5..Opt.A.(1)` tokenize to `'option'` and `'opt'`,
-so logically-related rows can fail strict prefix matching — almost certainly *why* the
-header-stack fallback exists.
+No symlink is required. `current.json` is a small checksummed pointer manifest written through the
+atomic file primitive. Release installation is:
 
----
+1. Download into a unique staging directory.
+2. Verify names, sizes, SHA-256, archive paths, and platform metadata.
+3. Construct a new versioned environment; never mutate the live release.
+4. Run core health and capability readiness checks.
+5. Atomically replace `current.json`.
+6. Retain the previous acknowledged release and referenced capabilities.
+7. Roll back the pointer if readiness or subsequent launch acknowledgement fails.
 
-## Python conventions
+Capability artifacts are version-scoped and reference-counted. A new Playwright version cannot
+silently replace the fallback browser required by the known-good release.
 
-- **Ruff** for lint and format, explicit rule selection. Run `ruff format` as a **separate
-  formatting-only commit**.
-- **mypy strict** on `domain`, `inference`, `storage`, `inputs`; lenient elsewhere;
-  `ignore_missing_imports` for `fitz`, `cv2`, `webview`.
-- **`logging` replaces all 19 `print()` calls.** Library modules take module loggers and
-  never configure handlers. The three silent `except Exception:` sites become
-  `logger.exception(...)`.
-- **`ScoutmbError` hierarchy** replaces raw `RuntimeError` (five in `bootstrap/`).
-- **Lazy heavyweight imports** — `openpyxl` inside `load_xlsx`.
-- **Shared loader helpers** so a new alias is added in one place.
-- Protocols over ABCs, frozen slotted dataclasses, `pathlib`, `importlib.resources`.
+### Health and readiness
+
+An import-only smoke test and "first HTTP request served" are insufficient. Release readiness has
+two levels:
+
+- **Core health:** import package, load serializers and templates, resolve and write the configured
+  data root, create the FastAPI app, and exercise required local routes.
+- **Capability readiness:** verify the selected ScoutingEvent browser engine and any enabled PDF
+  capability with local fixtures.
+
+The launcher uses a nonce-bearing, launcher-only local readiness probe rather than accepting any
+ordinary request as acknowledgement. After a configured number of failed acknowledgements, it
+restores the last-known-good pointer and reports the rollback.
+
+Update checks have short deadlines, run no more than once per day, and never block offline startup.
+
+### Browser selection
+
+Browser selection is an adapter concern and is tested as a deterministic capability matrix.
+
+```text
+Windows: installed Edge (msedge)
+             -> installed Chrome (chrome)
+             -> downloaded Playwright Chromium
+
+macOS:   installed Chrome
+             -> downloaded Playwright Chromium
+             -> experimental Safari adapter only by explicit override
+```
+
+Safari uses `safaridriver`; Playwright WebKit is not treated as Safari. The last successful engine
+is remembered with operating-system, Playwright, and browser versions. An explicit user override
+wins. Capability failures may fall back; authentication, validation, and schema failures may not be
+hidden by trying another browser.
+
+### Integrity without signing
+
+For the current internal-troop distribution, release metadata and payloads use TLS, immutable names,
+size allowlists, archive-path validation, and SHA-256 corruption checks. This detects accidental
+damage but does not provide strong publisher authenticity when metadata and payload are compromised
+together.
+
+That authenticity gap is accepted temporarily under D23. The design must not call the manifest
+"signed" or claim checksum verification prevents malicious substitution. Broader distribution or a
+changed threat model reopens signing, notarization, key rotation, downgrade, and freeze protection.
+
+## Testing strategy
+
+### Gate 1 behavior contract matrix
+
+Before production code moves, every legacy observable is named in a matrix with input, output,
+error behavior, and test. At minimum it covers:
+
+| Area | Contract examples |
+| --- | --- |
+| Loaders | Four formats, aliases, encoding, ordering, missing columns, invalid rows |
+| PDF extraction | Discovery order, embedded and rendered QR, adult filtering, duplicates, strict mode, corrupt PDFs, stale error files |
+| Browser orchestration | Navigation, discovery, form payloads, retry delays, dedup, error accumulation, exact status handling |
+| Inference | All observed requirement paths and flag pairs, duplicate numbers, notes, empty paths, choice thresholds, both consumers |
+| CLI and UI | Defaults, inversions, exit codes, invalid combinations, config parity, progress and quiet behavior |
+| Outputs | Exact headers, encoding, ordering, filenames, JSON shapes, HTML embedded data, error text |
+| Installer | First install, clean-root launch, offline launch, interrupted downloads, corrupt payload, rollback, capability selection |
+
+Gate 1 stays closed until the matrix passes against the legacy implementation.
+
+### Network policy
+
+`pytest-socket --disable-socket` applies suite-wide by default. Loopback is enabled only for tests
+that explicitly need a local fake site or HTTP server. No default test, local command, pre-commit
+hook, or CI job calls `scoutingevent.com`.
+
+Live service checks use a separate marker and staging job with all of these controls:
+
+- explicit operator opt-in;
+- a safe test account or approved test record;
+- read-only operations only;
+- low frequency and rate limit;
+- no execution in normal local or pull-request CI;
+- redacted retained diagnostics.
+
+### Test layers
+
+```text
+many:      pure unit and property tests
+           contract tests for legacy and new adapters
+           synthetic fixture and schema-profile tests
+
+some:      local fake ScoutingEvent through Playwright
+           local HTTP downloader and release server
+           packaging, migration, rollback, and failure injection
+
+few:       opt-in staging smoke against the real service
+           platform installer smoke on Windows and macOS
+```
+
+The Playwright fake must implement the actual call surface used by production code. In particular,
+`FakePage` supports `set_default_timeout` and `on`; `FakeResponse.request.post_data` is present; and
+fixture payloads use the live `CLASS_NAME_ONLY` and `HAS_REQ` fields. Loose mocks that accept any
+attribute are forbidden at this boundary.
+
+### Synthetic and private corpora
+
+Committed fixtures are small, deterministic, and fully synthetic. They include deliberately leaky
+values for privacy-tripwire tests, but never transformed real Scout data.
+
+When local `raw_data/` exists, `pytest --corpus-dir raw_data` runs the complete synthetic suite and
+then an extra private-corpus suite. Before use, a local manifest lock verifies every source file,
+expected categories, schema versions, aggregate counts, and a tree hash. The command:
+
+- parses every file;
+- never modifies the source corpus;
+- writes derived data only under a temporary or gitignored directory;
+- compares normalized outputs and artifact-category counts;
+- prints only redacted aggregates and diffs;
+- skips clearly when the corpus is absent;
+- requires an explicit manifest-update command when the corpus legitimately changes.
+
+A local scrubber may create a convenient private derived corpus, but it is fail-closed, uses a
+schema allowlist, scans all identifiers and filenames, and stages before promotion. Its output is
+never committed.
+
+### Legacy-to-new parity
+
+Implementation-neutral contract tests run a legacy adapter and a new adapter over the same
+synthetic inputs and, when enabled, the verified private corpus. Results are normalized for
+injected clocks and run UUIDs. Every non-equal field must appear in a reviewed intentional-change
+list. The legacy adapter is removed only after parity is green.
+
+### Required focused coverage
+
+- Same-named and slug-equivalent attendees remain isolated; missing upstream ID fails closed;
+  resumes retain run UUIDs and independent runs do not.
+- All observed `requirement_path` shapes and completion-flag pairs.
+- Inference purity, duplicate handling, parent selection, and both output consumers.
+- Schema drift, absent versus null, malformed containers, structural fingerprints, and circuit
+  breaking.
+- Retry attempt classification, exact delays under a fake clock, deadlines, cancellation, and
+  `Retry-After` bounds.
+- The exact seven PDF-import columns and exact external schema versions.
+- Atomic write failures inside render, write, flush, fsync, and replace.
+- Template placeholder validation before insertion and embedded JSON round-trip after insertion.
+- FastAPI app isolation, task retention, cancellation, SSE reconnect, registry cleanup, malformed
+  summaries, and worker errors.
+- Source-copy launcher bridge, package contents, clean installs, release pointer switch, offline
+  last-good startup, migration interruptions, split-brain detection, rollback, and capability
+  reference counting.
+- Redaction and diagnostic-bundle scans.
+
+### Coverage policy
+
+Branch coverage covers all first-party Python code from the first test phase. CI records the honest
+baseline and rejects regressions. New pure core and payload-validation modules target at least 95%
+branch coverage; new feature and file adapter code targets at least 90%. Platform/UI adapters may
+start lower only with explicit uncovered-line justification and must rise as their test harnesses
+land.
+
+The behavior matrix, mutation/failure tests, and parity suite are correctness gates. A global
+percentage never substitutes for them.
+
+### Performance gate
+
+Before thresholds are chosen, capture a reproducible baseline for:
+
+- launcher and application startup;
+- end-to-end synthetic and private-corpus runtime;
+- ScoutingEvent request count per attendee and class;
+- report generation;
+- peak memory;
+- output artifact sizes;
+- capability download and install time;
+- compressed installer size.
+
+Request counts and algorithmic growth receive hard assertions. Wall-clock comparisons run in a
+separate tolerant job on controlled runners and report trends before they become blocking. The plan
+must name the baseline command, corpus, machine class, permitted variance, and regression threshold.
 
 ## Continuous integration
 
-CI is **staged across phases** — a workflow defined up front cannot pass. `pytest --cov`
-exits non-zero with no tests collected, and a wheel-build job cannot build `src/scoutmb`
-before it exists.
+CI grows with the four execution phases but every introduced job is green when merged:
 
-| Job | Added in | Runs on | Contents |
-| --- | --- | --- | --- |
-| `lint` | Phase 0 | ubuntu | ruff check, ruff format --check |
-| `types` | Phase 0 | ubuntu | mypy on whatever exists |
-| `test` | Phase 1 | ubuntu, windows | pytest, `pytest-socket`, branch coverage |
-| `coverage-floors` | Phase 3 | ubuntu | per-area `coverage report --fail-under` |
-| `lock` | Phase 0 | ubuntu | `uv.lock` matches `pyproject.toml`; `requirements.txt` matches the lock |
-| `build` | Phase 2 | ubuntu | build wheel; verify packaged templates and static assets |
-| `wheel-install` | Phase 2 | windows, macos | install the wheel into a standalone runtime; resolve package resources |
-| `playwright` | Phase 5 | ubuntu | tier-3 tests against the local fake site; adapter changes + nightly |
-| `launcher` | Phase 8 | windows (+ macos Phase 9) | PyInstaller build smoke test |
-| `installer` | Phase 8 | windows, `workflow_dispatch` | real bootstrap, `SCOUTMB_FORCE_CHROMIUM_FALLBACK=1` (~10 min) |
-
-## Design decisions
-
-| Decision | Rationale |
+| Job | Purpose |
 | --- | --- |
-| Keep `errors.py` hierarchy | Designed upfront by explicit choice |
-| Keep `ProgressSink` with multiple implementations | Required by planned future work, not speculative |
-| Keep application self-update | Explicit product requirement; safety supplied by integrity verification, A/B environments, and health-gated rollback |
-| Launcher does **not** self-update | `bootstrap/` is frozen into the exe and excluded from the wheel; claiming otherwise would be false |
-| Per-collaborator injection, not one `RunContext` | Clock, IDs, jitter, sleep, and progress are unrelated concerns; bundling them is a service bag |
-| Wire-boundary `Mapping[str, Any]`, not `TypedDict` | The upstream API is not ours; typing it encodes an unenforceable assumption |
-| Drift severity policy, not blanket continue | Continuing past a missing completion flag produces confidently wrong results |
-| No Jinja2 | One substitution point; brace-escaping 206 CSS + 278 JS lines is a corruption risk, evidenced at `:886-893` |
-| Pre-built wheel, not `pip install -e .` | Needs no build backend on the user's machine; verified by `wheel-install` CI |
-| `requirements.txt` retained, generated and pinned | Still the installer's pip input and gates `compute_requirements_hash` |
-| Copy-only legacy migration | One install exists; deletion buys nothing and risks everything |
-| Technical layout | Deliberate deviation from CUPID's domain-based principle, appropriate at this size |
+| `lint-format` | Ruff lint and format check |
+| `types` | Python 3.12 mypy policy by package |
+| `lock` | `uv sync --locked`; launcher export matches lock |
+| `unit-contract` | Offline tests, branch coverage, synthetic fixtures, legacy/new parity |
+| `local-playwright` | Local fake ScoutingEvent; no external network |
+| `package` | sdist/wheel inspection and clean installation from wheel and sdist |
+| `architecture` | Reverse-import and cycle checks |
+| `launcher-windows` | Thin-installer size, clean-root start, release and rollback state machine |
+| `launcher-macos` | Platform paths, Chrome/Chromium selection, clean-root start |
+| `private-corpus` | Local developer command only; not hosted CI unless a private runner is approved |
+| `live-smoke` | Manual/staging, read-only, explicitly opted in; never a required PR job |
+| `performance` | Controlled, tolerant wall-time trend plus hard request-count checks |
 
-## Phases
+## Execution phases and go/no-go gates
 
-Each phase leaves the app runnable and the suite green.
+The specification owns why and behavioral contracts. The implementation plan owns file-by-file
+execution order and commands. There is one plan with four phases, not several disconnected plans.
 
-| # | Work | Exit criterion |
-| --- | --- | --- |
-| **0** | Tooling only, no source changes: pyproject, uv.lock, ruff, mypy, pre-commit, `lint`/`types`/`lock` CI. Separate `ruff format` commit. Note the in-flight refactor in `CLAUDE.md` | Green CI on untouched source; **no test or build job yet** |
-| **1** | Characterize in place against **flat** modules, including `process_scout` via monkeypatched module functions. Build `tests/factories/`. Scrubber and `verify_corpus.py` via TDD. Add `test` CI job | Safety net green; **zero app code moved** |
-| **2** | **Attendee identity fix** (behavior change, TDD, own phase) + atomic output writes. Add `build` / `wheel-install` CI | Same-named attendees provably isolated; goldens regenerated against corrected identity |
-| **3** | Data-root resolution (`UiSettings`, `SCOUTMB_DATA_DIR`) + legacy `app/` → `data/` migration, **before** any UI move | Pre-existing `data/scouts.csv` survives a full reinstall; migration idempotent |
-| **4** | Package skeleton + root shims. Mechanical move: `domain` → `storage` → `inference` → `inputs` → `scrape` → `reporting` → `emails` → `pdf` → `cli` → `ui`. Delete and rebuild the code-review-graph | Phase 1 tests pass at new import paths |
-| **5** | Extract the template (golden written **first**). Split `process_scout` at `SchedulePort` with `payloads.py` drift policy. Add `playwright` CI job | Contract suite green on all ports; tier-3 job green |
-| **6** | Typed config + per-collaborator injection. *Highest risk of a silently flipped default* | Test asserting `config_from_args(parse([minimal argv]))` equals a hand-written `ScrapeConfig` field by field, including the `scout_delay_ms=None` sentinel and the `no_html` inversion |
-| **7** | Logging + unified `ProgressSink` | Terminal format signed off; `[i/n] name` line kept verbatim |
-| **8** | UI app factory, `JobRegistry`, routers, the four UI defects, **and the `app.js` half of the report-opening change** | Routes tested under `TestClient`; frontend opens the report via a real anchor |
-| **9** | Bootstrap rebuild: `manifest.py`, platform modules, standalone runtime, A/B environments, release manifest + SHA-256 verification, health-gated rollback, browser revalidation | Windows launcher end to end, including forced-checksum-failure and forced-rollback tests |
-| **10** | macOS: platform implementations, CI matrix, notarization | A macOS launcher that runs |
-| **11** | Cleanup: dead code, raise the global floor to 85%, rewrite `CLAUDE.md` / `README.md` / `AGENTS.md` / `GEMINI.md`, final graph rebuild. **Shims retained** until the following release | Docs match reality |
+### Phase A: Tooling and complete characterization
 
-Phases 0–1 and 9 are independently reviewable; 2–8 must land in order. Phases 0–8
-(application) and 9–10 (launcher) are separable efforts; **phase 8 is a clean stopping
-point.**
+Add packaging metadata, dependency locking, offline test enforcement, synthetic fixtures, optional
+private-corpus verification, and the complete legacy behavior matrix. Production behavior is not
+moved yet.
 
-## Verification
+**Gate 1:** All named legacy observables pass, default tests prove external network is blocked, the
+lock and package metadata are reproducible, and performance baselines are recorded.
 
-- `ruff check . && ruff format --check . && mypy src && pytest --cov` green at every phase.
-- Legacy invocations still work via shims; `troop349 extract-pdf` / `troop349 download`
-  produce **byte-identical CSV headers**.
-- `troop349 ui`, then exercise upload → extract → download → open report → generate emails.
-- Diff generated `report.html` against a pre-refactor capture with a frozen clock.
-- Installer on macOS: `SCOUTMB_BOOTSTRAP_ROOT=<tmp> python -m bootstrap.main`; assert the
-  package imports *and* a pre-existing `data/scouts.csv` survives.
-- **Tag the pre-refactor commit** so it can be bisected from a Windows machine.
-- **Before Phase 9 ships, snapshot the one live installation's `app/` directory** to
-  external storage. The migration is copy-only and tested, but one irreplaceable dataset
-  justifies a manual backup.
+### Phase B: Package boundaries, identity, and outputs
 
-## Risks
+Introduce the `src/` package and compatibility shims incrementally. Establish the pure core,
+ScoutingEvent port, attendee-session boundary, typed identity, versioned DTOs, and atomic artifact
+writer. Run legacy and new adapters side by side.
+
+**Gate 2:** Same-named attendees cannot merge or collide; missing IDs fail closed; no shareable
+artifact leaks upstream identity or QR tokens; output failures preserve prior files; contract parity
+is green except for reviewed intentional changes.
+
+### Phase C: Storage, migration, and transactional releases
+
+Resolve the installed data root, rehearse copy-only migration, add split-brain detection, create
+versioned release directories, and switch releases through `current.json` with readiness and
+rollback.
+
+**Gate 3:** A throwaway copy of the live legacy layout migrates with byte hashes, interruption and
+collision tests pass, old writes are detected and preserved, the original remains untouched, and a
+failed release returns to the last known-good application.
+
+### Phase D: Thin installer, capabilities, and operational hardening
+
+Enforce the e-mail size budget, implement controlled payload downloads and caches, separate
+ScoutingEvent, Chromium fallback, and PDF capabilities, finish browser selection, add local
+diagnostics and telemetry stubs, and run platform and performance verification.
+
+**Gate 4:** The installer satisfies the size budget, first install and offline restart work on
+Windows and macOS, browser fallback is proven with local fixtures, optional capabilities are
+isolated, diagnostics are redacted, and no default path contacts the real service.
+
+### Plan task contract
+
+Each plan task must have one observable outcome and include:
+
+- symbol-based source anchors rather than brittle line numbers;
+- inputs, outputs, invariants, and failure behavior;
+- the RED test, implementation change, exact verification command, and expected result;
+- privacy and compatibility impact;
+- rollback or recovery path;
+- acceptance criteria mapped one-to-one to named tests.
+
+Mechanical movement and deliberate behavior changes are separate tasks. Each gate includes a
+go/no-go checklist and stops execution when it is not satisfied.
+
+## Acceptance criteria
+
+The refactor is complete only when:
+
+1. The legacy behavior matrix and new contract suite are green on fully synthetic data.
+2. Local private-corpus verification, when available, runs in addition to synthetic tests and
+   produces only redacted output.
+3. Default tests demonstrably cannot call `scoutingevent.com`.
+4. Two same-named attendees remain separate through acquisition, inference, reports, and resume.
+5. Shareable artifacts and logs contain no upstream IDs or QR tokens.
+6. All output writers survive injected failures without corrupting prior artifacts.
+7. External schemas are versioned and compatibility-tested.
+8. A clean sdist and wheel install outside the repository can run the CLI and local web app.
+9. A copy of the legacy installed layout migrates without altering the source, handles collisions,
+   and detects later legacy writes.
+10. A bad application release or capability fails readiness and returns to the known-good version.
+11. The e-mailed installer remains within the size budget and downloads immutable locked payloads
+    without using PyPI at runtime.
+12. Windows selects Edge, then Chrome, then downloaded Chromium; macOS selects Chrome, then
+    downloaded Chromium; Safari remains an explicit experiment.
+13. Local logs and diagnostic bundles are useful and redacted; telemetry remains off and no-op by
+    default.
+14. Performance and request-count gates show no unacceptable regression.
+15. Repository architecture tests and documentation match the installed application.
+
+## Risks and mitigations
 
 | Risk | Mitigation |
 | --- | --- |
-| **Hazards 1–3 destroy the live install's data** | Explicit `data_root`; copy-only migration in Phase 3 **before** the UI move; survival regression test; manual backup before Phase 9 |
-| **Same-named attendees corrupt each other's records** | Fixed in Phase 2, before any code moves, with its own failing tests |
-| **Stale `.code-review-graph/graph.db`** — `CLAUDE.md` instructs agents to trust it *before* reading files, so after the move an agent answers confidently about a codebase that no longer exists | Delete at the start of Phase 4, rebuild after **every** phase; note the refactor in `CLAUDE.md` in Phase 0. Check `.gemini/`, `.remember/`, `.kiro/`, `.qoder/` |
-| Corrupt or substituted update artifact | SHA-256 against a signed manifest, size and name allowlists, atomic download, downgrade prevention |
-| Update leaves a broken environment | A/B environments, candidate smoke test, atomic switch, health acknowledgement, retained known-good |
-| Playwright/browser version skew | Mandatory revalidation when the resolved version changes |
-| CSV column order derives from dataclass field order | Exact header rows pinned in Phase 1 |
-| Template reassembly shifts bytes | Golden written before extraction |
-| Scrubber leaks real data | Self-verifying over all artifacts and filenames; own TDD suite; conftest tripwire; `/raw_data/` gitignored |
-| Upstream API changes shape | Severity-tiered anti-corruption layer; property-based tests assert no crash on arbitrary payloads |
-| Windows installer untestable on macOS | `workflow_dispatch` real-bootstrap job; tagged pre-refactor commit |
-| 3.14 dev vs 3.12 shipped | `requires-python`, ruff `target-version`, mypy `--python-version`, 3.12 primary in CI; pinned `requirements.txt` |
-| Root shims become permanent | `FutureWarning` (visible, unlike `DeprecationWarning`); removed one release after introduction |
-| Adult filtering runs twice (`pdf:23`, `cli:212`) | Unify the constant, **keep both call sites** — inputs skipping the PDF stage still need the second |
-| macOS Gatekeeper blocks unsigned launcher | Apple Developer Program is a purchasing decision tracked outside this plan |
-| Scope creep from discovered bugs | Characterization tests pin bugs; fixes are separate changes with their own failing tests |
+| Same-named attendees corrupt records | Typed upstream identity in memory; independent run UUID in outputs; fail closed on missing identity |
+| Legacy and new code diverge during migration | Implementation-neutral parity suite and one plan with hard gates |
+| Installed data is lost or split across roots | Explicit data root, copy-only hashed migration, originals retained, split-brain detection, manual backup |
+| Upstream schema changes silently | Validated object boundary, fixture profiles, structural fingerprint, fail-closed drift policy, opt-in canary |
+| Default tests leak data or hit the real site | Synthetic-only committed fixtures, `pytest-socket`, private local corpus, separate live marker |
+| Output fails halfway | Render first, same-directory temp, fsync, atomic replace, completion manifest last |
+| Thin installer becomes a hidden online dependency | Resumable controlled downloads, cached known-good payload, optional offline kit, offline restart tests |
+| Update installs corrupt or incompatible application | Immutable versioned releases, integrity checks, readiness probe, atomic pointer, known-good rollback |
+| Unsigned metadata is maliciously replaced | Accepted D23 risk for internal distribution; do not overclaim checksums; reopen signing before distribution expands |
+| Playwright and browser versions drift | Version-scoped capabilities, readiness checks, remembered successful engine keyed by versions |
+| Safari fails on the legacy site | Chrome is the macOS default; Safari adapter remains explicit and experimental |
+| Optional PDF stack leaks into core installer | Capability package boundary and clean-core import tests |
+| Architecture becomes ceremonial | Protocols only at real seams; vertical slices; merge unjustified tiny modules |
+| Coverage creates false confidence | Behavior matrix, failure injection, parity, privacy scans, and request-count assertions remain separate gates |
+
+## Decision appendix
+
+All decisions below are locked unless a later design review explicitly supersedes one.
+
+| ID | Decision | Consequence |
+| --- | --- | --- |
+| **D1** | Keep one execution plan with hard go/no-go gates. | Stop after characterization, identity/output, and migration/release rehearsal when a gate is red. |
+| **D2** | Preserve the existing source-copy launcher bridge for the foundation. | Copy `src/scoutmb` into the installed app, include it in `build.spec`, and prove a clean-root launch; replace the bridge later with versioned payload installation. |
+| **D3** | Treat the upstream attendee ID as sensitive typed identity and fail closed when absent. | No name-based or unresolved identity buckets. D25 defines the separate output identity. |
+| **D4** | Make `uv.lock` canonical and derive the launcher's pinned, hashed requirements from it. | CI uses locked sync and fails on lock/export drift. |
+| **D5** | Define migration safety for installed user data. | Stage, SHA-256 verify, preserve collisions uniquely, publish atomically, write the marker last, and never delete originals. |
+| **D6** | Resolve production storage explicitly. | Constructor override, exact `SCOUTMB_DATA_DIR`, then `platformdirs`; working directory only in explicit development mode. |
+| **D7** | Commit only deterministic fully synthetic fixtures. | Real corpus and any locally scrubbed derivative remain private and gitignored. |
+| **D8** | Require a complete legacy behavior contract matrix before movement. | Gate 1 remains closed until all observable formats, flags, errors, delays, and output schemas are pinned. |
+| **D9** | Never call `scoutingevent.com` outside an explicit integration or staging smoke test. | Suite-wide socket blocking; local fake services; separately marked, opted-in, read-only live smoke. |
+| **D10** | Measure all first-party code from the start without using coverage as the correctness gate. | Honest baseline, no regression, high branch expectations for new core code, plus contract gates. |
+| **D11** | Use one atomic artifact-publication contract. | Render first, unique same-directory temp, flush/fsync, `os.replace`, cleanup, and manifest last. |
+| **D12** | Allow a verified private corpus to augment local tests. | `pytest --corpus-dir raw_data` always runs synthetic tests too, verifies a manifest lock, preserves originals, and emits redacted results. |
+| **D13** | Compare legacy and new code through implementation-neutral adapters. | Normalize deterministic fields, review intentional changes, and remove legacy only after parity. |
+| **D14** | Keep raw upstream identity and QR tokens out of shareable outputs. | Raw values remain at the upstream/private boundary; sensitive export is explicit and warned. |
+| **D15** | Build a real Python distribution. | Explicit backend, sdist and wheel, archive inspection, clean install, and wheel rebuilt from sdist. |
+| **D16** | Version external output schemas through dedicated DTOs. | Exact CSV order, JSON/run schema versions, current writer, supported readers, future-version rejection, and compatibility goldens. |
+| **D17** | Install application releases transactionally. | Versioned immutable directories, whole-candidate staging, readiness, atomic `current.json`, known-good rollback, and version-scoped capabilities. |
+| **D18** | Keep the e-mailed installer thin and move large capabilities to downloads. | Hard 18 MB attachment budget, no bundled wheelhouse/browser/PDF stack, cached controlled payloads, optional offline kit. |
+| **D19** | Use hexagonal boundaries with a functional core and vertical feature slices. | Avoid Clean Architecture ceremony; construct adapters outside and pass them inward; enforce import direction. |
+| **D20** | Add local diagnostics and an OpenTelemetry-shaped future seam. | No-op offline default, redacted event schema, bounded spool protocol, no OpenTelemetry import in core. |
+| **D21** | Establish performance baselines before selecting time thresholds. | Hard request-count and complexity assertions; tolerant controlled wall-time job. |
+| **D22** | Isolate the unowned legacy service behind an attendee-session gateway and drift detector. | Browser-backed initial adapter, validated `object` payloads, fail-closed schema policy, controlled retries, read-only canary, OS-specific browser fallback. |
+| **D23** | Defer signing and notarization while use remains internal to the troop. | Keep corruption checks and integrity validation, document the authenticity gap, and revisit before broader distribution or threat-model change. |
+| **D24** | Let the spec own contracts and the plan own execution order. | Rewrite the plan into four phases; each task has one observable outcome, RED test, commands, recovery, and named acceptance tests. |
+| **D25** | Use a full UUIDv4 per attendee per run for output identity. | Persist it in the private run checkpoint for resume; generate an unrelated value for each independent run; no HMAC, hash, UUID prefix, or UUIDv7. |
+| **D26** | Detect writes to the abandoned legacy data root after cutover. | Compare source hashes each launch, preserve changed state as a recovery snapshot, warn or block mutation, and never auto-merge or overwrite active data. |
 
 ## Open questions
 
-None blocking. The two suspect `requirement_path` behaviors are settled by direct tests of
-tree construction in Phase 4 rather than by advance decision, and any resulting fix is
-scheduled separately per the risk table.
+None block rewriting the implementation plan. D23 is deferred, not unresolved. Suspected legacy
+inference defects remain characterized behavior until separate fixes are proposed.
