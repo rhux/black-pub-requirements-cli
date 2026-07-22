@@ -8,7 +8,7 @@
     "value": "dcb9625c8e019f43dff94f2d1c49f53e98056d4956f95d2f058431fa4b096a78",
     "mismatchBehavior": "If the plan .md changed, regenerate this sidecar before executing."
   },
-  "lastUpdated": "2026-07-22T22:09:34Z",
+  "lastUpdated": "2026-07-22T22:11:04Z",
   "tasks": [
     {
       "id": 1,
@@ -148,7 +148,7 @@
     {
       "id": 20,
       "subject": "Gate 1a: In-place correctness go/no-go",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         2,
         3,
