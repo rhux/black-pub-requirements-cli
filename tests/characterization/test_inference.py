@@ -72,7 +72,7 @@ def test_leaf_and_ancestor_selection():
         ),
         asdict(make_requirement(requirement_number="#3b", requirement_id="leaf")),
     ]
-    entries = build_missing_requirements([_scout(reqs)])["Avery Archer"]["Chess"]
+    entries = build_missing_requirements([_scout(reqs)])["90000001"]["badges"]["Chess"]
     by_num = {e["requirement_number"]: e for e in entries}
     assert by_num["#3b"]["is_leaf"] is True
     assert by_num["#3"]["is_leaf"] is False
@@ -92,34 +92,6 @@ def test_headers_and_not_used_excluded():
     ]
     nums = {
         e["requirement_number"]
-        for e in build_missing_requirements([_scout(reqs)])["Avery Archer"]["Chess"]
+        for e in build_missing_requirements([_scout(reqs)])["90000001"]["badges"]["Chess"]
     }
     assert "#6" in nums and "#4" not in nums and "#5" not in nums
-
-
-def test_KNOWN_DEFECT_same_named_attendees_merge():
-    """DEFECT (spec defect #1). Pins today's WRONG behavior; Task 11 replaces this test."""
-
-    def scout(aid, rid, num):
-        return {
-            "name": "Avery Archer",
-            "attendee_id": aid,
-            "classes": [],
-            "errors": [],
-            "requirements": [
-                asdict(
-                    make_requirement(
-                        attendee_id=aid,
-                        requirement_id=rid,
-                        requirement_number=num,
-                        merit_badge_name="Chess",
-                    )
-                )
-            ],
-        }
-
-    grouped = build_missing_requirements(
-        [scout("90000001", "r1", "#1"), scout("90000002", "r2", "#2")]
-    )
-    assert list(grouped) == ["Avery Archer"]  # ONE bucket for TWO people — the bug
-    assert len(grouped["Avery Archer"]["Chess"]) == 2

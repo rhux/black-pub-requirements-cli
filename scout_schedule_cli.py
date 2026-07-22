@@ -696,6 +696,22 @@ def choice_requirement_count(description: str) -> int | None:
     return int(value) if value.isdigit() else CHOICE_COUNT_WORDS.get(value)
 
 
+def _attendee_key_for(item: dict[str, Any]) -> str:
+    """Grouping identity: the attendee ID, never the display name. Two attendees can
+    share a name; merging them silently corrupts both.
+
+    A blank attendee_id cannot occur through the production path (process_scout fails a
+    scout closed at :482 when the schedule request has no attendeeID), so the blank branch
+    is defensive only. It keys on scout_name — which does not fragment a single scout across
+    its requirements the way requirement_id would, and does not depend on id(item), which is
+    unstable across the dict copies this function makes.
+    """
+    attendee_id = str(item.get("attendee_id") or "").strip()
+    if attendee_id:
+        return attendee_id
+    return f"name:{str(item.get('scout_name') or '')}"
+
+
 def annotate_requirement_statuses(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Add inferred display status fields used only by the HTML report.
 
@@ -707,7 +723,7 @@ def annotate_requirement_statuses(requirements: list[dict[str, Any]]) -> list[di
     annotated = [dict(item) for item in requirements]
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for item in annotated:
-        grouped.setdefault((str(item.get("scout_name") or ""), str(item.get("class_p4_id") or "")), []).append(item)
+        grouped.setdefault((_attendee_key_for(item), str(item.get("class_p4_id") or "")), []).append(item)
 
     for group in grouped.values():
         current_top_level: str | None = None
@@ -803,7 +819,7 @@ def annotate_requirement_statuses(requirements: list[dict[str, Any]]) -> list[di
     return annotated
 
 
-def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[str, list[dict[str, Any]]]]:
+def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Group incomplete, actionable requirements by scout name and merit badge.
 
     `scouts` is the same nested shape written to scouts.json: a list of
@@ -818,7 +834,7 @@ def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[s
     annotated = annotate_requirement_statuses(flattened)
 
     by_key = {
-        (str(item.get("scout_name") or ""), str(item.get("class_p4_id") or ""), str(item.get("requirement_number") or "")): item
+        (_attendee_key_for(item), str(item.get("class_p4_id") or ""), str(item.get("requirement_number") or "")): item
         for item in annotated
     }
 
@@ -846,7 +862,7 @@ def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[s
             if parent_number is None:
                 break
             parent_key = (
-                str(current.get("scout_name") or ""),
+                _attendee_key_for(current),
                 str(current.get("class_p4_id") or ""),
                 str(parent_number),
             )
@@ -855,7 +871,7 @@ def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[s
                 break
             current = parent
 
-    grouped: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    grouped: dict[str, dict[str, Any]] = {}
     for item in annotated:
         if id(item) not in selected:
             continue
@@ -870,9 +886,12 @@ def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[s
             "is_leaf": selected[id(item)],
             "depth": max(len(item.get("requirement_path") or []) - 1, 0),
         }
-        scout_name = str(item.get("scout_name") or "")
+        attendee_key = _attendee_key_for(item)
         badge_name = str(item.get("merit_badge_name") or "")
-        grouped.setdefault(scout_name, {}).setdefault(badge_name, []).append(entry)
+        bucket = grouped.setdefault(
+            attendee_key, {"display_name": str(item.get("scout_name") or ""), "badges": {}}
+        )
+        bucket["badges"].setdefault(badge_name, []).append(entry)
 
     return grouped
 
@@ -952,7 +971,9 @@ def write_email_reports(output_dir: Path, scouts: list[dict[str, Any]]) -> Path:
     for scout in scouts:
         scout_name = str(scout.get("name") or "")
         attendee_id = str(scout.get("attendee_id") or "")
-        badge_groups = missing.get(scout_name, {})
+        attendee_key = attendee_id.strip() or f"unresolved-{scout_name}"
+        bucket = missing.get(attendee_key) or {"display_name": scout_name, "badges": {}}
+        badge_groups = bucket["badges"]
         missing_count = sum(1 for items in badge_groups.values() for item in items if item["is_leaf"])
 
         if missing_count:
