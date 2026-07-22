@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-21
 **Last updated:** 2026-07-22
-**Status:** Engineering decisions locked; implementation plan must be regenerated against this revision
+**Status:** Engineering decisions locked; implementation plan regenerated and verified against this revision
 **Supersedes:** `docs/refactor-plan.md` and the earlier revision of this specification
 **Related plan:** `docs/superpowers/plans/2026-07-21-scoutmb-foundation.md`
 **Review state:** Architecture, correctness, testing, performance, migration, distribution,
@@ -245,6 +245,7 @@ src/scoutmb/
     time.py
     ownership.py
     observability.py
+    releases.py
 
   adapters/
     scoutevent/
