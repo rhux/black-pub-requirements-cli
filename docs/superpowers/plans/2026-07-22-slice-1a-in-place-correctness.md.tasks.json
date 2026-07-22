@@ -8,7 +8,7 @@
     "value": "dcb9625c8e019f43dff94f2d1c49f53e98056d4956f95d2f058431fa4b096a78",
     "mismatchBehavior": "If the plan .md changed, regenerate this sidecar before executing."
   },
-  "lastUpdated": "2026-07-22T21:57:33Z",
+  "lastUpdated": "2026-07-22T22:00:31Z",
   "tasks": [
     {
       "id": 1,
@@ -92,7 +92,7 @@
     {
       "id": 10,
       "subject": "Task 10: Core identity (AttendeeId + per-run UUIDv4 output identity)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         7,
         8,
@@ -103,7 +103,7 @@
     {
       "id": 11,
       "subject": "Task 11: Fix the merge - key inference on attendee ID",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         10
       ],
