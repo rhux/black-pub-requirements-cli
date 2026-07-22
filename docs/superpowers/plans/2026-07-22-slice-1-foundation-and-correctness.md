@@ -1583,23 +1583,45 @@ git commit -m "fix: key inference grouping on attendee id, not display name (liv
 
 ### Task 12: Collision-free output filenames via per-run UUIDv4
 
-**Goal:** Email and raw-payload filenames are distinct per attendee and carry no raw ID —
-readable name slug + the run UUID short form.
+**Goal:** Raw-payload and email filenames are distinct per attendee and carry no raw ID —
+readable name slug + a per-run UUID short form.
+
+**Two write sites, two contexts (verified against the code — the earlier draft got this
+wrong):**
+- **Raw payloads** are written at `scout_schedule_cli.py:490` (schedule) and `:554`
+  (requirements), both **inside `process_scout`**, sharing one `slug` computed at `:490`.
+  `process_scout` is called only from `async_main` (`:1743`). A `RunIdentity` therefore has
+  to be **passed into `process_scout`** — it cannot be reached from `async_main` otherwise.
+- **Emails** are written at `:935` inside `write_email_reports`, which is called **two
+  ways**: from `write_outputs` during a run *and* **independently from `ui/server.py:313`**
+  (`generate_emails` re-reads `scouts.json` in a separate request, with no `RunIdentity` in
+  scope). So `write_email_reports` must mint its **own** `RunIdentity` internally — that
+  fixes both call paths at once.
+
+Collision-freedom does not require the raw UUID and the email UUID to match (different
+directories, different purposes): distinct `attendee_id`s always map to distinct UUIDs
+within either `RunIdentity`. Cross-artifact/persisted identity for resume (spec D25's "run
+checkpoint") is a Slice-2 concern (acquisition checkpointing) and is **not** implemented
+here — noted as a follow-up.
 
 **Files:**
-- Modify: `scout_schedule_cli.py` (add helper after `safe_slug` `:595-597`; `:490`; `:935`; thread a `RunIdentity`)
+- Modify: `scout_schedule_cli.py` — add `attendee_filename_stem` after `safe_slug`
+  (`:595-597`); add a `run_identity` param to `process_scout`; use the stem at `:490`
+  (covers `:554` via the shared `slug`); mint a local `RunIdentity` in `write_email_reports`
+  and use the stem at `:935`; construct + pass a `RunIdentity` from `async_main`.
 - Test: `tests/unit/test_output_filenames.py`
 
 **Acceptance Criteria:**
-- [ ] Two same-named attendees → distinct email and raw filenames
-- [ ] Filename = `f"{safe_slug(name)}-{output_id[:8]}"`; contains no raw attendee ID
+- [ ] `attendee_filename_stem(name, output_id)` = `f"{safe_slug(name)}-{output_id[:8]}"` (hyphens stripped); no raw attendee ID
+- [ ] Two same-named, different-ID attendees → **distinct raw filenames** (via `process_scout`) and **distinct email filenames** (via `write_email_reports`)
+- [ ] `process_scout`'s new `run_identity` param defaults to `None` and self-creates, so Task 9's characterization calls keep working unchanged
 - [ ] Stable within a run
 
 **Verify:** `uv run pytest tests/unit/test_output_filenames.py -q`
 
 **Steps:**
 
-- [ ] **Step 1: RED test**
+- [ ] **Step 1: RED tests** (helper + both write sites)
 
 ```python
 # tests/unit/test_output_filenames.py
@@ -1609,21 +1631,40 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import scout_schedule_cli as cli  # noqa: E402
 from scout_schedule_cli import attendee_filename_stem  # noqa: E402
+from tests.factories.records import make_requirement  # noqa: E402
 
 
-def test_same_name_distinct_output_ids_differ():
-    assert attendee_filename_stem("Avery Archer", "uuid-aaaaaaaa-1") != \
-           attendee_filename_stem("Avery Archer", "uuid-bbbbbbbb-2")
-
-
-def test_stem_hides_nothing_sensitive_and_is_readable():
+def test_stem_hides_the_raw_id_and_is_readable():
     stem = attendee_filename_stem("Avery Archer", "1234abcd-ef00-4000-8000-000000000000")
-    assert stem.startswith("avery-archer-")
-    assert stem.endswith("1234abcd")
+    assert stem == "avery-archer-1234abcd"
+
+
+def test_stem_distinct_for_distinct_output_ids():
+    assert attendee_filename_stem("Avery Archer", "aaaaaaaa-0000-4000-8000-000000000000") != \
+           attendee_filename_stem("Avery Archer", "bbbbbbbb-0000-4000-8000-000000000000")
+
+
+def test_email_reports_do_not_collide_for_same_named_attendees(tmp_path):
+    """write_email_reports must produce distinct .txt/.html for two same-named attendees."""
+    def scout(aid, rid):
+        return {"name": "Avery Archer", "attendee_id": aid, "classes": [], "errors": [],
+                "requirements": [dict(__import__("dataclasses").asdict(
+                    make_requirement(attendee_id=aid, requirement_id=rid,
+                                     requirement_number="#1", merit_badge_name="Chess")))]}
+    cli.write_email_reports(tmp_path, [scout("90000001", "r1"), scout("90000002", "r2")])
+    txt = sorted((tmp_path / "emails").glob("avery-archer-*.txt"))
+    # Two same-named attendees -> two distinct email files, not one overwritten file.
+    assert len(txt) == 2 and txt[0].name != txt[1].name
 ```
 
-- [ ] **Step 2: Run RED**, expect `ImportError: attendee_filename_stem`.
+> The email test only asserts distinctness if both scouts have missing requirements. Ensure
+> the synthetic requirement is incomplete (the factory default `completed_requirement=False`
+> satisfies this) so `missing_count > 0` and the files are written.
+
+- [ ] **Step 2: Run RED**, expect `ImportError: attendee_filename_stem` (then, once the
+  helper exists, the email-collision test fails because `:935` still uses `safe_slug(name)`).
 
 - [ ] **Step 3: Add the helper after `safe_slug`**
 
@@ -1634,28 +1675,48 @@ def attendee_filename_stem(scout_name: str, output_id: str) -> str:
     return f"{safe_slug(scout_name)}-{str(output_id).replace('-', '')[:8]}"
 ```
 
-- [ ] **Step 4: Thread a `RunIdentity` and use the stem.** Build one `RunIdentity()` at the
-  start of `async_main`; when writing raw payloads (`:490`) and emails (`:935`), compute
-  `output_id = run_identity.output_id(AttendeeId.parse(result.attendee_id, result.name))`
-  and replace `safe_slug(result.name)` / `safe_slug(scout_name)` with
-  `attendee_filename_stem(name, output_id)`. Import at the top:
-  `from scoutmb.core.identity import AttendeeId, RunIdentity`.
+- [ ] **Step 4: Fix the raw side in `process_scout`.** Import at the top of the module:
+  `from scoutmb.core.identity import AttendeeId, RunIdentity`. Add a parameter
+  `run_identity: RunIdentity | None = None` to `process_scout`; at the top of its body add
+  `run_identity = run_identity or RunIdentity()`. After `attendee_id` is confirmed non-blank
+  (it raises at `:482` otherwise) and `result.name` is set (`:486`), compute
+  `output_id = run_identity.output_id(AttendeeId.parse(attendee_id, result.name))` and
+  replace `slug = safe_slug(result.name)` at `:490` with
+  `slug = attendee_filename_stem(result.name, output_id)`. The `:554` requirements write
+  reuses `slug`, so it is fixed automatically. The `None` default keeps Task 9's direct
+  `process_scout(...)` test calls valid without change.
 
-  For an attendee whose ID is blank (already failed closed upstream in Task 11's keying),
-  fall back to `RunIdentity().output_id` seeded off the row marker — the email path only
-  runs for attendees that produced output, so a valid ID is present in practice.
+- [ ] **Step 5: Pass a shared `RunIdentity` from `async_main`.** Build
+  `run_identity = RunIdentity()` before the scout loop and call
+  `process_scout(browser, scout, args, raw_dir, run_identity)` at `:1743` so raw filenames
+  are stable across the whole run.
 
-- [ ] **Step 5: Run the suite**
+- [ ] **Step 6: Fix the email side in `write_email_reports`.** Add
+  `run_identity = RunIdentity()` at the top of the function (its own instance — the UI's
+  `generate_emails` at `ui/server.py:313` calls this function directly with no shared
+  identity, and this makes that path collision-free too). In the `if missing_count:` branch,
+  replace `slug = safe_slug(scout_name)` at `:935` with:
+
+```python
+            output_id = run_identity.output_id(AttendeeId.parse(attendee_id, scout_name))
+            slug = attendee_filename_stem(scout_name, output_id)
+```
+
+  `attendee_id` is already read at `:919`; this branch only runs for scouts with missing
+  requirements, which always have a non-blank `attendee_id`, so `AttendeeId.parse` will not
+  raise here.
+
+- [ ] **Step 7: Run the suite**
 
 ```bash
 uv run pytest tests/ -q
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add scout_schedule_cli.py tests/unit/test_output_filenames.py
-git commit -m "fix: collision-free output filenames via per-run UUID, no raw id in names"
+git commit -m "fix: collision-free raw and email filenames via per-run UUID (no raw id)"
 ```
 
 ---
