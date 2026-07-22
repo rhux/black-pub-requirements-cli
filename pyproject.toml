@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scoutmb"
+version = "0.1.0"
+description = "Scout merit-badge schedule and requirement extraction for Troop 349"
+requires-python = ">=3.12"
+dependencies = [
+    "openpyxl>=3.1,<4",
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    "python-multipart>=0.0.12,<1",
+    "pywebview>=5.3,<6",
+]
+
+[project.optional-dependencies]
+acquisition = ["playwright>=1.57,<2"]
+pdf = ["PyMuPDF>=1.24,<2", "opencv-python-headless>=4.10,<5"]
+
+[project.scripts]
+troop349 = "scoutmb.cli.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-cov>=6.0,<7",
+    "pytest-asyncio>=0.24,<1",
+    "pytest-socket>=0.7,<1",
+    "hypothesis>=6.112,<7",
+    "httpx>=0.27,<1",          # Starlette TestClient (used in Slice 1b) needs it
+    "ruff>=0.8,<1",
+    "mypy>=1.13,<2",
+    "pyyaml>=6,<7",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scoutmb"]
+
+[tool.hatch.build]
+exclude = ["bootstrap", "raw_data", "docs", "tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests", "tools"]
+# The legacy flat scripts are characterized in Slice 1 and moved/rewritten in Slice 2; the
+# bootstrap package is stdlib-only legacy rewritten in Slice 3/4. Excluding both keeps ruff
+# from reformatting code about to move, preserves the line numbers this plan references, and
+# avoids failing on pre-existing PTH violations (open()/os.replace in bootstrap). They
+# re-enter ruff in their owning slice. New Slice-1 code (src/scoutmb, tools, tests) is linted.
+extend-exclude = [
+    "scout_schedule_cli.py", "pdf_to_scouts.py", "ui/server.py", "run_app.py", "bootstrap",
+]
+exclude = [".venv", "raw_data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "PTH", "RET", "ARG", "TID"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ARG"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tools"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "live_service: test may contact the real scoutingevent.com (deselected by default)",
+    "playwright: test needs a real browser (deselected by default)",
+]
+addopts = "-m 'not live_service and not playwright' --strict-markers --strict-config"
+asyncio_mode = "auto"
+xfail_strict = true
+
+[tool.coverage.run]
+branch = true
+source = ["src/scoutmb", "tools"]
