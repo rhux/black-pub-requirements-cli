@@ -10,7 +10,8 @@
 > finalizing.
 
 **Spec:** `docs/superpowers/specs/2026-07-21-scoutmb-refactor-design.md`
-**Depends on:** Slice 1 complete (Gate 1 GO).
+**Depends on:** Slice 1a (Gate 1a GO) **and** Slice 1b (Gate 1b GO). Gate 1b provides the
+exhaustive Phase A parity oracle this slice's `parity` tests diff against.
 **Goal:** Move behavior behind hexagonal boundaries in small parity-checked slices. The
 flat scripts become thin compatibility shims; the new package is the home for all logic.
 **Gate at end:** Gate 2 — identity/output/runtime go/no-go.

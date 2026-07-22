@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "planPath": "docs/superpowers/plans/2026-07-22-slice-1-foundation-and-correctness.md",
+  "planPath": "docs/superpowers/plans/2026-07-22-slice-1a-in-place-correctness.md",
   "specPath": "docs/superpowers/specs/2026-07-21-scoutmb-refactor-design.md",
-  "slice": "1 of 4 (READY)",
+  "slice": "1a of 5 (READY)",
   "planDigest": {
     "algorithm": "sha256",
-    "value": "973e5cc9887d06b039820fb946792d389619b17bf6a19228264a99050dbd0c36",
+    "value": "dcb9625c8e019f43dff94f2d1c49f53e98056d4956f95d2f058431fa4b096a78",
     "mismatchBehavior": "If the plan .md changed, regenerate this sidecar before executing."
   },
   "lastUpdated": "2026-07-22T00:00:00Z",
@@ -14,7 +14,8 @@
       "id": 1,
       "subject": "Task 1: Project tooling scaffold (uv, ruff, mypy, pytest, 3.12)",
       "status": "pending",
-      "description": "**Goal:** A Hatchling src/ project pinned to Python 3.12 that syncs reproducibly from uv.lock, with ruff/mypy/pytest/coverage configured. Zero production-source changes.\n\n**Files:**\n- Create: pyproject.toml, .python-version\n- Generate: uv.lock\n- Modify: .gitignore\n\n**Acceptance Criteria:**\n- .python-version is 3.12; requires-python >=3.12; ruff target-version py312\n- uv sync --locked succeeds; python reports 3.12\n- ruff check and mypy exit 0; no test job in CI yet\n\n**Verify:** `uv sync --locked && uv run ruff check . && uv run mypy && uv run python -c \"import sys;assert sys.version_info[:2]==(3,12);print('py312 ok')\"`\n\n```json:metadata\n{\"files\":[\"pyproject.toml\",\".python-version\",\"uv.lock\",\".gitignore\"],\"verifyCommand\":\"uv sync --locked && uv run ruff check . && uv run mypy\",\"acceptanceCriteria\":[\"py312 pinned\",\"uv sync --locked works\",\"ruff+mypy exit 0\",\"no test job yet\"],\"modelTier\":\"mechanical\"}\n```"
+      "description": "**Goal:** A Hatchling src/ project pinned to Python 3.12 that syncs reproducibly from uv.lock, with ruff/mypy/pytest/coverage configured. Zero production-source changes.\n\n**Files:**\n- Create: pyproject.toml, .python-version\n- Generate: uv.lock\n- Modify: .gitignore\n\n**Acceptance Criteria:**\n- .python-version is 3.12; requires-python >=3.12; ruff target-version py312\n- uv sync --locked succeeds; python reports 3.12\n- ruff check and mypy exit 0; no test job in CI yet\n\n**Verify:** `uv sync --locked && uv run ruff check . && uv run mypy && uv run python -c \"import sys;assert sys.version_info[:2]==(3,12);print('py312 ok')\"`\n\n```json:metadata\n{\"files\":[\"pyproject.toml\",\".python-version\",\"uv.lock\",\".gitignore\"],\"verifyCommand\":\"uv sync --locked && uv run ruff check . && uv run mypy\",\"acceptanceCriteria\":[\"py312 pinned\",\"uv sync --locked works\",\"ruff+mypy exit 0\",\"no test job yet\"],\"modelTier\":\"mechanical\"}\n```",
+      "blockedBy": []
     },
     {
       "id": 2,
@@ -89,44 +90,6 @@
       "description": "**Goal:** Pin the browser-free orchestration path (monkeypatched), retry count, dedup, a loader, and the exact CSV headers.\n\n**Files:**\n- Create: tests/characterization/test_process_scout.py, tests/characterization/test_inputs_and_outputs.py\n\n**Acceptance Criteria:**\n- process_scout runs with no browser via monkeypatched navigate_and_trigger_schedule/discover_name/post_requirement\n- Retry pinned at 3 attempts; failing scout accumulates an error, does not raise\n- Both CSV headers asserted literally (guards __dataclass_fields__ order :1666,:1671)\n\n**Verify:** `uv run pytest tests/characterization -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_process_scout.py\",\"tests/characterization/test_inputs_and_outputs.py\"],\"verifyCommand\":\"uv sync --locked --all-extras && uv run pytest tests/characterization -q\",\"acceptanceCriteria\":[\"process_scout no browser\",\"retry 3\",\"error accumulation\",\"CSV headers literal\"],\"modelTier\":\"standard\",\"notes\":\"If a fake lacks a method process_scout calls, add it to the fake; do not edit production.\"}\n```"
     },
     {
-      "id": 16,
-      "subject": "Task 16: Characterize full input & PDF matrix (A7)",
-      "status": "pending",
-      "blockedBy": [
-        4,
-        5
-      ],
-      "description": "**Goal:** A table-driven suite pinning every input format and PDF-extraction behavior: XLSX/CSV/JSON/text, directory/glob expansion, header aliases, dedup, QR decode tiers, the exact 7-column attendee CSV schema, ordering, strict mode, corrupt input, optional-capability absence.\n\n**Files:**\n- Create: tests/characterization/test_input_matrix.py, tests/characterization/test_pdf_matrix.py, tests/factories/pdf_builder.py\n\n**Acceptance Criteria:**\n- load_inputs pinned for CSV/XLSX/JSON/text incl. every header alias\n- expand_pdf_inputs pinned for file/dir/glob/--recursive\n- decode_embedded_qr/extract_pdf pinned against a GENERATED synthetic PDF; rendered-fallback noted\n- exact 7 attendee columns asserted literally\n- : load_csv works without openpyxl/fitz/cv2\n\n**Verify:** `uv sync --locked --all-extras && uv run pytest tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_input_matrix.py\",\"tests/characterization/test_pdf_matrix.py\",\"tests/factories/pdf_builder.py\"],\"verifyCommand\":\"uv sync --locked --all-extras && uv run pytest tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py -q\",\"acceptanceCriteria\":[\"loaders + aliases pinned\",\"expand_pdf_inputs file/dir/glob\",\"generated-PDF QR decode\",\"7-col schema literal\",\"\"],\"modelTier\":\"careful\",\"notes\":\"Characterization. Verify extract_pdf/ExtractedAttendee real signatures before finalizing; complete the alias table from observed output. Commit the PDF builder, never a .pdf.\"}\n```"
-    },
-    {
-      "id": 17,
-      "subject": "Task 17: Characterize ScoutingEvent payload & retry/error contract (A8 monkeypatch)",
-      "status": "pending",
-      "blockedBy": [
-        9
-      ],
-      "description": "**Goal:** Pin observed schedule/requirement payload shapes, the dedup rule, and retry/terminal-error behavior via monkeypatched module functions + synthetic payloads. The loopback fake service and real-Playwright-surface check are Slice 2.\n\n**Files:**\n- Create: tests/characterization/test_scoutingevent_contract.py\n\n**Acceptance Criteria:**\n- Schedule variants pinned: zero classes, multiple, HAS_REQUIREMENTS=0\n- 'prefer the completed duplicate' dedup (:510) pinned with a duplicate classP4ID\n- Retry/error matrix pinned: transient-then-success, terminal error accumulates without raising\n- A requirement payload missing an expected field pinned as CURRENT behavior (drift-fail-closed is Slice 2)\n\n**Verify:** `uv run pytest tests/characterization/test_scoutingevent_contract.py -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_scoutingevent_contract.py\"],\"verifyCommand\":\"uv sync --locked --all-extras && uv run pytest tests/characterization/test_scoutingevent_contract.py -q\",\"acceptanceCriteria\":[\"schedule variants\",\"dedup prefers completed\",\"retry/terminal-error matrix\",\"missing-field current behavior\"],\"modelTier\":\"careful\",\"notes\":\"Reuse the _Browser/monkeypatch harness from Task 9; pin exact observed outputs; do not change production.\"}\n```"
-    },
-    {
-      "id": 18,
-      "subject": "Task 18: Characterize artifact schemas, interface defaults, baseline (A9)",
-      "status": "pending",
-      "blockedBy": [
-        5,
-        9
-      ],
-      "description": "**Goal:** Pin remaining output schemas (errors.csv, scouts.json, summary.json, report.html injected-JSON structure), CLI/UI default configuration, and a pre-refactor request-count baseline (the 'before' for the Slice 4 perf gate). Runs BEFORE Task 13 so schemas are pinned against legacy output.\n\n**Files:**\n- Create: tests/characterization/test_artifact_matrix.py, tests/characterization/test_interface_matrix.py, tests/performance/test_baseline.py, tools/measure_baseline.py\n\n**Acceptance Criteria:**\n- errors.csv header, scouts.json keys, summary.json keys pinned\n- report.html pinned by parsing the injected application/json block, not byte-compare\n- parse_args defaults pinned for both CLIs; UI default Namespace field values pinned\n- request-count assertion: 1 schedule + 1 requirement request per requirement-bearing class; measure_baseline writes build/baseline.json\n\n**Verify:** `uv run pytest tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_artifact_matrix.py\",\"tests/characterization/test_interface_matrix.py\",\"tests/performance/test_baseline.py\",\"tools/measure_baseline.py\"],\"verifyCommand\":\"uv sync --locked --all-extras && uv run pytest tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py -q\",\"acceptanceCriteria\":[\"artifact schemas pinned\",\"report.html structural\",\"CLI+UI defaults pinned\",\"request-count baseline\"],\"modelTier\":\"careful\",\"notes\":\"Gates Task 13 (atomic writes) - pin output schemas against legacy before the write mechanism changes.\"}\n```"
-    },
-    {
-      "id": 19,
-      "subject": "Task 19: Characterize bootstrap, local web, lifecycle, static UI (A10)",
-      "status": "pending",
-      "blockedBy": [
-        5
-      ],
-      "description": "**Goal:** Pin installer/bootstrap, local-web, run-lifecycle, and progress/quiet/error behavior so Slice 2 can move them under parity. Records current behavior incl. insecure/incomplete web behavior, classified preserve/intentional-change/new-acceptance - NOT as the final contract. Runs BEFORE Task 14 so web routes are pinned before the data_root rewire.\n\n**Files:**\n- Create: tests/characterization/test_bootstrap_matrix.py, tests/characterization/test_local_web_matrix.py, tests/characterization/test_run_lifecycle_matrix.py\n\n**Acceptance Criteria:**\n- Bootstrap: marker.is_environment_valid, paths.get_paths, _acquire_lock (mtime) pinned for present/absent/invalid/stale\n- Local web (TestClient, in-process): /api/health, /api/status, /api/scouts pinned; current upload/download/report-open pinned and classified\n- Run lifecycle: pause/resume/cancel + SSE event-stream shape pinned\n- Static UI: server-emitted SSE contract pinned; JS-only flows documented, not asserted\n\n**Verify:** `uv run pytest tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_bootstrap_matrix.py\",\"tests/characterization/test_local_web_matrix.py\",\"tests/characterization/test_run_lifecycle_matrix.py\"],\"verifyCommand\":\"uv sync --locked --all-extras && uv run pytest tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py -q\",\"acceptanceCriteria\":[\"bootstrap marker+lock pinned\",\"web read routes pinned + insecure classified\",\"lifecycle + SSE shape pinned\",\"static-UI contract pinned\"],\"modelTier\":\"careful\",\"notes\":\"Gates Task 14. Import bootstrap.marker/paths directly (avoid bootstrap.webview2 winreg). TestClient is in-process (no real socket).\"}\n```"
-    },
-    {
       "id": 10,
       "subject": "Task 10: Core identity (AttendeeId + per-run UUIDv4 output identity)",
       "status": "pending",
@@ -160,9 +123,7 @@
       "subject": "Task 13: Atomic single-file writes",
       "status": "pending",
       "blockedBy": [
-        9,
-        16,
-        18
+        9
       ],
       "description": "**Goal:** A failed write never truncates the previous file. scouts.csv, report, and email files write via temp + fsync + os.replace. Runs AFTER Task 18 (artifact schemas pinned against legacy).\n\n**Files:**\n- Create: src/scoutmb/adapters/files/atomic.py\n- Modify: pdf_to_scouts.py (write_attendees_csv), scout_schedule_cli.py (report/email writers)\n- Test: tests/unit/test_atomic_write.py\n\n**Acceptance Criteria:**\n- Write raising mid-render leaves original byte-identical\n- Success replaces atomically; no .tmp remains\n- write_attendees_csv preserves the exact 7-column header order\n\n**Verify:** `uv run pytest tests/unit/test_atomic_write.py -q`\n\n```json:metadata\n{\"files\":[\"scout_schedule_cli.py\",\"pdf_to_scouts.py\",\"tests/unit/test_atomic_write.py\"],\"verifyCommand\":\"uv run pytest tests/unit/test_atomic_write.py -q\",\"acceptanceCriteria\":[\"success replaces, no tmp\",\"failure preserves original\",\"header order unchanged\"],\"modelTier\":\"careful\",\"notes\":\"Check each header/column order against current code before replacing the writer body. Task 18 pinned these schemas.\"}\n```"
     },
@@ -171,8 +132,7 @@
       "subject": "Task 14: UiSettings explicit data_root (close Hazard 1)",
       "status": "pending",
       "blockedBy": [
-        10,
-        19
+        10
       ],
       "description": "**Goal:** Data paths resolve explicitly, never from __file__, so the Slice-2 package move cannot relocate user data. Runs AFTER Task 19 (web routes pinned before the rewire).\n\n**Files:**\n- Create: src/scoutmb/ui/settings.py\n- Modify: ui/server.py (:24-41), pyproject.toml (+stdlib OS-dir), uv.lock\n- Test: tests/unit/test_ui_settings.py\n\n**Acceptance Criteria:**\n- Order: explicit -> SCOUTMB_DATA_DIR -> stdlib OS-dir -> cwd (dev only)\n- ui/server.py derives no DATA path from __file__ (static path may stay)\n- Test proves relocating the module does not move the data root; app still starts\n\n**Verify:** `uv run pytest tests/unit/test_ui_settings.py -q`\n\n```json:metadata\n{\"files\":[\"ui/server.py\",\"tests/unit/test_ui_settings.py\"],\"verifyCommand\":\"uv run pytest tests/unit/test_ui_settings.py -q\",\"acceptanceCriteria\":[\"explicit wins\",\"env used without arg\",\"dev falls back to cwd\",\"root independent of module location\"],\"modelTier\":\"careful\",\"notes\":\"Task 19 pinned the web routes before this rewire.\"}\n```"
     },
@@ -187,7 +147,7 @@
     },
     {
       "id": 20,
-      "subject": "Gate 1: Characterization & correctness go/no-go",
+      "subject": "Gate 1a: In-place correctness go/no-go",
       "status": "pending",
       "blockedBy": [
         2,
@@ -196,14 +156,9 @@
         11,
         12,
         13,
-        15,
-        16,
-        17,
-        18,
-        19
+        15
       ],
       "description": "**Goal:** One reproducible offline run proving Slice 1 complete: the FULL Phase A characterization matrix (7,8,9,16,17,18,19) green, offline enforced, identity fixed, atomic writes, migration proven, privacy clean incl. corpus cross-reference.\n\n**Files:** (aggregation only - no new production code)\n\n**Acceptance Criteria:**\n- ruff/format/mypy clean; full suite green under -m 'not live_service and not playwright'\n- check_private_data --corpus reports 0 findings; verify_corpus reproduces the numbers\n- Full legacy matrix (input/PDF, ScoutingEvent contract, inference, artifacts, interfaces, bootstrap, web, lifecycle, UI) pinned and classified\n- Two same-named attendees stay separate; no failed write truncates a prior file; migration keeps originals\n\n**Verify:** `uv sync --locked --extra pdf && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest -m \"not live_service and not playwright\" --cov=src/scoutmb --cov-branch -q && uv run python tools/check_private_data.py --corpus raw_data tests && uv run python tools/verify_corpus.py raw_data`\n\n```json:metadata\n{\"files\":[],\"verifyCommand\":\"uv sync --locked --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy && SCOUTMB_DEV=1 uv run pytest -m \\\"not live_service and not playwright\\\" --cov=src/scoutmb --cov-branch -q && uv run python tools/check_private_data.py --corpus raw_data tests\",\"acceptanceCriteria\":[\"full Phase A matrix green\",\"0 private-data findings incl corpus\",\"identity separate\",\"atomic preserves\",\"migration keeps originals\"],\"modelTier\":\"careful\",\"notes\":\"GATE. NO-GO blocks Slice 2; no conditional waiver. Snapshot the live install's app/ before Slice 2.\"}\n```"
     }
-  ],
-  "reviewStatus": "Structural rework in progress (flat-scripts move applied to Tasks 10/12/13/14). PENDING: full matrix expansion (16,19), mechanical fixes (#2 privacy-test token, #9 schedule_payload empty + Task 17 zero-class, #10 measure_baseline impl, #14 migration marker order, #16 fakes module), D4 claim narrowing, and a full sidecar acceptance-criteria regen. NOT yet ready to execute."
+  ]
 }
