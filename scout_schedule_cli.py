@@ -18,6 +18,7 @@ import random
 import re
 import sys
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +33,40 @@ DEAD_ASSET_HOSTS = {
     "mike.dev.admin.247scouting.com",
     "mike.dev.scoutingevent.com",
 }
+
+
+class MissingAttendeeId(RuntimeError):
+    """An attendee record arrived without the ID we use as identity."""
+
+    def __init__(self, scout_name: str = "") -> None:
+        self.scout_name = scout_name
+        super().__init__(f"No attendee_id for {scout_name or 'an unnamed attendee'}")
+
+
+@dataclass(frozen=True, slots=True)
+class AttendeeId:
+    value: str
+
+    @classmethod
+    def parse(cls, raw: str, scout_name: str = "") -> "AttendeeId":
+        cleaned = str(raw or "").strip()
+        if not cleaned:
+            raise MissingAttendeeId(scout_name)
+        return cls(cleaned)
+
+
+@dataclass(slots=True)
+class RunIdentity:
+    """Assigns a UUIDv4 per attendee for one run. Stable within the run instance."""
+
+    _by_attendee: dict[str, str] = field(default_factory=dict)
+
+    def output_id(self, attendee: AttendeeId) -> str:
+        existing = self._by_attendee.get(attendee.value)
+        if existing is None:
+            existing = str(uuid.uuid4())
+            self._by_attendee[attendee.value] = existing
+        return existing
 
 
 @dataclass(slots=True)
