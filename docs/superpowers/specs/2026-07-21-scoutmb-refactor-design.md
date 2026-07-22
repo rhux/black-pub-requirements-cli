@@ -286,8 +286,10 @@ testable. Illegal transitions fail closed.
 status, missing}.py` — dataclasses in, dataclasses out. The `id(item)` ancestor walk in
 `build_missing_requirements` is re-expressed over explicit node indices from the tree.
 Both consumers (HTML `:981`, email `:783`) are pinned separately before the move. The two
-suspect behaviors (label-row grafting `Note.` → child of the prior requirement; 402
-empty-number rows → path `()`) are characterized as-is; any fix is a separate change.
+suspect behaviors (label-row grafting `Note.` → child of the prior requirement; 31
+empty-number requirement rows per canonical snapshot → path `()`) are characterized as-is;
+any fix is a separate change. The former 402 count mixed schedule rows into requirement
+rows and multiplied across three equivalent private snapshots.
 
 ### ScoutingEvent gateway (D22 — KEEP port + drift + breaker + checkpoints; deadline/allowlist POSTPONED)
 
@@ -413,6 +415,12 @@ non-mutation, output schemas, CLI/UI defaults, errors, request counts, bootstrap
 lifecycle flows — is pinned to a named test and classified `preserve`,
 `intentional-change`, or `new-acceptance`.
 
+The authoritative matrix design is
+`docs/superpowers/specs/2026-07-22-phase-a-characterization-matrix-design.md`. Cases live in
+a central typed catalog reused by legacy characterization and Slice 2 parity. Each
+independent behavior has at least two focused synthetic cases; finite observed sets receive
+full coverage; failures receive immediate-success, recovery, and terminal cases.
+
 ### Network policy (D9, D27 — KEEP)
 
 Three denial layers in default tests: Python socket blocking (`pytest-socket`),
@@ -424,16 +432,17 @@ plus a separate environment opt-in.
 ### Test layers
 
 Synthetic factories → unit/property tests; local fake service → gateway/browser contract
-tests; legacy adapters → characterization/parity tests; private `raw_data` → optional
-redacted local corpus checks (D12); throwaway installs → migration/update rehearsals;
-explicit staging → read-only live smoke only, never a PR gate.
+tests; legacy adapters → characterization/parity tests; private `raw_data` → automatic
+redacted read-only local augmentation when present (D12); throwaway installs →
+migration/update rehearsals; explicit staging → read-only live smoke only, never a PR gate.
 
 ### Synthetic and private corpora (D7, D12 — KEEP)
 
 Committed fixtures are deterministic and fully synthetic; a privacy tripwire fails closed
-on likely private data (contents and filenames). `pytest --corpus-dir raw_data` always
-runs the synthetic suite and adds redacted read-only private-corpus checks when the local
-corpus matches its manifest lock.
+on likely private data in both fixture sources and generated artifacts. The default local
+pytest run always executes focused and variable/scale synthetic profiles. When `raw_data/`
+exists, it also runs redacted read-only private-corpus checks; `--corpus-dir` selects another
+location. CI runs the synthetic suite and skips the absent private corpus.
 
 ### Legacy-to-new parity (D13 — KEEP)
 
@@ -443,9 +452,11 @@ normalized; intentional changes reviewed; legacy removed only after parity.
 ### Required focused coverage
 
 Identity (same-name isolation, fail-closed missing ID, UUIDv4 survives resume, no raw ID
-in outputs); inference (non-mutation, leaf/ancestor selection, `(not used)` and
-`type_id==3` exclusions, all 18 number shapes, 5 flag combos, 402 empty rows, 375 label
-rows, choice thresholds); atomic single-file failure matrix; schema drift (critical vs
+in shareable outputs); inference (non-mutation, leaf/ancestor selection, `(not used)` and
+`type_id==3` exclusions, all 26 number shapes in path and tree contexts, all 4 observed
+requirement flag combinations in leaf and parent/consumer contexts, 31 empty-number and
+125 `Note.`-shape requirement rows per canonical snapshot, choice thresholds); atomic
+single-file failure matrix; schema drift (critical vs
 optional vs unknown); loaders (all formats + aliases); PDF (decode tiers, corrupt,
 strict, adult filter); scraper (retry ×3 at 500/1000/1500 ms, dedup, circuit breaker,
 checkpoint resume); template (`__REPORT_JS__` scout, `</script>`, U+2028/2029); migration
@@ -482,14 +493,16 @@ Staged across phases (a full workflow cannot pass before the package and tests e
 ## Execution phases and go/no-go gates
 
 The specification owns *why* and behavioral contracts; the plans own file-by-file
-execution. Work is delivered as **four sliced plans**, each its own file. Slice 1 is
-execution-ready; Slices 2–4 are preliminary and refined after the prior slice runs.
+execution. Work is delivered as **five plan files across four phases**: Slice 1 is split
+into 1a and 1b, followed by Slices 2–4. Later plans are refined after the prior gate runs.
 
-- **Slice 1 — Foundation & Correctness (Phase A + in-place fixes).** Packaging, lock, CI,
-  offline enforcement, synthetic fixtures + tripwire, the full characterization matrix,
-  and the surgical in-place correctness fixes that protect the live install *before* any
-  restructure: attendee identity, atomic single-file writes, `data_root` resolution, and
-  copy-only migration. **Gate 1** closes the slice.
+- **Slice 1a — Foundation & In-Place Correctness.** Packaging, lock, CI, offline
+  enforcement, fixture/privacy foundations, and the surgical in-place fixes that protect
+  the live install: attendee identity, atomic single-file writes, `data_root` resolution,
+  and copy-only migration. **Gate 1a** closes the in-place work.
+- **Slice 1b — Full Phase A Characterization.** The reusable matrix catalog, focused and
+  variable/production-scale synthetic data, local browser and vertical flows, read-only
+  authentic-corpus augmentation, and pre-refactor baselines. **Gate 1b** unblocks Slice 2.
 - **Slice 2 — Package Boundaries & Core (Phase B).** Hexagonal restructure, typed core,
   input/PDF adapters, ScoutingEvent gateway (port + drift + breaker + checkpoints),
   run-state machine + job supervisor, structural web boundary, entrypoint parity, clean
