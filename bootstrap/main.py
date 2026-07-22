@@ -8,7 +8,7 @@ import subprocess
 import time
 import traceback
 
-from bootstrap import browser_setup, marker, python_env, source_sync, webview2
+from bootstrap import browser_setup, marker, migrate, python_env, source_sync, webview2
 from bootstrap.config import LOCK_STALE_SECONDS
 from bootstrap.paths import AppPaths, get_paths
 from bootstrap.ui import ProgressWindow
@@ -48,7 +48,11 @@ def _release_lock(paths: AppPaths) -> None:
 
 def _launch_app(paths: AppPaths, channel: str | None) -> None:
     log_path = paths.logs_dir / "run_app.log"
-    env = {**os.environ, "SCOUTMB_BROWSER_CHANNEL": channel or ""}
+    env = {
+        **os.environ,
+        "SCOUTMB_BROWSER_CHANNEL": channel or "",
+        "SCOUTMB_DATA_DIR": str(paths.data_dir),
+    }
     with open(log_path, "ab") as log_fh:
         subprocess.Popen(
             [str(python_env.pythonw_exe(paths)), str(paths.app_dir / "run_app.py")],
@@ -71,6 +75,10 @@ def _run(window: ProgressWindow, paths: AppPaths, logger: logging.Logger) -> Non
 
     status("Checking previous setup...")
     source_sync.sync_app_source(paths)
+
+    migration_report = migrate.migrate_legacy_data(paths.app_dir, paths.data_dir)
+    if migration_report is not None:
+        logger.info("Migrated legacy data: %s", migration_report)
 
     if marker.is_environment_valid(paths, requirements_path):
         status("Starting application...")

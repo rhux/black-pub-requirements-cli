@@ -19,6 +19,7 @@ class AppPaths:
     marker_path: Path
     lock_path: Path
     browser_channel_path: Path
+    data_dir: Path
 
     def ensure_dirs(self) -> None:
         for path in (self.root, self.python_dir, self.app_dir, self.state_dir, self.logs_dir):
@@ -44,4 +45,5 @@ def get_paths() -> AppPaths:
         marker_path=state_dir / "bootstrap_marker.json",
         lock_path=state_dir / "bootstrap.lock",
         browser_channel_path=state_dir / "browser_channel.json",
+        data_dir=root / "data",
     )
