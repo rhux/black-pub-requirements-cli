@@ -566,9 +566,18 @@ git commit -m "test: add deterministic synthetic factories and API-shaped payloa
 
 ### Task 5: Privacy scanner and fixture tripwire
 
-**Goal:** A scanner that fails closed if likely-private data (real-looking names, 8-digit
-attendee IDs, live QR tokens) appears under `tests/`, plus a conftest tripwire that runs
-it before the suite.
+**Goal:** A scanner that fails closed if likely-private data appears under `tests/`, with
+two layers: (a) **pattern checks** that run everywhere including CI (live QR tokens), and
+(b) an optional **corpus cross-reference** that, where the private `raw_data/` corpus is
+present, scans committed content *and filenames* for any real name, attendee ID, or
+surname fragment — the manual pre-commit PII sweep, codified as a committed tool. A
+conftest tripwire runs both before the suite.
+
+*Carried forward from the original foundation plan:* the self-verifying discipline (scan
+output for every original value, longest-first, report the file never the value) and its
+leaky-input test suite. The real→committed fixture scrubber is **not** carried forward —
+committed fixtures are synthetic (spec D7); a local-corpus scrubber is deferred to the
+private-corpus work (D12).
 
 **Files:**
 - Create: `tools/check_private_data.py`
@@ -576,56 +585,88 @@ it before the suite.
 - Create: `tests/privacy/test_fixture_hygiene.py`
 
 **Acceptance Criteria:**
-- [ ] Scanner flags a `scoutingevent.com/mobile/?t=` token not starting with `TESTTOKEN`
-- [ ] Scanner reports `private-data findings: 0` on clean synthetic fixtures, without echoing matches
-- [ ] Session-scoped tripwire fails the suite if a fixture holds an un-prefixed live token
-- [ ] Exits non-zero on findings
+- [ ] Pattern layer flags a `scoutingevent.com/mobile/?t=` token not starting with `TESTTOKEN`
+- [ ] `--corpus <dir>` layer flags a real name or attendee ID from the corpus appearing in
+      a scanned file's **contents or filename**, including a surname fragment (word-boundary, len > 3)
+- [ ] A name that is a substring of another (`Ann Lee` inside `Ann Leeson`) is still caught
+- [ ] Reports `private-data findings: 0` on clean synthetic fixtures, **never echoing the matched value**
+- [ ] Session tripwire runs pattern checks always and corpus checks when `raw_data/` exists; exits non-zero on findings
 
-**Verify:** `uv run python tools/check_private_data.py tests && uv run pytest tests/privacy -q`
+**Verify:** `uv run python tools/check_private_data.py --corpus raw_data tests && uv run pytest tests/privacy -q`
 
 **Steps:**
 
-- [ ] **Step 1: RED test**
+- [ ] **Step 1: RED tests (pattern + corpus + leaky-input suite)**
 
 ```python
 # tests/privacy/test_fixture_hygiene.py
 from pathlib import Path
-from tools.check_private_data import scan_paths
+
+from tools.check_private_data import scan_corpus, scan_patterns
 
 
-def test_clean_fixtures_have_no_findings():
-    findings = scan_paths([Path("tests/fixtures"), Path("tests/factories")])
-    assert findings == [], f"unexpected private-data findings: {len(findings)}"
+def test_clean_fixtures_have_no_pattern_findings():
+    assert scan_patterns([Path("tests/fixtures"), Path("tests/factories")]) == []
 
 
-def test_scanner_flags_a_live_token(tmp_path):
+def test_pattern_flags_a_live_token(tmp_path):
     (tmp_path / "leak.json").write_text(
-        'url: https://scoutingevent.com/mobile/?t=REALTOKEN123', encoding="utf-8"
+        "url: https://scoutingevent.com/mobile/?t=REALTOKEN123", encoding="utf-8"
     )
-    findings = scan_paths([tmp_path])
-    assert findings, "scanner must flag a non-TESTTOKEN live QR token"
+    assert scan_patterns([tmp_path])
+
+
+def test_corpus_flags_a_real_name_in_contents(tmp_path):
+    (tmp_path / "leak.md").write_text("notes about Ann Leeson", encoding="utf-8")
+    findings = scan_corpus([tmp_path], names={"Ann Leeson"}, ids=set())
+    assert findings and all("Ann Leeson" not in f"{path} {reason}" for path, reason in findings)
+
+
+def test_corpus_flags_a_substring_name(tmp_path):
+    """'Ann Lee' must still be caught when embedded in other text."""
+    (tmp_path / "leak.md").write_text("Ann Leeson met Ann Lee", encoding="utf-8")
+    assert scan_corpus([tmp_path], names={"Ann Lee"}, ids=set())
+
+
+def test_corpus_flags_an_id_and_a_filename(tmp_path):
+    (tmp_path / "88880001-report.html").write_text('<tr data-attendee="88880001">', encoding="utf-8")
+    findings = scan_corpus([tmp_path], names=set(), ids={"88880001"})
+    assert findings  # matched in BOTH the filename and the attribute; value never echoed
+    assert all("88880001" not in f"{path} {reason}" for path, reason in findings)
+
+
+def test_corpus_flags_a_surname_fragment(tmp_path):
+    (tmp_path / "leak.md").write_text("a note mentioning Leeson somewhere", encoding="utf-8")
+    assert scan_corpus([tmp_path], names={"Ann Leeson"}, ids=set())
+
+
+def test_clean_content_has_no_corpus_findings(tmp_path):
+    (tmp_path / "ok.md").write_text("Avery Archer is synthetic", encoding="utf-8")
+    assert scan_corpus([tmp_path], names={"Ann Leeson"}, ids={"88880001"}) == []
 ```
 
-- [ ] **Step 2: Run RED**
+- [ ] **Step 2: Run RED**, expect `ModuleNotFoundError: tools.check_private_data`.
 
-```bash
-uv run pytest tests/privacy -q
-```
-Expected: `ModuleNotFoundError: tools.check_private_data`.
-
-- [ ] **Step 3: Implement the scanner**
+- [ ] **Step 3: Implement the scanner (pattern layer + corpus layer)**
 
 ```python
 # tools/check_private_data.py
 """Fail closed if committed content looks like real Scout data.
 
-Reports only the count and the offending file — never the matched text — so the
-scanner itself cannot leak what it found.
+Two layers:
+  * patterns  — run everywhere (CI included): live scoutingevent QR tokens.
+  * corpus    — run where the private raw_data corpus is present: cross-reference
+                every real name, attendee ID, and surname fragment against scanned
+                file contents AND filenames, longest-first.
+
+Findings report the offending file and a reason ONLY — never the matched value — so
+the scanner itself cannot leak what it found.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import re
 import sys
 from pathlib import Path
@@ -633,39 +674,84 @@ from pathlib import Path
 LIVE_TOKEN = re.compile(r"scoutingevent\.com/mobile/[^\s\"'<>]*?[?&]t=([A-Za-z0-9_-]+)")
 
 
-def scan_text(text: str) -> list[str]:
-    reasons: list[str] = []
-    for token in LIVE_TOKEN.findall(text):
-        if not token.startswith("TESTTOKEN"):
-            reasons.append("live-qr-token")
-    return reasons
-
-
-def scan_paths(roots: list[Path]) -> list[tuple[str, str]]:
-    findings: list[tuple[str, str]] = []
+def _iter_files(roots: list[Path]):
     for root in roots:
         if not root.exists():
             continue
         for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
-                continue
-            for reason in scan_text(text):
-                findings.append((str(path), reason))
+            if path.is_file():
+                yield path
+
+
+def _read(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return None
+
+
+def scan_patterns(roots: list[Path]) -> list[tuple[str, str]]:
+    findings: list[tuple[str, str]] = []
+    for path in _iter_files(roots):
+        text = _read(path)
+        if text is None:
+            continue
+        for token in LIVE_TOKEN.findall(text):
+            if not token.startswith("TESTTOKEN"):
+                findings.append((str(path), "live-qr-token"))
+    return findings
+
+
+def load_corpus_identifiers(corpus_dir: Path) -> tuple[set[str], set[str]]:
+    """Real names + attendee IDs from a private corpus's classes.csv files (local only)."""
+    names: set[str] = set()
+    ids: set[str] = set()
+    for classes in corpus_dir.glob("*/classes.csv"):
+        with classes.open(encoding="utf-8-sig", newline="") as fh:
+            for row in csv.DictReader(fh):
+                if row.get("scout_name"):
+                    names.add(row["scout_name"].strip())
+                if row.get("attendee_id"):
+                    ids.add(row["attendee_id"].strip())
+    return names, ids
+
+
+def scan_corpus(roots: list[Path], names: set[str], ids: set[str]) -> list[tuple[str, str]]:
+    # Full values (longest first, so a substring name never masks its superstring) plus
+    # surname-level fragments matched on a word boundary.
+    exact = sorted((v for v in (names | ids) if v), key=len, reverse=True)
+    fragments = {p for n in names for p in n.split() if len(p) > 3}
+    frag_res = {p: re.compile(rf"\b{re.escape(p)}\b") for p in fragments}
+
+    findings: list[tuple[str, str]] = []
+    for path in _iter_files(roots):
+        blob = str(path)  # filenames leak too
+        text = _read(path)
+        if text is not None:
+            blob += "\n" + text
+        if any(value in blob for value in exact):
+            findings.append((str(path), "corpus-exact"))
+            continue
+        if any(rx.search(blob) for rx in frag_res.values()):
+            findings.append((str(path), "corpus-fragment"))
     return findings
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("roots", nargs="+", type=Path)
+    parser.add_argument("--corpus", type=Path, default=None,
+                        help="Private corpus dir; enables real-value cross-reference when present.")
     args = parser.parse_args(argv)
-    findings = scan_paths(args.roots)
+
+    findings = scan_patterns(args.roots)
+    if args.corpus and args.corpus.is_dir():
+        names, ids = load_corpus_identifiers(args.corpus)
+        findings += scan_corpus(args.roots, names, ids)
+
     print(f"private-data findings: {len(findings)}")
     for path, reason in findings:
-        print(f"  {path}: {reason}")  # reason only, never the matched text
+        print(f"  {path}: {reason}")  # reason only, never the matched value
     return 1 if findings else 0
 
 
@@ -682,27 +768,36 @@ from pathlib import Path
 
 import pytest
 
-from tools.check_private_data import scan_paths as _scan_paths
+from tools.check_private_data import load_corpus_identifiers, scan_corpus, scan_patterns
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="session", autouse=True)
 def fixtures_are_sanitized() -> None:
-    findings = _scan_paths([Path(__file__).parent / "fixtures", Path(__file__).parent / "factories"])
+    roots = [Path(__file__).parent / "fixtures", Path(__file__).parent / "factories"]
+    findings = scan_patterns(roots)
+    corpus = _REPO_ROOT / "raw_data"
+    if corpus.is_dir():  # local strictness; degrades to pattern-only in CI
+        names, ids = load_corpus_identifiers(corpus)
+        findings += scan_corpus(roots, names, ids)
     assert not findings, f"private-data findings under tests/: {len(findings)}"
 ```
 
-- [ ] **Step 5: Run GREEN + scanner**
+- [ ] **Step 5: Run GREEN + the full sweep**
 
 ```bash
-uv run pytest tests/privacy -q && uv run python tools/check_private_data.py tests
+uv run pytest tests/privacy -q
+uv run python tools/check_private_data.py --corpus raw_data tests
 ```
-Expected: passed; `private-data findings: 0`.
+Expected: passed; `private-data findings: 0`. If the corpus layer reports anything, **stop
+and remove the leak — do not commit.**
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add tools/check_private_data.py tests/conftest.py tests/privacy/test_fixture_hygiene.py
-git commit -m "test: add fail-closed privacy scanner and fixture tripwire"
+git commit -m "test: fail-closed privacy scanner (patterns + corpus cross-reference) and tripwire"
 ```
 
 ---
@@ -1930,23 +2025,381 @@ git commit -m "feat: copy-only legacy migration into data/, originals retained"
 
 ---
 
+## Complete the Phase A characterization matrix (Tasks 16–19)
+
+The spec sets Slice 1 = **full Phase A characterization** + the in-place fixes. Tasks 7–9
+pinned `requirement_path`, inference, and `process_scout`/CSV headers. Tasks 16–19 pin the
+rest of the legacy behavior so that **every module Slice 2 moves has a parity oracle** and
+Gate 1 genuinely means "all current behavior is pinned before movement." These are
+characterization: tests describe today's behavior, including awkward/insecure cases,
+without fixing them; each row is classified `preserve`, `intentional-change`, or
+`new-acceptance`. Where a table is large, the code shows the harness plus representative
+rows and instructs completing the table from observed output.
+
+**Ordering:** Tasks 18 and 19 characterize output writers and the web/bootstrap code that
+the fixes in Tasks 13–15 then modify, so 18 gates 13 and 19 gates 14 (enforced by the
+sidecar's `blockedBy`). Run the characterization before the change it protects.
+
+---
+
+### Task 16: Characterize the full input & PDF matrix (A7)
+
+**Goal:** A table-driven suite pinning every input format and PDF-extraction behavior:
+XLSX/CSV/JSON/text loading, directory/glob expansion, header aliases, dedup, QR decode
+tiers, the exact 7-column attendee CSV schema, ordering, strict mode, corrupt input, and
+optional-capability absence.
+
+**Files:**
+- Create: `tests/characterization/test_input_matrix.py`, `tests/characterization/test_pdf_matrix.py`
+- Create: `tests/factories/pdf_builder.py` (synthetic PDF+QR generator, never committed as a binary)
+
+**Acceptance Criteria:**
+- [ ] `load_inputs` pinned for CSV, XLSX, JSON, and text, including every header alias in `first_matching_key`
+- [ ] `expand_pdf_inputs` pinned for a file, a directory, a glob, and `--recursive`
+- [ ] `decode_embedded_qr`/`extract_pdf` pinned against a **generated** synthetic PDF (raster QR); the rendered-fallback path noted for extension
+- [ ] The exact 7 attendee columns (`Attendee Name`/`Registrant Type`/`QR Code Contents`/source/page/method) asserted literally
+- [ ] Core-only import: `load_csv` works without `openpyxl`/`fitz`/`cv2` importable (optional-capability absence)
+
+**Verify:** `uv sync --extra pdf && uv run pytest tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py -q`
+
+**Steps:**
+
+- [ ] **Step 1: Synthetic PDF builder** (uses `cv2.QRCodeEncoder` — OpenCV is already the `pdf` extra — + PyMuPDF `insert_image`; commit the builder, never a `.pdf`)
+
+```python
+# tests/factories/pdf_builder.py
+"""Build a synthetic schedule PDF with an embedded QR, at test time. Never commit a .pdf."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def build_schedule_pdf(path: Path, *, name: str, registrant: str, qr_value: str) -> Path:
+    import cv2  # from the `pdf` extra
+    import fitz  # PyMuPDF
+    import numpy as np
+
+    encoder = cv2.QRCodeEncoder.create()
+    qr = encoder.encode(qr_value)               # small binary image
+    qr = cv2.resize(qr, (300, 300), interpolation=cv2.INTER_NEAREST)
+    png = cv2.imencode(".png", qr)[1].tobytes()
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Attendee Information")
+    page.insert_text((72, 96), f"Name {name}")
+    page.insert_text((72, 120), f"Registrant {registrant}")
+    page.insert_image(fitz.Rect(72, 150, 372, 450), stream=png)
+    doc.save(path)
+    doc.close()
+    return path
+```
+
+- [ ] **Step 2: Input-matrix characterization** (harness + representative rows; complete the
+  alias/format table from observed `load_inputs` output — this is characterization)
+
+```python
+# tests/characterization/test_input_matrix.py
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import scout_schedule_cli as cli  # noqa: E402
+
+
+def _csv(tmp_path, header, row):
+    p = tmp_path / "in.csv"
+    p.write_text(header + "\n" + row + "\n", encoding="utf-8")
+    return p
+
+
+@pytest.mark.parametrize(
+    ("header", "expected_name_field"),
+    [
+        ("Attendee Name,QR Code Contents", "Avery Archer"),
+        ("Name,QR Code Contents", "Avery Archer"),          # alias
+        ("attendee name,qr code contents", "Avery Archer"),  # case/alias
+        # Complete this table with every alias first_matching_key accepts,
+        # from observed load_inputs behavior. This is characterization.
+    ],
+)
+def test_csv_header_aliases(tmp_path, header, expected_name_field):
+    path = _csv(tmp_path, header, "Avery Archer,https://example.invalid/?t=TESTTOKEN0001")
+    scouts = cli.load_inputs(path, sheet_name="Scouts Only", include_adults=True)
+    assert scouts[0].name == expected_name_field
+
+
+def test_json_and_text_loaders(tmp_path):
+    j = tmp_path / "in.json"
+    j.write_text(json.dumps([{"Attendee Name": "Avery Archer",
+                              "QR Code Contents": "https://example.invalid/?t=TESTTOKEN0001"}]),
+                 encoding="utf-8")
+    assert cli.load_inputs(j, "Scouts Only", True)[0].name == "Avery Archer"
+
+
+def test_adult_filtering_default(tmp_path):
+    path = _csv(tmp_path, "Attendee Name,Registrant Type,QR Code Contents",
+                "Adult Leader,Adult,https://example.invalid/?t=TESTTOKEN0002")
+    assert cli.load_inputs(path, "Scouts Only", include_adults=False) == []
+    assert len(cli.load_inputs(path, "Scouts Only", include_adults=True)) == 1
+```
+
+- [ ] **Step 3: PDF-matrix characterization** (`expand_pdf_inputs` + a generated PDF)
+
+```python
+# tests/characterization/test_pdf_matrix.py
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+pytest.importorskip("fitz"); pytest.importorskip("cv2")
+import pdf_to_scouts as pdf  # noqa: E402
+from tests.factories.pdf_builder import build_schedule_pdf  # noqa: E402
+
+
+def test_expand_pdf_inputs_file_dir_glob(tmp_path):
+    (tmp_path / "a.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "b.pdf").write_bytes(b"%PDF-1.4")
+    assert len(pdf.expand_pdf_inputs([str(tmp_path)], recursive=False)) == 2
+    assert len(pdf.expand_pdf_inputs([str(tmp_path / "*.pdf")], recursive=False)) == 2
+
+
+def test_embedded_qr_decodes_from_a_generated_pdf(tmp_path):
+    token = "https://scoutingevent.com/mobile/?t=TESTTOKEN0001"
+    p = build_schedule_pdf(tmp_path / "s.pdf", name="Avery Archer", registrant="Youth", qr_value=token)
+    attendees, errors = pdf.extract_pdf(p, render_dpis=[144], strict=False, normalize=True)
+    assert errors == []
+    assert attendees[0].qr_value == token
+    # Rendered-fallback path (vector QR -> decode_rendered_qr) is a follow-up row; note it.
+
+
+def test_attendee_csv_has_exact_seven_columns(tmp_path):
+    import csv
+    from pdf_to_scouts import ExtractedAttendee, write_attendees_csv
+    a = ExtractedAttendee(name="Avery Archer", registrant_type="Youth",
+                          qr_value="https://example.invalid/?t=TESTTOKEN0001",
+                          source_pdf="s.pdf", page_number=1, decode_method="embedded")
+    out = tmp_path / "scouts.csv"
+    write_attendees_csv(out, [a])
+    with out.open(encoding="utf-8-sig", newline="") as fh:
+        header = next(csv.reader(fh))
+    assert header == ["Attendee Name", "Registrant Type", "QR Code Contents",
+                      "Source PDF", "Page", "Decode Method"]
+```
+
+> **Note:** verify `extract_pdf`'s real signature/return shape and `ExtractedAttendee`'s
+> real fields against the current `pdf_to_scouts.py` before finalizing — adjust the calls
+> to match. This is characterization; the code is the authority.
+
+- [ ] **Step 4: Run + complete the tables from observed output, then commit**
+
+```bash
+uv sync --extra pdf
+uv run pytest tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py -q
+git add tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py tests/factories/pdf_builder.py
+git commit -m "test: characterize full input and PDF extraction matrix (A7)"
+```
+
+---
+
+### Task 17: Characterize the ScoutingEvent payload & retry/error contract (A8, monkeypatch)
+
+**Goal:** Pin the observed schedule/requirement payload shapes, the dedup rule, and the
+retry/terminal-error behavior — via the monkeypatched module functions and synthetic
+payloads. (The loopback **fake service** and real-Playwright-surface check are Slice 2.)
+
+**Files:**
+- Create: `tests/characterization/test_scoutingevent_contract.py`
+
+**Acceptance Criteria:**
+- [ ] Schedule payload variants pinned: zero classes, multiple classes, a `HAS_REQUIREMENTS=0` class
+- [ ] The "prefer the completed duplicate" dedup rule (`scout_schedule_cli.py:510`) pinned with a duplicate-`classP4ID` payload
+- [ ] Retry/error matrix pinned: transient-then-success, terminal error accumulates and does not raise
+- [ ] A requirement payload missing an expected field is pinned as **current** behavior (drift handling is Slice 2/B4)
+
+**Verify:** `uv run pytest tests/characterization/test_scoutingevent_contract.py -q`
+
+**Steps:**
+
+- [ ] **Step 1: Contract characterization** (reuse the fakes/monkeypatch pattern from Task 9)
+
+```python
+# tests/characterization/test_scoutingevent_contract.py
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import scout_schedule_cli as cli  # noqa: E402
+from tests.factories.payloads import requirement_payload, requirement_row, schedule_payload  # noqa: E402
+# _Browser/_Ctx/_Page/_Resp/_args helpers: import or duplicate from test_process_scout.
+
+
+async def test_dedup_prefers_completed_duplicate(monkeypatch, tmp_path):
+    dup = schedule_payload([
+        {"classP4ID": "2000001", "CLASS_NAME": "Chess", "CLASS_NBR": "26MB1",
+         "CLASS_COMPLETED": "0", "HAS_REQUIREMENTS": "1", "attendeeID": "90000001"},
+        {"classP4ID": "2000001", "CLASS_NAME": "Chess", "CLASS_NBR": "26MB1",
+         "CLASS_COMPLETED": "1", "HAS_REQUIREMENTS": "1", "attendeeID": "90000001"},
+    ])
+    # monkeypatch navigate->dup, discover_name->fallback, post_requirement->requirement_payload()
+    # assert the single retained class has class_completed True (:510 "prefer completed").
+    ...
+
+
+async def test_terminal_error_accumulates_without_raising(monkeypatch, tmp_path):
+    # monkeypatch post_requirement to raise a terminal error; assert result.errors non-empty,
+    # no exception propagates, and other classes still process.
+    ...
+
+
+def test_current_behavior_on_missing_field():
+    # A requirement_row() missing COMPLETED_REQ_FLAG -> pin what the legacy mapper does TODAY
+    # (e.g. coerces to False). Drift-fail-closed is a Slice 2 intentional change, not here.
+    row = requirement_row(); row.pop("COMPLETED_REQ_FLAG")
+    payload = requirement_payload([row])
+    assert "data" in payload  # replace with the pinned legacy projection once observed
+```
+
+> Fill the `...` bodies using the same `_Browser`/monkeypatch harness as Task 9, and pin
+> the exact observed outputs. This characterizes today's contract; do not change production.
+
+- [ ] **Step 2: Run + commit**
+
+```bash
+uv run pytest tests/characterization/test_scoutingevent_contract.py -q
+git add tests/characterization/test_scoutingevent_contract.py
+git commit -m "test: characterize ScoutingEvent payload/dedup/retry contract (A8, monkeypatch)"
+```
+
+---
+
+### Task 18: Characterize artifact schemas, interface defaults, and a baseline (A9)
+
+**Goal:** Pin the remaining output schemas (beyond the CSV headers in Task 9), the CLI/UI
+default configuration, and a **pre-refactor request-count baseline** — the "before"
+reference the Slice 4 performance gate compares against. **Runs before Task 13** (atomic
+writes) so schemas are pinned against legacy output.
+
+**Files:**
+- Create: `tests/characterization/test_artifact_matrix.py`, `tests/characterization/test_interface_matrix.py`
+- Create: `tests/performance/test_baseline.py`, `tools/measure_baseline.py`
+
+**Acceptance Criteria:**
+- [ ] `errors.csv` header, `scouts.json` top-level keys, and `summary.json` keys pinned
+- [ ] `report.html` structure pinned by parsing the injected `<script type="application/json">` block (not byte-compare)
+- [ ] `parse_args` defaults pinned for both CLIs; the UI's default `Namespace` field values pinned
+- [ ] `test_request_count_growth_is_bounded`: process_scout issues 1 schedule request + 1 requirement request per requirement-bearing class (hard assertion), captured by `measure_baseline.py`
+
+**Verify:** `uv run pytest tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py -q`
+
+**Steps:**
+
+- [ ] **Step 1: Artifact-schema characterization** — build a synthetic `list[ScoutResult]`
+  from the factories, run `write_outputs` into `tmp_path`, and assert the header/keys/
+  structure of each artifact. Parse `report.html`'s injected JSON and assert its shape.
+- [ ] **Step 2: Interface-defaults characterization** — `parse_args([])`-equivalent for
+  each CLI (note: `scout_schedule_cli.parse_args` currently takes no `argv`; call it as-is
+  and pin the `Namespace`); pin the UI's hand-built `Namespace` field defaults from
+  `ui/server.py`.
+- [ ] **Step 3: Baseline** — a `RequestCountingSession`-style counter (increment on each
+  monkeypatched `navigate_and_trigger_schedule`/`post_requirement`) asserts the exact
+  request count for a 2-class synthetic scout; `tools/measure_baseline.py` writes
+  `build/baseline.json` (machine class, counts, no wall-time gate yet).
+
+```python
+# tests/performance/test_baseline.py (representative)
+async def test_request_count_growth_is_bounded(monkeypatch, tmp_path):
+    counts = {"schedule": 0, "requirement": 0}
+    # monkeypatch navigate_and_trigger_schedule (++schedule) and post_requirement (++requirement)
+    # run process_scout on a 2-requirement-bearing-class synthetic schedule
+    # assert counts == {"schedule": 1, "requirement": 2}
+    ...
+```
+
+- [ ] **Step 4: Run + commit**
+
+```bash
+uv run pytest tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py -q
+uv run python tools/measure_baseline.py --output build/baseline.json
+git add tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py tools/measure_baseline.py
+git commit -m "test: characterize artifact schemas, interface defaults, and request-count baseline (A9)"
+```
+
+---
+
+### Task 19: Characterize bootstrap, local web, run lifecycle, and static UI (A10)
+
+**Goal:** Pin the installer/bootstrap, local-web, run-lifecycle, and user-visible
+progress/quiet/error behavior so Slice 2 can move them under parity. **Records current
+behavior, including insecure/incomplete web behavior, as `preserve` /
+`intentional-change` / `new-acceptance` — not as the final contract.** Runs **before Task
+14** (data_root) so the web routes are pinned before the rewire.
+
+**Files:**
+- Create: `tests/characterization/test_bootstrap_matrix.py`, `tests/characterization/test_local_web_matrix.py`, `tests/characterization/test_run_lifecycle_matrix.py`
+
+**Acceptance Criteria:**
+- [ ] Bootstrap: `marker.is_environment_valid`, `paths.get_paths`, and `_acquire_lock` (mtime lock) pinned for present/absent/invalid marker and lock-held/stale cases
+- [ ] Local web (FastAPI `TestClient`, in-process — no real socket): `/api/health`, `/api/status`, `/api/scouts` responses pinned; the current upload/download/report-open behavior pinned and **classified** (structural fix is Slice 2/B9)
+- [ ] Run lifecycle: pause/resume/cancel and the SSE event stream shape pinned for the current operation model
+- [ ] Static UI: the server-emitted SSE event contract the JS depends on is pinned; JS-only flows (progress/quiet/error rendering) are documented observations, not asserted
+
+**Verify:** `uv run pytest tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py -q`
+
+**Steps:**
+
+- [ ] **Step 1: Bootstrap characterization** — stdlib-only; import `bootstrap.marker`,
+  `bootstrap.paths` directly (avoid importing `bootstrap.webview2` — its module-level
+  `import winreg` breaks off-Windows; the fix is Slice 4). Pin marker validity + `_acquire_lock`.
+- [ ] **Step 2: Local-web characterization** — `from ui import server` (via the existing
+  `sys.path` shim), drive `fastapi.testclient.TestClient(server.app)`; pin the JSON of the
+  read routes and the current status of the state-changing routes. Add a comment marking
+  the insecure/incomplete cases `intentional-change` (fixed structurally in Slice 2).
+- [ ] **Step 3: Run-lifecycle + SSE characterization** — exercise pause/resume/cancel
+  through the current operation API and pin the emitted event sequence shape.
+- [ ] **Step 4: Run + commit**
+
+```bash
+uv run pytest tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py -q
+git add tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py
+git commit -m "test: characterize bootstrap, local web, lifecycle, and static-UI contract (A10)"
+```
+
+---
+
 ### Gate 1 — Characterization & correctness go/no-go
 
-**Goal:** One reproducible offline run: all characterization green, offline enforced,
-identity fixed, atomic writes in place, migration proven, privacy clean.
+**Goal:** One reproducible offline run: the **complete Phase A characterization matrix**
+(Tasks 7–9 and 16–19) green, offline enforced, identity fixed, atomic writes in place,
+migration proven, privacy clean.
 
 **Verify (all must pass):**
 ```bash
-uv sync --locked
+uv sync --locked --extra pdf
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 uv run pytest -m "not live_service and not playwright" --cov=src/scoutmb --cov-branch -q
-uv run python tools/check_private_data.py tests
+uv run python tools/check_private_data.py --corpus raw_data tests
 uv run python tools/verify_corpus.py raw_data
 ```
 
-**Expected GO:** every command exits 0; two same-named attendees stay separate; no failed
-write truncates a prior file; migration copies without touching originals; `private-data
-findings: 0`; no non-loopback request.
+**Expected GO:** every command exits 0; the full legacy matrix (input/PDF, ScoutingEvent
+contract, inference, artifacts, interfaces, bootstrap, web, lifecycle, static UI) is pinned
+and classified; two same-named attendees stay separate; no failed write truncates a prior
+file; migration copies without touching originals; `private-data findings: 0` (including
+the corpus cross-reference); no non-loopback request.
 
 **NO-GO:** stop, assign the failing evidence to its task, keep legacy behavior intact,
 rerun the whole gate. Do **not** begin Slice 2 with a conditional waiver.
@@ -1960,14 +2413,21 @@ backup.
 ## Self-review
 
 **Spec coverage (this slice):** D4 (Task 1), CI (2,7), D9/D27 offline (3), D7 synthetic
-fixtures + tripwire (4,5), D12 corpus (6), D8 characterization (7,8,9), D3/D25 identity
-(10,11,12), D11 atomic (13), D6 data_root/Hazard-1 (14), D5 migration (15).
+fixtures + tripwire (4,5), D12 corpus (6), **D8 full Phase A characterization (7,8,9 +
+16 input/PDF + 17 ScoutingEvent contract + 18 artifacts/interfaces/baseline + 19
+bootstrap/web/lifecycle/UI)**, D3/D25 identity (10,11,12), D11 atomic (13), D6
+data_root/Hazard-1 (14), D5 migration (15), D21 pre-refactor baseline (18).
+
+**Phase A completeness:** Tasks 16–19 fold the mega-plan's A7–A10 characterization into
+this slice, so every module Slice 2 moves (input/PDF, scraper, output writers, run
+lifecycle, local web, bootstrap) is pinned before movement and Gate 2 has a parity oracle.
+Ordering edges: 18 gates 13, 19 gates 14 (characterize before the change).
 
 **Deferred to Slice 2+ (by design):** hexagonal restructure, typed core beyond identity,
-ScoutingEvent gateway, run-state machine, structural web/`JobRegistry` + the 4 UI bugs,
-entrypoint parity, clean distributions, storage/retention, transactional releases,
-installer/capabilities, diagnostics, performance gates, supply-chain license gate. Each
-lands in its slice.
+the ScoutingEvent **fake service** + gateway, run-state machine, structural web/`JobRegistry`
++ the 4 UI bugs, entrypoint parity, clean distributions, storage/retention, transactional
+releases, installer/capabilities, diagnostics, performance **gate** (baseline captured
+here), supply-chain license gate. Each lands in its slice.
 
 **Known follow-ups carried forward:** the schedule-dedup rule (`:510`) is exercised only
 indirectly here; it becomes a pure-function test when `payloads.py` is extracted in
