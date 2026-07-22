@@ -1,2586 +1,929 @@
-# scoutmb Foundation Implementation Plan (Spec Phases 0–3)
-
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers-extended-cc:subagent-driven-development (recommended) or superpowers-extended-cc:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
-**Goal:** Establish tooling, a real characterization safety net, correct attendee identity, and a copy-only migration that protects the one live installation's data — before any code moves.
-
-**Architecture:** Nothing is restructured in this plan. We add `pyproject.toml`, ruff/mypy/pytest, and staged CI; build sanitized fixtures from the local real corpus; pin current behavior of the flat modules with characterization tests (including `process_scout`, reachable via monkeypatch); then make two deliberate, individually-tested behavior changes — a stable `AttendeeKey` replacing name-based identity, and an explicit `data_root` plus legacy migration. Package restructuring begins in the next plan, on top of this net.
-
-**Tech Stack:** Python 3.12 target (dev venv is 3.14), uv, ruff, mypy, pytest + pytest-cov + pytest-socket, PyMuPDF, OpenCV, Playwright, FastAPI.
-
-**User decisions (already made):**
-- Package name is `scoutmb`; console command `troop349`.
-- CLI flags may be redesigned in this refactor, then stay stable afterward.
-- GUI is the product; CLI is a developer/debug tool. Both stay first-class.
-- One installation exists in the wild with real data. **Breaking the install is acceptable; destroying its data is not.**
-- Keep `errors.py`, keep `ProgressSink` (needed by planned work), keep application self-update.
-- Wheel + `python-build-standalone` for the launcher (spec Phase 9, not this plan).
-- No real Scout data in the spec or codebase, ever. `raw_data/` stays local and gitignored.
-
----
-
-## Scope
-
-This plan implements **spec Phases 0–3 only**. The spec has 12 phases; writing all of them at full fidelity now would be speculative, because Phases 4+ depend on what the characterization suite in Task 6–11 actually reveals (notably the `Note.`-row hypothesis, which may turn out to be a live defect requiring its own scheduled fix).
-
-Phases 0–3 form a coherent, shippable unit: **after this plan, the live install's data is protected, same-named Scouts can no longer corrupt each other, and every subsequent refactor has a regression net.** Plan 2 (package restructure, spec Phases 4–8) is written after Task 14 lands.
-
-## File Structure
-
-| File | Responsibility |
-| --- | --- |
-| `pyproject.toml` | Project metadata, dependencies, ruff/mypy/pytest/coverage config |
-| `.github/workflows/ci.yml` | Staged CI — lint, types, lock only at this stage |
-| `tools/verify_corpus.py` | Reproduce corpus counts, emit aggregates only, never PII |
-| `tools/scrub_fixtures.py` | Convert a real run into committable fixtures; self-verifying |
-| `tests/conftest.py` | Fixture tripwire, socket blocking, shared fixtures |
-| `tests/factories/records.py` | Builders for `ClassRecord` / `RequirementRecord` test data |
-| `tests/characterization/*` | Pin current behavior of the flat modules |
-| `src/scoutmb/domain/identity.py` | `AttendeeKey` — stable, non-reversible attendee identity |
-| `src/scoutmb/errors.py` | `ScoutmbError` hierarchy (seeded here, grown later) |
-| `src/scoutmb/ui/settings.py` | `UiSettings` with explicit `data_root` resolution |
-| `bootstrap/migrate.py` | Copy-only legacy `app/` → `data/` migration |
-
-`src/scoutmb/` is created in this plan only for the three modules above. The bulk move happens in Plan 2.
-
----
-
-### Task 1: Project tooling scaffold
-
-**Goal:** `pyproject.toml` with ruff, mypy, pytest, and coverage configured for a 3.12 target, with zero source changes.
-
-**Files:**
-- Create: `pyproject.toml`
-- Modify: `.gitignore`
-
-**Acceptance Criteria:**
-- [ ] `ruff check .` exits 0 on the untouched tree
-- [ ] `ruff format --check .` reports the current formatting state without erroring the run
-- [ ] `mypy` runs and exits 0 (nothing typed strictly yet)
-- [ ] `requires-python = ">=3.12"` and ruff `target-version = "py312"`
-- [ ] No test job configured yet — `pytest` is installed but CI does not run it until Task 6
-
-**Verify:** `ruff check . && mypy --version && python -c "import tomllib,pathlib; tomllib.loads(pathlib.Path('pyproject.toml').read_text())"` → exit 0
-
-**Steps:**
-
-- [ ] **Step 1: Create `pyproject.toml`**
-
-```toml
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[project]
-name = "scoutmb"
-version = "0.1.0"
-description = "Scout merit-badge schedule and requirement extraction for Troop 349"
-requires-python = ">=3.12"
-dependencies = [
-    "playwright>=1.57,<2",
-    "openpyxl>=3.1,<4",
-    "PyMuPDF>=1.24,<2",
-    "opencv-python-headless>=4.10,<5",
-    "fastapi>=0.115,<1",
-    "uvicorn[standard]>=0.32,<1",
-    "python-multipart>=0.0.12,<1",
-    "pywebview>=5.3,<6",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.3,<9",
-    "pytest-cov>=6.0,<7",
-    "pytest-asyncio>=0.24,<1",
-    "pytest-socket>=0.7,<1",
-    "hypothesis>=6.112,<7",
-    "ruff>=0.8,<1",
-    "mypy>=1.13,<2",
-]
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/scoutmb"]
-
-[tool.hatch.build]
-exclude = ["bootstrap", "raw_data", "docs"]
-
-[tool.ruff]
-target-version = "py312"
-line-length = 100
-src = ["src", "tests", "tools"]
-exclude = [".venv", "raw_data", "bootstrap/build.spec"]
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "PTH", "RET", "ARG", "TID"]
-ignore = [
-    "E501",    # line length is handled by the formatter
-    "B008",    # FastAPI's Depends()/File() defaults are idiomatic
-]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ARG"]          # unused fixture args are normal in pytest
-
-[tool.mypy]
-python_version = "3.12"
-files = ["src", "tools"]
-ignore_missing_imports = true
-warn_unused_ignores = true
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-markers = [
-    "playwright: tests requiring a real browser (deselected by default)",
-]
-addopts = "-m 'not playwright' --strict-markers"
-asyncio_mode = "auto"
-
-[tool.coverage.run]
-branch = true
-source = ["src/scoutmb", "tools"]
-```
-
-- [ ] **Step 2: Extend `.gitignore`**
-
-Append these lines (`/raw_data/` and `.DS_Store` are already present):
-
-```gitignore
-# Added for the scoutmb restructure
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-htmlcov/
-.coverage
-dist/
-*.egg-info/
-```
-
-- [ ] **Step 3: Install the dev extras**
-
-Run: `.venv/bin/python -m pip install -e ".[dev]"`
-Expected: installs pytest, ruff, mypy, and the runtime deps; `Successfully installed` in output.
-
-- [ ] **Step 4: Verify tooling runs clean**
-
-Run: `.venv/bin/ruff check .`
-Expected: `All checks passed!` — if any error appears, fix the config (not the source; this task changes no source).
-
-Run: `.venv/bin/mypy`
-Expected: exit 0, `Success: no issues found` (nothing is strictly typed yet).
-
-- [ ] **Step 5: Record the Python version gap**
-
-The dev venv is **3.14.6** but the shipped runtime is **3.12.8**, and no 3.12 interpreter exists on this machine. Install one so local runs match CI:
-
-Run: `uv python install 3.12` (or download from python.org)
-Then: `uv venv --python 3.12 .venv312 && .venv312/bin/python -m pip install -e ".[dev]"`
-
-This is **recommended, not blocking** — CI runs 3.12 and is the authority. Record in the commit message which interpreter the tests were run under.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add pyproject.toml .gitignore
-git commit -m "build: add pyproject with ruff, mypy, pytest for a 3.12 target"
-```
-
----
-
-### Task 2: Staged CI — lint, types, lock
-
-**Goal:** CI that passes today. No test or build job, because `pytest` with zero tests exits non-zero and `src/scoutmb` does not exist yet.
-
-**Files:**
-- Create: `.github/workflows/ci.yml`
-
-**Acceptance Criteria:**
-- [ ] Workflow parses as valid YAML
-- [ ] Jobs: `lint`, `types` only
-- [ ] Runs on `ubuntu-latest` with Python **3.12**
-- [ ] No `pytest` step (added in Task 6), no wheel build (added in Plan 2)
-
-**Verify:** `python -c "import yaml,pathlib; yaml.safe_load(pathlib.Path('.github/workflows/ci.yml').read_text()); print('valid')"` → `valid`
-
-**Steps:**
-
-- [ ] **Step 1: Create the workflow**
-
-```yaml
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e ".[dev]"
-      - run: ruff check .
-      - run: ruff format --check .
-
-  types:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e ".[dev]"
-      - run: mypy
-```
-
-- [ ] **Step 2: Verify YAML validity**
-
-Run: `.venv/bin/python -c "import yaml,pathlib; yaml.safe_load(pathlib.Path('.github/workflows/ci.yml').read_text()); print('valid')"`
-Expected: `valid`
-
-- [ ] **Step 3: Apply formatting as its own commit**
-
-`ruff format --check` will fail on the existing source. Fix it in a **formatting-only commit** so formatting never mixes with logic in a diff:
-
-```bash
-.venv/bin/ruff format .
-git add -A
-git commit -m "style: apply ruff format (formatting only, no logic changes)"
-```
-
-- [ ] **Step 4: Commit the workflow**
-
-```bash
-git add .github/workflows/ci.yml
-git commit -m "ci: add lint and types jobs on Python 3.12"
-```
-
----
-
-### Task 3: Corpus verification tool
-
-**Goal:** A tool that reproduces the spec's corpus counts while emitting only aggregates, so the numbers can be re-checked without exporting any Scout data.
-
-**Files:**
-- Create: `tools/verify_corpus.py`
-- Test: `tests/tools/test_verify_corpus.py`
-
-**Acceptance Criteria:**
-- [ ] Prints scouts / classes / requirements / raw-payload counts per run
-- [ ] Prints the `(COMPLETED_REQ_FLAG, COMPLETED_CLASS_FLAG)` distribution
-- [ ] Prints distinct `REQ_NBR_WEB_DISPLAY` **shape** counts, never raw values
-- [ ] **Emits no names, attendee IDs, descriptions, or URLs** — enforced by a test
-- [ ] Exits non-zero if the corpus directory is absent
-
-**Verify:** `.venv/bin/pytest tests/tools/test_verify_corpus.py -v` → all pass
-
-**Steps:**
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/tools/test_verify_corpus.py
-import json
-
-from tools.verify_corpus import summarize_run
-
-
-def test_summarize_emits_only_aggregates(tmp_path):
-    raw = tmp_path / "raw"
-    raw.mkdir()
-    (raw / "ada-lovelace-26mb1-sched.json").write_text(
-        json.dumps(
-            {
-                "status": {"status": 1, "stack": []},
-                "data": [
-                    {
-                        "MDM_LKP_BADGE_REQ_ID": "111",
-                        "REQ_NBR_WEB_DISPLAY": "#3b",
-                        "REQ_DESCR": "Ada Lovelace secret description",
-                        "COMPLETED_REQ_FLAG": "1",
-                        "COMPLETED_CLASS_FLAG": "0",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    summary = summarize_run(tmp_path)
-    rendered = json.dumps(summary)
-
-    assert summary["requirements"] == 1
-    assert summary["flag_combos"]["('1', '0')"] == 1
-    assert summary["number_shapes"]["#Na"] == 1
-    # No PII may appear anywhere in the output.
-    assert "Ada" not in rendered
-    assert "Lovelace" not in rendered
-    assert "secret" not in rendered
-    assert "111" not in rendered
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `.venv/bin/pytest tests/tools/test_verify_corpus.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'tools.verify_corpus'`
-
-- [ ] **Step 3: Write the implementation**
-
-```python
-# tools/verify_corpus.py
-"""Reproduce the fixture-corpus counts cited in the design spec.
-
-Emits aggregate counts only — never names, attendee IDs, descriptions, or URLs —
-so the spec's numbers can be re-verified without exporting any Scout data.
-"""
-
-from __future__ import annotations
-
-import argparse
-import collections
-import json
-import re
-import sys
-from pathlib import Path
-from typing import Any
-
-
-def number_shape(value: str) -> str:
-    """Collapse a requirement number to its punctuation/case shape.
-
-    '#3b' -> '#Na',  '#2.Option.A.(1)' -> '#N.Aaaaaa.A.(N)'
-    """
-    shaped = re.sub(r"[A-Z]", "A", str(value))
-    shaped = re.sub(r"[a-z]", "a", shaped)
-    return re.sub(r"[0-9]+", "N", shaped)
-
-
-def summarize_run(run_dir: Path) -> dict[str, Any]:
-    raw_dir = run_dir / "raw"
-    payloads = sorted(raw_dir.glob("*.json")) if raw_dir.is_dir() else []
-
-    requirements = 0
-    flag_combos: collections.Counter[str] = collections.Counter()
-    number_shapes: collections.Counter[str] = collections.Counter()
-
-    for payload_path in payloads:
-        try:
-            payload = json.loads(payload_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        for row in payload.get("data") or []:
-            if not isinstance(row, dict):
-                continue
-            requirements += 1
-            combo = (row.get("COMPLETED_REQ_FLAG"), row.get("COMPLETED_CLASS_FLAG"))
-            flag_combos[str(combo)] += 1
-            number_shapes[number_shape(row.get("REQ_NBR_WEB_DISPLAY") or "")] += 1
-
-    return {
-        "raw_payloads": len(payloads),
-        "requirements": requirements,
-        "flag_combos": dict(flag_combos),
-        "number_shapes": dict(number_shapes),
-    }
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("corpus", type=Path, help="Directory holding run subdirectories")
-    args = parser.parse_args(argv)
-
-    if not args.corpus.is_dir():
-        print(f"Corpus directory not found: {args.corpus}", file=sys.stderr)
-        return 2
-
-    for run_dir in sorted(p for p in args.corpus.iterdir() if p.is_dir()):
-        summary = summarize_run(run_dir)
-        print(f"{run_dir.name}: {summary['requirements']} requirements, "
-              f"{summary['raw_payloads']} payloads")
-        for combo, count in sorted(summary["flag_combos"].items()):
-            print(f"    flags {combo}: {count}")
-        for shape, count in sorted(summary["number_shapes"].items(), key=lambda kv: -kv[1]):
-            print(f"    shape {shape!r}: {count}")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `.venv/bin/pytest tests/tools/test_verify_corpus.py -v`
-Expected: PASS
-
-- [ ] **Step 5: Reproduce the spec's numbers**
-
-Run: `.venv/bin/python tools/verify_corpus.py raw_data`
-Expected: each of the three runs reports **4858 requirements** and **120 payloads**, and the flag distribution includes a `(None, None)` entry with **309**. If these differ, update the spec rather than the tool — the spec's numbers are the claim under test.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add tools/verify_corpus.py tests/tools/test_verify_corpus.py
-git commit -m "test: add corpus verification tool emitting aggregates only"
-```
-
----
-
-### Task 4: Self-verifying fixture scrubber
-
-**Goal:** Convert a real run directory into committable fixtures, with automated proof that no original name, ID, or token survives — in file contents *or* filenames.
-
-**Files:**
-- Create: `tools/scrub_fixtures.py`
-- Test: `tests/tools/test_scrub_fixtures.py`
-
-**Acceptance Criteria:**
-- [ ] Replaces names and attendee IDs deterministically (same input → same fake output)
-- [ ] Rewrites **filenames** as well as contents
-- [ ] Longest-first replacement, so `"Ann Lee"` inside `"Ann Leeson"` cannot leave a fragment
-- [ ] `verify_clean` returns every surviving original; scrub **raises** if any remain
-- [ ] Rewrites `scoutingevent.com/mobile/` tokens to `TESTTOKEN####`
-
-**Verify:** `.venv/bin/pytest tests/tools/test_scrub_fixtures.py -v` → all pass
-
-**Steps:**
-
-- [ ] **Step 1: Write the failing tests (the leaky-input suite)**
-
-```python
-# tests/tools/test_scrub_fixtures.py
-import pytest
-
-from tools.scrub_fixtures import LeakDetected, build_mapping, scrub_text, verify_clean
-
-
-def test_substring_name_is_fully_replaced():
-    """'Ann Lee' must not leave a fragment inside 'Ann Leeson'."""
-    mapping = build_mapping(names=["Ann Lee", "Ann Leeson"], attendee_ids=[])
-    scrubbed = scrub_text("Ann Leeson met Ann Lee", mapping)
-
-    assert "Ann Lee" not in scrubbed
-    assert "Ann Leeson" not in scrubbed
-    assert verify_clean(scrubbed, ["Ann Lee", "Ann Leeson"]) == []
-
-
-def test_id_inside_html_attribute_is_replaced():
-    mapping = build_mapping(names=[], attendee_ids=["90000042"])
-    scrubbed = scrub_text('<tr data-attendee="90000042">', mapping)
-
-    assert "90000042" not in scrubbed
-    assert verify_clean(scrubbed, ["90000042"]) == []
-
-
-def test_qr_token_is_rewritten_to_testtoken():
-    mapping = build_mapping(names=[], attendee_ids=[])
-    scrubbed = scrub_text("https://scoutingevent.com/mobile/?t=REALTOKEN99", mapping)
-
-    assert "REALTOKEN99" not in scrubbed
-    assert "TESTTOKEN" in scrubbed
-
-
-def test_verify_clean_reports_survivors():
-    assert verify_clean("Ann Lee is here", ["Ann Lee"]) == ["Ann Lee"]
-
-
-def test_scrub_text_raises_when_a_leak_survives():
-    """A mapping that fails to cover an original must fail loudly, not silently."""
-    empty = build_mapping(names=[], attendee_ids=[])
-    with pytest.raises(LeakDetected) as excinfo:
-        scrub_text("Ann Lee", empty, must_not_contain=["Ann Lee"])
-    assert "Ann Lee" in str(excinfo.value)
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `.venv/bin/pytest tests/tools/test_scrub_fixtures.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'tools.scrub_fixtures'`
-
-- [ ] **Step 3: Write the implementation**
-
-```python
-# tools/scrub_fixtures.py
-"""Turn a real run directory into committable fixtures.
-
-Substitution is deterministic and longest-first, and every scrub is verified:
-if any original value survives in contents or filenames, we raise rather than
-write. An unverified scrubber is a data leak with extra steps.
-"""
-
-from __future__ import annotations
-
-import argparse
-import csv
-import hashlib
-import re
-import shutil
-import sys
-from dataclasses import dataclass, field
-from pathlib import Path
-
-QR_TOKEN_RE = re.compile(r"(scoutingevent\.com/mobile/[^\s\"'<>]*?[?&]t=)([A-Za-z0-9_-]+)")
-
-_FIRST_NAMES = ["Avery", "Blake", "Casey", "Devon", "Ellis", "Finley", "Gray", "Harper",
-                "Indigo", "Jules", "Kai", "Lane", "Micah", "Nova", "Oakley", "Parker",
-                "Quinn", "Reese", "Sage", "Tatum", "Umber", "Vale"]
-_LAST_NAMES = ["Archer", "Brooks", "Calder", "Dunmore", "Ellery", "Fenwick", "Garrow",
-               "Holloway", "Ives", "Jarrow", "Keswick", "Lockhart", "Marsh", "Norrell",
-               "Ovington", "Pike", "Quill", "Rowan", "Selby", "Thorne", "Underhill", "Vance"]
-
-
-class LeakDetected(RuntimeError):
-    """Raised when an original value survives scrubbing."""
-
-
-@dataclass(frozen=True, slots=True)
-class Mapping:
-    replacements: dict[str, str] = field(default_factory=dict)
-
-    def ordered_items(self) -> list[tuple[str, str]]:
-        """Longest original first, so substrings cannot leave fragments."""
-        return sorted(self.replacements.items(), key=lambda kv: len(kv[0]), reverse=True)
-
-
-def _stable_index(value: str, modulus: int) -> int:
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
-    return int(digest[:8], 16) % modulus
-
-
-def fake_name(original: str) -> str:
-    first = _FIRST_NAMES[_stable_index(original + "|f", len(_FIRST_NAMES))]
-    last = _LAST_NAMES[_stable_index(original + "|l", len(_LAST_NAMES))]
-    return f"{first} {last}"
-
-
-def fake_attendee_id(original: str) -> str:
-    return f"9{_stable_index(original, 10_000_000):07d}"
-
-
-def build_mapping(names: list[str], attendee_ids: list[str]) -> Mapping:
-    replacements: dict[str, str] = {}
-    for name in names:
-        cleaned = name.strip()
-        if cleaned:
-            replacements[cleaned] = fake_name(cleaned)
-    for attendee_id in attendee_ids:
-        cleaned = attendee_id.strip()
-        if cleaned:
-            replacements[cleaned] = fake_attendee_id(cleaned)
-    return Mapping(replacements)
-
-
-def scrub_text(text: str, mapping: Mapping, must_not_contain: list[str] | None = None) -> str:
-    scrubbed = text
-    for original, replacement in mapping.ordered_items():
-        scrubbed = scrubbed.replace(original, replacement)
-    scrubbed = QR_TOKEN_RE.sub(
-        lambda m: f"{m.group(1)}TESTTOKEN{_stable_index(m.group(2), 10_000):04d}", scrubbed
-    )
-
-    survivors = verify_clean(scrubbed, must_not_contain or list(mapping.replacements))
-    if survivors:
-        raise LeakDetected(f"Original values survived scrubbing: {survivors}")
-    return scrubbed
-
-
-def verify_clean(text: str, originals: list[str]) -> list[str]:
-    """Return every original still present. Empty list means clean."""
-    return [original for original in originals if original and original in text]
-
-
-def collect_identifiers(run_dir: Path) -> tuple[list[str], list[str]]:
-    names: set[str] = set()
-    ids: set[str] = set()
-    classes_csv = run_dir / "classes.csv"
-    if classes_csv.is_file():
-        with classes_csv.open("r", encoding="utf-8-sig", newline="") as stream:
-            for row in csv.DictReader(stream):
-                if row.get("scout_name"):
-                    names.add(row["scout_name"].strip())
-                if row.get("attendee_id"):
-                    ids.add(row["attendee_id"].strip())
-    return sorted(names), sorted(ids)
-
-
-def scrub_run(run_dir: Path, dest_dir: Path, keep_scouts: int = 3) -> None:
-    names, ids = collect_identifiers(run_dir)
-    if not names:
-        raise RuntimeError(f"No scout names found in {run_dir}; refusing to scrub blind")
-
-    keep = set(names[:keep_scouts])
-    mapping = build_mapping(names, ids)
-    originals = list(mapping.replacements)
-
-    if dest_dir.exists():
-        shutil.rmtree(dest_dir)
-    dest_dir.mkdir(parents=True)
-
-    for source in sorted(run_dir.rglob("*")):
-        if source.is_dir():
-            continue
-        relative = source.relative_to(run_dir)
-        # Filenames carry name slugs — scrub the path, not just the bytes.
-        scrubbed_relative = Path(scrub_text(str(relative), mapping))
-        target = dest_dir / scrubbed_relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            content = source.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue  # binary or unreadable artifacts are not fixture material
-
-        target.write_text(scrub_text(content, mapping), encoding="utf-8")
-
-        leaks = verify_clean(str(target), originals)
-        if leaks:
-            raise LeakDetected(f"Original values survived in path {target}: {leaks}")
-
-    print(f"Scrubbed {run_dir} -> {dest_dir} (kept {len(keep)} scouts in the reduced set)")
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("run_dir", type=Path)
-    parser.add_argument("dest_dir", type=Path)
-    parser.add_argument("--keep-scouts", type=int, default=3)
-    args = parser.parse_args(argv)
-
-    if not args.run_dir.is_dir():
-        print(f"Run directory not found: {args.run_dir}", file=sys.stderr)
-        return 2
-    scrub_run(args.run_dir, args.dest_dir, args.keep_scouts)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `.venv/bin/pytest tests/tools/test_scrub_fixtures.py -v`
-Expected: 5 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tools/scrub_fixtures.py tests/tools/test_scrub_fixtures.py
-git commit -m "test: add self-verifying fixture scrubber with leaky-input suite"
-```
-
----
-
-### Task 5: Generate committable fixtures and install the tripwire
-
-**Goal:** A reduced, sanitized fixture set in the repo, plus a conftest tripwire that fails the suite if unsanitized data ever appears.
-
-**Files:**
-- Create: `tests/conftest.py`
-- Create: `tests/fixtures/run_reduced/` (generated)
-- Create: `tests/factories/records.py`
-
-**Acceptance Criteria:**
-- [ ] `tests/fixtures/run_reduced/` contains 2–3 scouts' worth of scrubbed artifacts
-- [ ] Tripwire fails if any fixture holds a `scoutingevent.com/mobile/` token not starting with `TESTTOKEN`
-- [ ] `pytest-socket` blocks network in the default suite
-- [ ] A PII sweep over `tests/` finds zero real names or IDs
-
-**Verify:** `.venv/bin/pytest tests/ -v` → passes; and the sweep in Step 4 prints `NONE`
-
-**Steps:**
-
-- [ ] **Step 1: Generate the fixtures**
-
-Run: `.venv/bin/python tools/scrub_fixtures.py raw_data/2026-07-19_2139 tests/fixtures/run_reduced --keep-scouts 3`
-Expected: `Scrubbed raw_data/2026-07-19_2139 -> tests/fixtures/run_reduced (kept 3 scouts in the reduced set)`
-
-If `LeakDetected` is raised, **do not commit anything** — fix the scrubber and re-run.
-
-- [ ] **Step 2: Write `tests/conftest.py`**
-
-```python
-# tests/conftest.py
-"""Shared fixtures plus the fixture-safety tripwire.
-
-The tripwire is session-scoped and runs before any test: if unsanitized Scout
-data ever lands under tests/fixtures/, the whole suite fails loudly rather than
-quietly committing a leak.
-"""
-
-from __future__ import annotations
-
-import re
-from pathlib import Path
-
-import pytest
-
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
-QR_TOKEN_RE = re.compile(r"scoutingevent\.com/mobile/[^\s\"'<>]*?[?&]t=([A-Za-z0-9_-]+)")
-
-
-@pytest.fixture(scope="session", autouse=True)
-def fixtures_are_sanitized() -> None:
-    offenders: list[str] = []
-    for path in FIXTURES_DIR.rglob("*"):
-        if not path.is_file():
-            continue
-        try:
-            content = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        for token in QR_TOKEN_RE.findall(content):
-            if not token.startswith("TESTTOKEN"):
-                offenders.append(f"{path}: token {token!r}")
-    assert not offenders, (
-        "Unsanitized QR tokens found under tests/fixtures/:\n  " + "\n  ".join(offenders)
-    )
-
-
-@pytest.fixture()
-def reduced_run() -> Path:
-    return FIXTURES_DIR / "run_reduced"
-```
-
-- [ ] **Step 3: Write `tests/factories/records.py`**
-
-```python
-# tests/factories/records.py
-"""Builders for record test data.
-
-Defaults are valid; tests override only the field under test, so a new field on
-the dataclass does not break every test at once.
-"""
-
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-from typing import Any
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from scout_schedule_cli import ClassRecord, RequirementRecord  # noqa: E402
-
-
-def make_requirement(**overrides: Any) -> RequirementRecord:
-    defaults: dict[str, Any] = {
-        "scout_name": "Avery Archer",
-        "attendee_id": "90000001",
-        "class_number": "26MB1",
-        "class_p4_id": "2000001",
-        "merit_badge_name": "Chess",
-        "requirement_id": "1001",
-        "requirement_type_id": "1",
-        "requirement_number": "#1",
-        "description": "Discuss the history of chess.",
-        "completed_requirement": False,
-        "completed_class": False,
-        "requirement_on_event": True,
-        "present_days": "MoTuWeTh",
-    }
-    return RequirementRecord(**{**defaults, **overrides})
-
-
-def make_class(**overrides: Any) -> ClassRecord:
-    defaults: dict[str, Any] = {
-        "scout_name": "Avery Archer",
-        "attendee_id": "90000001",
-        "class_number": "26MB1",
-        "class_p4_id": "2000001",
-        "class_name": "Chess",
-        "days": "MoTuWeTh",
-        "period_name": "A Block",
-        "start_time": "09:00 AM",
-        "start_time_24h": "09:00:00",
-        "location": "Pavilion",
-        "has_requirements": True,
-        "class_completed": False,
-        "raw_class_name": "MoTuWeTh - Chess - 26MB1 (Pavilion)",
-    }
-    return ClassRecord(**{**defaults, **overrides})
-```
-
-- [ ] **Step 4: Run the PII sweep before committing**
-
-```bash
-.venv/bin/python - <<'PY'
-import csv, re, pathlib
-names, ids = set(), set()
-with open('raw_data/2026-07-19_2139/classes.csv', encoding='utf-8-sig') as f:
-    for r in csv.DictReader(f):
-        if r.get('scout_name'): names.add(r['scout_name'].strip())
-        if r.get('attendee_id'): ids.add(r['attendee_id'].strip())
-blob = "\n".join(
-    str(p) + p.read_text(encoding='utf-8', errors='ignore')
-    for p in pathlib.Path('tests').rglob('*') if p.is_file()
-)
-parts = {p for n in names for p in n.split() if len(p) > 3}
-leaks = [v for v in (names | ids) if v and v in blob]
-leaks += [f"partial:{p}" for p in parts if re.search(rf"\b{re.escape(p)}\b", blob)]
-print("LEAKS:", leaks if leaks else "NONE")
-PY
-```
-Expected: `LEAKS: NONE`. **If anything is listed, stop and fix the scrubber — do not commit.**
-
-- [ ] **Step 5: Verify the suite runs**
-
-Run: `.venv/bin/pytest tests/ -v`
-Expected: previous tests still pass, tripwire fixture runs without failing.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add tests/conftest.py tests/factories/records.py tests/fixtures/run_reduced
-git commit -m "test: add sanitized fixture corpus, safety tripwire, and record factories"
-```
-
----
-
-### Task 6: Characterize `requirement_path` across all real shapes
-
-**Goal:** Pin the current parse result for every requirement-number shape the real corpus contains, and add the `test` job to CI now that tests exist.
-
-**Files:**
-- Create: `tests/characterization/test_requirement_path.py`
-- Modify: `.github/workflows/ci.yml`
-
-**Acceptance Criteria:**
-- [ ] All 18 observed shapes are covered as a `parametrize` table
-- [ ] Suspect behaviors (`Note.` → `('7','note')`, `''` → `()`) are pinned **as-is** with comments marking them as unresolved, not "fixed"
-- [ ] A `hypothesis` property test asserts `requirement_path` never raises on arbitrary strings
-- [ ] CI gains a `test` job on ubuntu + windows
-
-**Verify:** `.venv/bin/pytest tests/characterization/test_requirement_path.py -v` → all pass
-
-**Steps:**
-
-- [ ] **Step 1: Write the characterization tests**
-
-```python
-# tests/characterization/test_requirement_path.py
-"""Pin current requirement_path behavior before any code moves.
-
-These are characterization tests: they record what the code does TODAY,
-including behavior we suspect is wrong. Suspect cases are marked. Do not
-"fix" them here — a fix is a separate change with its own failing test.
-"""
-
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-import pytest
-from hypothesis import given, strategies as st
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from scout_schedule_cli import requirement_path  # noqa: E402
-
-
-@pytest.mark.parametrize(
-    ("number", "current_top_level", "expected_path", "expected_top_level"),
-    [
-        # --- ordinary, well-formed numbers ---
-        ("#3b", None, ("3", "b"), "3"),
-        ("#3(b)", None, ("3", "b"), "3"),
-        ("6.a.1.", None, ("6", "a", "1"), "6"),
-        ("#5(c)(1)", None, ("5", "c", "1"), "5"),
-        ("#1", None, ("1",), "1"),
-        ("2.", None, ("2",), "2"),
-        ("4", None, ("4",), "4"),
-        ("#7a.", None, ("7", "a"), "7"),
-        ("#8a(2)", None, ("8", "a", "2"), "8"),
-        ("3.b.", None, ("3", "b"), "3"),
-        # --- word-bearing option numbers (Shooting Sports style) ---
-        ("#2.Option.A.(1)", None, ("2", "option", "a", "1"), "2"),
-        ("#5.Option.D.(3)(a)", None, ("5", "option", "d", "3", "a"), "5"),
-        ("#5.Option.A(1)", None, ("5", "option", "a", "1"), "5"),
-        # --- malformed separators: punctuation is ignored by construction ---
-        ("#5..Opt.A.(1)", None, ("5", "opt", "a", "1"), "5"),
-        # --- malformed: missing top level, inherits the last-seen one ---
-        ("#(c)", "7", ("7", "c"), "7"),
-        # --- SUSPECT: a label row becomes a CHILD of the preceding requirement.
-        #     If requirement 7 is a "Do TWO of the following" choice, this note
-        #     enters the satisfied-child arithmetic. Unresolved; see spec.
-        ("Note.", "7", ("7", "note"), "7"),
-        # --- SUSPECT: 402 rows have an empty number AND empty description ---
-        ("", None, (), None),
-        ("", "7", (), "7"),
-    ],
-)
-def test_requirement_path_pins_current_behavior(
-    number, current_top_level, expected_path, expected_top_level
-):
-    path, top_level = requirement_path(number, current_top_level)
-    assert path == expected_path
-    assert top_level == expected_top_level
-
-
-@given(st.text(max_size=40))
-def test_requirement_path_never_raises(value: str):
-    """Whatever the upstream API emits, parsing must not crash the run."""
-    path, _ = requirement_path(value, None)
-    assert isinstance(path, tuple)
-```
-
-- [ ] **Step 2: Run tests to verify they pass against current code**
-
-Run: `.venv/bin/pytest tests/characterization/test_requirement_path.py -v`
-Expected: all PASS. **A failure here means the expected value is wrong, not the code** — correct the test to match observed behavior, since this is characterization.
-
-- [ ] **Step 3: Add the `test` job to CI**
-
-Insert this job into `.github/workflows/ci.yml` after `types`:
-
-```yaml
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e ".[dev]"
-      - run: pytest --cov --cov-report=term-missing
-```
-
-- [ ] **Step 4: Verify the whole suite**
-
-Run: `.venv/bin/pytest --cov --cov-report=term-missing`
-Expected: all tests pass; a coverage table prints.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tests/characterization/test_requirement_path.py .github/workflows/ci.yml
-git commit -m "test: characterize requirement_path across all 18 real shapes"
-```
-
----
-
-### Task 7: Characterize inference — purity, statuses, and both consumers
-
-**Goal:** Pin `annotate_requirement_statuses` and `build_missing_requirements`, including the non-mutation guarantee and the `id()`-keyed bookkeeping that a later dataclass refactor will disturb.
-
-**Files:**
-- Create: `tests/characterization/test_inference.py`
-
-**Acceptance Criteria:**
-- [ ] A test proves input dictionaries are **not** mutated (guards the copy at `:672`)
-- [ ] Choice-requirement threshold behavior is pinned (`Do ONE` / `Do TWO`)
-- [ ] Both consumers are pinned separately: `annotate_requirement_statuses` directly and `build_missing_requirements`
-- [ ] A test documents that same-named attendees currently **merge**, marked as the defect Task 9 fixes
-- [ ] **Leaf selection and ancestor inclusion are pinned**, because `build_missing_requirements` implements them with `dict[int, bool]` keyed on `id(item)` (`:801-835`). That keying cannot survive the move to dataclasses, so Plan 2 must rewrite it over node indices — these tests are the only thing that will catch a behavior change during that rewrite
-- [ ] The `(not used)` filter and the `requirement_type_id == "3"` section-header exclusion are pinned
-
-**Verify:** `.venv/bin/pytest tests/characterization/test_inference.py -v` → all pass
-
-**Steps:**
-
-- [ ] **Step 1: Write the characterization tests**
-
-```python
-# tests/characterization/test_inference.py
-"""Pin inference behavior before decomposition.
-
-Includes a test that documents a KNOWN DEFECT (same-named attendees merge).
-That test asserts today's wrong behavior on purpose; Task 9 replaces it with
-the corrected expectation. Do not "fix" it here.
-"""
-
-from __future__ import annotations
-
-import sys
-from dataclasses import asdict
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from scout_schedule_cli import (  # noqa: E402
-    annotate_requirement_statuses,
-    build_missing_requirements,
-    choice_requirement_count,
-)
-
-from tests.factories.records import make_requirement  # noqa: E402
-
-
-def test_annotate_does_not_mutate_its_input():
-    """scout_schedule_cli.py:672 copies every input dict. Guard that."""
-    rows = [asdict(make_requirement(requirement_number="#1"))]
-    before = [dict(row) for row in rows]
-
-    annotate_requirement_statuses(rows)
-
-    assert rows == before, "annotate_requirement_statuses must not mutate caller data"
-
-
-def test_parent_completes_when_all_children_complete():
-    rows = [
-        asdict(make_requirement(requirement_number="#1", requirement_id="p")),
-        asdict(make_requirement(requirement_number="#1a", requirement_id="c1",
-                                completed_requirement=True)),
-        asdict(make_requirement(requirement_number="#1b", requirement_id="c2",
-                                completed_requirement=True)),
-    ]
-    annotated = annotate_requirement_statuses(rows)
-    parent = next(r for r in annotated if r["requirement_id"] == "p")
-
-    assert parent["calculated_status"] in {"complete", "complete_check"}
-
-
-def test_choice_parent_completes_at_the_stated_threshold():
-    rows = [
-        asdict(make_requirement(requirement_number="#2", requirement_id="p",
-                                description="Do TWO of the following.")),
-        asdict(make_requirement(requirement_number="#2a", requirement_id="c1",
-                                completed_requirement=True)),
-        asdict(make_requirement(requirement_number="#2b", requirement_id="c2",
-                                completed_requirement=True)),
-        asdict(make_requirement(requirement_number="#2c", requirement_id="c3")),
-    ]
-    annotated = annotate_requirement_statuses(rows)
-    parent = next(r for r in annotated if r["requirement_id"] == "p")
-
-    assert parent["choice_required_count"] == 2
-    assert parent["calculated_status"] == "complete_check"
-
-
-def test_choice_requirement_count_handles_every_corpus_verb():
-    assert choice_requirement_count("Do TWO of the following.") == 2
-    assert choice_requirement_count("Choose ONE of the following options.") == 1
-    assert choice_requirement_count("Complete one of the following") == 1
-    assert choice_requirement_count("Select two of the following.") == 2
-    assert choice_requirement_count("Explain the following terms") is None
-
-
-def test_build_missing_requirements_groups_by_badge():
-    scouts = [
-        {
-            "name": "Avery Archer",
-            "attendee_id": "90000001",
-            "classes": [],
-            "requirements": [
-                asdict(make_requirement(requirement_number="#1", requirement_id="r1",
-                                        merit_badge_name="Chess")),
-            ],
-            "errors": [],
-        }
-    ]
-    grouped = build_missing_requirements(scouts)
-
-    assert "Avery Archer" in grouped
-    assert "Chess" in grouped["Avery Archer"]
-
-
-def test_leaf_selection_includes_incomplete_ancestors():
-    """Pin the ancestor walk at :801-835.
-
-    build_missing_requirements keys selection on id(item). That breaks when
-    inference moves to dataclasses, so Plan 2 rewrites it over node indices.
-    These assertions are the contract that rewrite must preserve.
-    """
-    scouts = [
-        {
-            "name": "Avery Archer",
-            "attendee_id": "90000001",
-            "classes": [],
-            "requirements": [
-                asdict(make_requirement(requirement_number="#3", requirement_id="parent",
-                                        description="Do the following.")),
-                asdict(make_requirement(requirement_number="#3b", requirement_id="leaf")),
-            ],
-            "errors": [],
-        }
-    ]
-    entries = build_missing_requirements(scouts)["Avery Archer"]["Chess"]
-    numbers = {e["requirement_number"]: e for e in entries}
-
-    # The incomplete leaf is actionable...
-    assert numbers["#3b"]["is_leaf"] is True
-    # ...and its still-incomplete parent rides along for context.
-    assert numbers["#3"]["is_leaf"] is False
-
-
-def test_section_headers_and_not_used_rows_are_excluded():
-    """type_id '3' is a section header; '(not used)' rows are dead weight."""
-    scouts = [
-        {
-            "name": "Avery Archer",
-            "attendee_id": "90000001",
-            "classes": [],
-            "requirements": [
-                asdict(make_requirement(requirement_number="#4", requirement_id="hdr",
-                                        requirement_type_id="3")),
-                asdict(make_requirement(requirement_number="#5", requirement_id="dead",
-                                        description="Forge a blade ...(not used)")),
-                asdict(make_requirement(requirement_number="#6", requirement_id="live")),
-            ],
-            "errors": [],
-        }
-    ]
-    entries = build_missing_requirements(scouts)["Avery Archer"]["Chess"]
-    numbers = {e["requirement_number"] for e in entries}
-
-    assert "#6" in numbers
-    assert "#4" not in numbers, "section headers are not actionable on their own"
-    assert "#5" not in numbers, "(not used) rows must be filtered"
-
-
-def test_KNOWN_DEFECT_same_named_attendees_are_merged():
-    """DEFECT (spec defect #1): grouping keys on scout_name, not attendee_id.
-
-    Two different attendees sharing a display name have their requirements
-    merged into one bucket. This test pins the WRONG behavior so Task 9's fix
-    is visible as an intentional change. Task 9 replaces this test.
-    """
-    scouts = [
-        {
-            "name": "Avery Archer",
-            "attendee_id": "90000001",
-            "classes": [],
-            "requirements": [
-                asdict(make_requirement(attendee_id="90000001", requirement_id="r1",
-                                        requirement_number="#1", merit_badge_name="Chess")),
-            ],
-            "errors": [],
-        },
-        {
-            "name": "Avery Archer",          # same display name, different person
-            "attendee_id": "90000002",
-            "classes": [],
-            "requirements": [
-                asdict(make_requirement(attendee_id="90000002", requirement_id="r2",
-                                        requirement_number="#2", merit_badge_name="Chess")),
-            ],
-            "errors": [],
-        },
-    ]
-    grouped = build_missing_requirements(scouts)
-
-    # Today: ONE bucket holding BOTH attendees' requirements. That is the bug.
-    assert list(grouped) == ["Avery Archer"]
-    assert len(grouped["Avery Archer"]["Chess"]) == 2
-```
-
-- [ ] **Step 2: Run tests**
-
-Run: `.venv/bin/pytest tests/characterization/test_inference.py -v`
-Expected: all PASS. If a status assertion fails, adjust the expectation to the observed value — this is characterization, and the code is the authority.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add tests/characterization/test_inference.py
-git commit -m "test: characterize inference incl. non-mutation and the name-merge defect"
-```
-
----
-
-### Task 8: Characterize `process_scout`, loaders, and CSV headers
-
-**Goal:** Pin the orchestration path Codex showed is reachable via monkeypatch, plus the CSV header rows that silently depend on dataclass field order.
-
-**Files:**
-- Create: `tests/characterization/test_process_scout.py`
-- Create: `tests/characterization/test_outputs.py`
-
-**Acceptance Criteria:**
-- [ ] `process_scout` is exercised with **no real browser**, by monkeypatching `navigate_and_trigger_schedule`, `discover_name`, and `post_requirement`
-- [ ] Retry behavior is pinned at exactly 3 attempts
-- [ ] Schedule dedup ("prefer the completed duplicate", `:510`) is pinned
-- [ ] `classes.csv` and `requirements.csv` header rows are asserted literally, guarding `__dataclass_fields__` order (`:1666`, `:1671`)
-
-**Verify:** `.venv/bin/pytest tests/characterization/ -v` → all pass
-
-**Steps:**
-
-- [ ] **Step 1: Write the `process_scout` characterization test**
-
-```python
-# tests/characterization/test_process_scout.py
-"""Characterize process_scout WITHOUT a browser.
-
-navigate_and_trigger_schedule (:368), discover_name (:347), and
-post_requirement (:417) are module-level functions called by name at :479,
-:486, and :540. Monkeypatching them makes the orchestration — dedup, retry,
-record mapping, error accumulation — fully testable today, before the port
-extraction.
-"""
-
-from __future__ import annotations
-
-import argparse
-import sys
-from pathlib import Path
-
-import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-import scout_schedule_cli as cli  # noqa: E402
-
-
-class FakeResponse:
-    def __init__(self, payload: dict) -> None:
-        self._payload = payload
-
-    async def json(self) -> dict:
-        return self._payload
-
-
-class FakePage:
-    async def evaluate(self, *args, **kwargs):
-        return None
-
-    async def wait_for_timeout(self, _ms: int) -> None:
-        return None
-
-    async def close(self) -> None:
-        return None
-
-
-class FakeContext:
-    async def new_page(self) -> FakePage:
-        return FakePage()
-
-    async def route(self, *args, **kwargs) -> None:
-        return None
-
-    async def close(self) -> None:
-        return None
-
-
-class FakeBrowser:
-    async def new_context(self, **kwargs) -> FakeContext:
-        return FakeContext()
-
-
-def make_args(**overrides) -> argparse.Namespace:
-    defaults = {
-        "timeout": 45,
-        "request_delay_ms": 0,
-        "allow_dead_assets": True,
-        "headed": False,
-        "channel": None,
-    }
-    return argparse.Namespace(**{**defaults, **overrides})
-
-
-@pytest.fixture()
-def fake_schedule(monkeypatch):
-    """Install fakes for the three module-level Playwright entry points."""
-    schedule_payload = {
-        "status": {"status": 1},
-        "data": [
-            {
-                "classP4ID": "2000001",
-                "CLASS_NAME": "Chess",
-                "CLASS_NBR": "26MB1",
-                "CLASS_COMPLETED": "0",
-                "HAS_REQUIREMENTS": "1",
-                "attendeeID": "90000001",
-            }
-        ],
-    }
-
-    async def fake_navigate(page, qr_url, timeout_seconds):
-        return FakeResponse(schedule_payload)
-
-    async def fake_discover_name(page, fallback):
-        return fallback
-
-    async def fake_post_requirement(page, attendee_id, class_p4_id):
-        return {
-            "status": {"status": 1},
-            "data": [
-                {
-                    "MDM_LKP_BADGE_REQ_ID": "r1",
-                    "MDM_LKP_BADGE_REQ_TYPE_ID": "1",
-                    "MERIT_BADGE_NAME": "Chess",
-                    "REQ_NBR_WEB_DISPLAY": "#1",
-                    "REQ_DESCR": "Discuss the history of chess.",
-                    "COMPLETED_REQ_FLAG": "0",
-                    "COMPLETED_CLASS_FLAG": "0",
-                    "REQ_ON_EVENT": "1",
-                    "PRESENT_DAYS": "MoTuWeTh",
-                }
-            ],
-        }
-
-    monkeypatch.setattr(cli, "navigate_and_trigger_schedule", fake_navigate)
-    monkeypatch.setattr(cli, "discover_name", fake_discover_name)
-    monkeypatch.setattr(cli, "post_requirement", fake_post_requirement)
-    return schedule_payload
-
-
-async def test_process_scout_builds_records_without_a_browser(fake_schedule, tmp_path):
-    scout = cli.ScoutInput(name="Avery Archer", url="https://example.invalid/?t=TESTTOKEN0001")
-
-    result = await cli.process_scout(FakeBrowser(), scout, make_args(), tmp_path)
-
-    assert result.name == "Avery Archer"
-    assert len(result.classes) == 1
-    assert result.classes[0].class_name == "Chess"
-    assert len(result.requirements) == 1
-    assert result.requirements[0].requirement_number == "#1"
-    assert result.errors == []
-
-
-async def test_process_scout_records_errors_without_aborting(monkeypatch, tmp_path):
-    async def failing_navigate(page, qr_url, timeout_seconds):
-        raise RuntimeError("schedule endpoint exploded")
-
-    monkeypatch.setattr(cli, "navigate_and_trigger_schedule", failing_navigate)
-
-    scout = cli.ScoutInput(name="Avery Archer", url="https://example.invalid/?t=TESTTOKEN0001")
-    result = await cli.process_scout(FakeBrowser(), scout, make_args(), tmp_path)
-
-    assert result.errors, "a failing scout must accumulate an error, not raise"
-    assert "schedule endpoint exploded" in " ".join(result.errors)
-
-
-async def test_requirement_fetch_retries_exactly_three_times(fake_schedule, tmp_path):
-    attempts = {"count": 0}
-
-    async def flaky_post_requirement(page, attendee_id, class_p4_id):
-        attempts["count"] += 1
-        raise RuntimeError("transient")
-
-    import scout_schedule_cli as module
-
-    module.post_requirement = flaky_post_requirement  # noqa: SLF001 - characterization
-    scout = cli.ScoutInput(name="Avery Archer", url="https://example.invalid/?t=TESTTOKEN0001")
-
-    await cli.process_scout(FakeBrowser(), scout, make_args(), tmp_path)
-
-    assert attempts["count"] == 3, "retry policy is range(1, 4) at scout_schedule_cli.py:538"
-```
-
-- [ ] **Step 2: Run and reconcile**
-
-Run: `.venv/bin/pytest tests/characterization/test_process_scout.py -v`
-Expected: PASS. If a fake is missing a method `process_scout` calls, the failure names it — add the method to the fake. **Do not change `scout_schedule_cli.py`.**
-
-- [ ] **Step 3: Write the output-format characterization test**
-
-```python
-# tests/characterization/test_outputs.py
-"""Pin the CSV header rows.
-
-write_outputs derives fieldnames from __dataclass_fields__ order (:1666, :1671),
-so reordering a dataclass field silently reorders CSV columns. These literal
-header assertions are the only thing that catches that.
-"""
-
-from __future__ import annotations
-
-import csv
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from scout_schedule_cli import ClassRecord, RequirementRecord, write_csv  # noqa: E402
-
-from tests.factories.records import make_class, make_requirement  # noqa: E402
-
-EXPECTED_CLASS_HEADER = [
-    "scout_name", "attendee_id", "class_number", "class_p4_id", "class_name",
-    "days", "period_name", "start_time", "start_time_24h", "location",
-    "has_requirements", "class_completed", "raw_class_name",
-]
-
-EXPECTED_REQUIREMENT_HEADER = [
-    "scout_name", "attendee_id", "class_number", "class_p4_id", "merit_badge_name",
-    "requirement_id", "requirement_type_id", "requirement_number", "description",
-    "completed_requirement", "completed_class", "requirement_on_event", "present_days",
-]
-
-
-def test_class_csv_header_is_stable(tmp_path):
-    path = tmp_path / "classes.csv"
-    fieldnames = [f.name for f in ClassRecord.__dataclass_fields__.values()]
-    write_csv(path, [make_class()], fieldnames)
-
-    with path.open("r", encoding="utf-8-sig", newline="") as stream:
-        header = next(csv.reader(stream))
-
-    assert header == EXPECTED_CLASS_HEADER
-
-
-def test_requirement_csv_header_is_stable(tmp_path):
-    path = tmp_path / "requirements.csv"
-    fieldnames = [f.name for f in RequirementRecord.__dataclass_fields__.values()]
-    write_csv(path, [make_requirement()], fieldnames)
-
-    with path.open("r", encoding="utf-8-sig", newline="") as stream:
-        header = next(csv.reader(stream))
-
-    assert header == EXPECTED_REQUIREMENT_HEADER
-```
-
-- [ ] **Step 4: Run the full characterization suite**
-
-Run: `.venv/bin/pytest tests/characterization/ -v`
-Expected: all pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tests/characterization/test_process_scout.py tests/characterization/test_outputs.py
-git commit -m "test: characterize process_scout via monkeypatch and pin CSV headers"
-```
-
----
-
-### Task 9: `AttendeeKey` — stable, non-reversible attendee identity
-
-**Goal:** A domain type that replaces the display name as identity, with a filename-safe digest that never exposes the bearer-token attendee ID.
-
-**Files:**
-- Create: `src/scoutmb/__init__.py`
-- Create: `src/scoutmb/errors.py`
-- Create: `src/scoutmb/domain/__init__.py`
-- Create: `src/scoutmb/domain/identity.py`
-- Test: `tests/unit/test_identity.py`
-
-**Acceptance Criteria:**
-- [ ] `AttendeeKey.from_attendee_id` rejects blank IDs with a typed error
-- [ ] `AttendeeKey.unresolved(seed)` produces a stable key when the API supplies no ID
-- [ ] `.short` is 8 hex chars, deterministic, and **does not contain the raw ID**
-- [ ] Two different IDs never produce the same `.short` in the corpus-sized ID space
-- [ ] `mypy --strict src/scoutmb/domain/identity.py` passes
-
-**Verify:** `.venv/bin/pytest tests/unit/test_identity.py -v && .venv/bin/mypy --strict src/scoutmb/domain/identity.py`
-
-**Steps:**
-
-- [ ] **Step 1: Write the failing tests**
-
-```python
-# tests/unit/test_identity.py
-import pytest
-
-from scoutmb.domain.identity import AttendeeKey
-from scoutmb.errors import MissingAttendeeId
-
-
-def test_key_is_stable_for_the_same_id():
-    assert AttendeeKey.from_attendee_id("90000042") == AttendeeKey.from_attendee_id("90000042")
-
-
-def test_short_is_deterministic_and_hides_the_raw_id():
-    key = AttendeeKey.from_attendee_id("90000042")
-
-    assert len(key.short) == 8
-    assert key.short == AttendeeKey.from_attendee_id("90000042").short
-    assert "90000042" not in key.short
-
-
-def test_different_ids_produce_different_shorts():
-    shorts = {AttendeeKey.from_attendee_id(str(90000000 + n)).short for n in range(500)}
-    assert len(shorts) == 500
-
-
-def test_blank_id_is_rejected():
-    with pytest.raises(MissingAttendeeId):
-        AttendeeKey.from_attendee_id("   ")
-
-
-def test_unresolved_key_is_stable_and_distinct():
-    a = AttendeeKey.unresolved("https://example.invalid/?t=TESTTOKEN0001")
-    b = AttendeeKey.unresolved("https://example.invalid/?t=TESTTOKEN0002")
-
-    assert a == AttendeeKey.unresolved("https://example.invalid/?t=TESTTOKEN0001")
-    assert a != b
-    assert a.short != b.short
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `.venv/bin/pytest tests/unit/test_identity.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'scoutmb'`
-
-- [ ] **Step 3: Create the package and error hierarchy**
-
-```python
-# src/scoutmb/__init__.py
-"""scoutmb — Scout merit-badge schedule and requirement extraction."""
-```
-
-```python
-# src/scoutmb/errors.py
-"""Typed errors for scoutmb.
-
-Carry structured context rather than pre-formatted strings, so callers can
-decide how to render them.
-"""
-
-from __future__ import annotations
-
-
-class ScoutmbError(Exception):
-    """Base class for every error this package raises."""
-
-
-class MissingAttendeeId(ScoutmbError):
-    """An attendee record arrived without the ID we use as identity."""
-
-    def __init__(self, scout_name: str = "") -> None:
-        self.scout_name = scout_name
-        super().__init__(
-            f"No attendee_id available for {scout_name or 'an unnamed attendee'}"
-        )
-```
-
-```python
-# src/scoutmb/domain/__init__.py
-```
-
-```python
-# src/scoutmb/domain/identity.py
-"""Stable attendee identity.
-
-The display name is NOT identity: two attendees can share one. Grouping,
-lookup, and filenames all key on AttendeeKey instead.
-
-`attendee_id` is a bearer token for a real minor's records, so `short` is a
-one-way digest prefix — filenames built from it stay safe to share.
-"""
-
-from __future__ import annotations
-
-import hashlib
-from dataclasses import dataclass
-
-from scoutmb.errors import MissingAttendeeId
-
-_SHORT_LENGTH = 8
-
-
-@dataclass(frozen=True, slots=True)
-class AttendeeKey:
-    """An opaque, stable identity for one attendee."""
-
-    value: str
-
-    @classmethod
-    def from_attendee_id(cls, attendee_id: str, scout_name: str = "") -> AttendeeKey:
-        cleaned = str(attendee_id or "").strip()
-        if not cleaned:
-            raise MissingAttendeeId(scout_name)
-        return cls(cleaned)
-
-    @classmethod
-    def unresolved(cls, seed: str) -> AttendeeKey:
-        """Identity for an attendee the API gave us no ID for.
-
-        Seeded from a per-attendee value (their QR URL), so it stays stable
-        across runs and distinct between attendees.
-        """
-        digest = hashlib.sha256(f"unresolved|{seed}".encode()).hexdigest()
-        return cls(f"unresolved-{digest[:16]}")
-
-    @property
-    def short(self) -> str:
-        """Filename-safe, non-reversible digest prefix."""
-        return hashlib.sha256(self.value.encode("utf-8")).hexdigest()[:_SHORT_LENGTH]
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `.venv/bin/pytest tests/unit/test_identity.py -v`
-Expected: 5 passed
-
-Run: `.venv/bin/mypy --strict src/scoutmb/domain/identity.py`
-Expected: `Success: no issues found in 1 source file`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/scoutmb tests/unit/test_identity.py
-git commit -m "feat: add AttendeeKey with non-reversible filename digest"
-```
-
----
-
-### Task 10: Key inference and grouping on `AttendeeKey`
-
-**Goal:** Replace name-based grouping so two same-named attendees are never merged. This is a **deliberate behavior change**, tested first.
-
-**Files:**
-- Modify: `scout_schedule_cli.py:675` (grouping key), `:786` (`by_key`), `:838-840` (grouped output)
-- Modify: `tests/characterization/test_inference.py` (replace the KNOWN_DEFECT test)
-- Test: `tests/unit/test_inference_identity.py`
-
-**Acceptance Criteria:**
-- [ ] Two attendees with identical names and different IDs produce **separate** groups
-- [ ] `build_missing_requirements` returns a mapping keyed by `AttendeeKey`, with the display name carried inside each entry
-- [ ] The `KNOWN_DEFECT` characterization test is replaced by its corrected counterpart
-- [ ] All other characterization tests still pass unchanged
-
-**Verify:** `.venv/bin/pytest tests/ -v` → all pass, including the corrected identity test
-
-**Steps:**
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/unit/test_inference_identity.py
-"""Same-named attendees must never share a bucket.
-
-Replaces the KNOWN_DEFECT characterization test from Task 7.
-"""
-
-from __future__ import annotations
-
-import sys
-from dataclasses import asdict
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from scout_schedule_cli import build_missing_requirements  # noqa: E402
-
-from tests.factories.records import make_requirement  # noqa: E402
-
-
-def _scout(attendee_id: str, requirement_id: str, number: str) -> dict:
-    return {
-        "name": "Avery Archer",
-        "attendee_id": attendee_id,
-        "classes": [],
-        "requirements": [
-            asdict(
-                make_requirement(
-                    attendee_id=attendee_id,
-                    requirement_id=requirement_id,
-                    requirement_number=number,
-                    merit_badge_name="Chess",
-                )
-            )
-        ],
-        "errors": [],
-    }
-
-
-def test_same_named_attendees_stay_separate():
-    grouped = build_missing_requirements(
-        [_scout("90000001", "r1", "#1"), _scout("90000002", "r2", "#2")]
-    )
-
-    assert len(grouped) == 2, "two distinct attendees must produce two buckets"
-    for entry in grouped.values():
-        assert entry["display_name"] == "Avery Archer"
-        assert len(entry["badges"]["Chess"]) == 1
-
-
-def test_grouping_survives_a_missing_attendee_id():
-    """An attendee with no ID still gets a distinct, stable bucket."""
-    a = _scout("", "r1", "#1")
-    b = _scout("", "r2", "#2")
-    a["qr_url"] = "https://example.invalid/?t=TESTTOKEN0001"
-    b["qr_url"] = "https://example.invalid/?t=TESTTOKEN0002"
-
-    grouped = build_missing_requirements([a, b])
-
-    assert len(grouped) == 2
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `.venv/bin/pytest tests/unit/test_inference_identity.py -v`
-Expected: FAIL — `assert len(grouped) == 2` gets `1`, and `KeyError: 'display_name'`.
-
-- [ ] **Step 3: Change the grouping key in `annotate_requirement_statuses`**
-
-At `scout_schedule_cli.py:675`, replace:
-
-```python
-        grouped.setdefault((str(item.get("scout_name") or ""), str(item.get("class_p4_id") or "")), []).append(item)
-```
-
-with:
-
-```python
-        grouped.setdefault(
-            (_attendee_key_for(item), str(item.get("class_p4_id") or "")), []
-        ).append(item)
-```
-
-Add this helper immediately above `annotate_requirement_statuses`:
-
-```python
-def _attendee_key_for(item: dict[str, Any]) -> str:
-    """Identity for grouping: the attendee ID, never the display name.
-
-    Two attendees can share a name; merging them silently corrupts both.
-    Rows with no attendee_id fall back to a stable per-row marker rather than
-    collapsing together.
-    """
-    attendee_id = str(item.get("attendee_id") or "").strip()
-    if attendee_id:
-        return attendee_id
-    return f"unresolved-{item.get('qr_url') or item.get('requirement_id') or id(item)}"
-```
-
-- [ ] **Step 4: Change `by_key` and the output grouping in `build_missing_requirements`**
-
-At `:786`, replace the `by_key` comprehension:
-
-```python
-    by_key = {
-        (
-            _attendee_key_for(item),
-            str(item.get("class_p4_id") or ""),
-            str(item.get("requirement_number") or ""),
-        ): item
-        for item in annotated
-    }
-```
-
-At `:813-817`, replace the `parent_key` construction:
-
-```python
-            parent_key = (
-                _attendee_key_for(current),
-                str(current.get("class_p4_id") or ""),
-                str(parent_number),
-            )
-```
-
-At `:838-840`, replace the grouped-output block:
-
-```python
-        attendee_key = _attendee_key_for(item)
-        badge_name = str(item.get("merit_badge_name") or "")
-        bucket = grouped.setdefault(
-            attendee_key,
-            {"display_name": str(item.get("scout_name") or ""), "badges": {}},
-        )
-        bucket["badges"].setdefault(badge_name, []).append(entry)
-```
-
-And update the return annotation on `:771`:
-
-```python
-def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-```
-
-- [ ] **Step 5: Update `write_email_reports` for the new shape**
-
-At `:920`, replace:
-
-```python
-        badge_groups = missing.get(scout_name, {})
-```
-
-with:
-
-```python
-        attendee_key = str(scout.get("attendee_id") or "").strip() or f"unresolved-{scout_name}"
-        bucket = missing.get(attendee_key) or {"display_name": scout_name, "badges": {}}
-        badge_groups = bucket["badges"]
-```
-
-- [ ] **Step 6: Replace the KNOWN_DEFECT test**
-
-Delete `test_KNOWN_DEFECT_same_named_attendees_are_merged` from
-`tests/characterization/test_inference.py`. Its corrected counterpart now lives in
-`tests/unit/test_inference_identity.py`.
-
-- [ ] **Step 7: Run the whole suite**
-
-Run: `.venv/bin/pytest tests/ -v`
-
-Expected: all pass. **Three Task 7 tests assert the old return shape and will fail** —
-update each to the new `{attendee_key: {"display_name": ..., "badges": {...}}}` form:
-
-| Test | Old access | New access |
+# ScoutMB Foundation Execution Plan
+
+**Status:** Ready for implementation
+**Rewritten:** 2026-07-22
+**Specification:** `docs/superpowers/specs/2026-07-21-scoutmb-refactor-design.md`
+**Execution contract:** Four phases, three blocking go/no-go gates, and one final acceptance task
+
+## Outcome
+
+Turn the current script-oriented application into an installable Python 3.12 product without
+changing known behavior accidentally, exposing private attendee data, or making normal automated
+tests contact `scoutingevent.com`. The target architecture is hexagonal: a functional core, explicit
+ports, adapters at the edges, and vertical feature slices at composition boundaries.
+
+This plan is the sole execution source of truth for the foundation work. Its generated sidecar is
+valid only when `planSha256` matches this file. An executor must stop if the hashes differ.
+
+## Non-negotiable contracts
+
+- Default unit, contract, integration, UI, browser, packaging, and performance tests use synthetic
+  data or a local fake service. Only an explicitly opted-in staging/live smoke test may contact the
+  real service.
+- A private local corpus under `raw_data/` may supplement synthetic tests. It is never committed,
+  copied into hosted CI, or printed except as redacted aggregates.
+- Upstream attendee ID is required at the boundary. Missing or malformed identity fails closed.
+  Each accepted attendee receives a full random UUIDv4 scoped to that run. Names, digests, HMACs,
+  shortened identifiers, and unresolved buckets are not identity.
+- Shareable artifacts never contain the upstream attendee ID, QR token, session cookies, or bearer
+  material.
+- Migration is copy-only, hash-verified, resumable, collision-safe, and never deletes the legacy
+  source. Split-brain writes are detected and preserved.
+- The launcher owns one installed instance through an OS-backed lock and authenticated rendezvous.
+  A second launch activates the existing instance and exits.
+- The emailed installer remains at or below 18 MB, leaving margin below the 25 MB transport limit.
+  Playwright/browser, OpenCV, and PDF support are separate capability downloads.
+- Supported release targets are Windows 11 x64 and macOS 14+ arm64. Windows 10 x64 is best effort
+  only when the Windows 11 payload works unchanged.
+- D23 signing and notarization remain deferred for internal-only distribution. Revisit before any
+  broader distribution.
+
+## Scope boundaries
+
+### In scope
+
+- Packaging, lock files, quality tooling, CI, offline enforcement, fixtures, behavior
+  characterization, package boundaries, identity, outputs, local runtime, storage, migration,
+  updates, thin installers, optional capabilities, diagnostics seams, supply-chain evidence, and
+  performance/resource limits.
+
+### Not in scope
+
+- Rebuilding or modifying `scoutingevent.com`.
+- A cloud backend, multi-user server deployment, or remote telemetry collector.
+- Automatic telemetry upload; Phase D provides only an offline-safe OpenTelemetry seam and spool.
+- Code signing/notarization, automatic downgrade migrations, or Windows 10-specific payloads.
+- Treating Safari as a supported automated acquisition engine. It is an explicit experimental
+  system-browser option on macOS; Chrome then managed Chromium are supported acquisition paths.
+- Deleting legacy data or the compatibility shims before final parity and migration acceptance.
+
+## What already exists
+
+The repository graph was refreshed before this rewrite. It currently identifies 169 code symbols,
+22 execution flows, no test nodes, and several large orchestration hotspots.
+
+| Existing area | Source anchors | Behavior this plan preserves or isolates |
 | --- | --- | --- |
-| `test_build_missing_requirements_groups_by_badge` | `grouped["Avery Archer"]` | `grouped["90000001"]["badges"]` |
-| `test_leaf_selection_includes_incomplete_ancestors` | `[...]["Avery Archer"]["Chess"]` | `[...]["90000001"]["badges"]["Chess"]` |
-| `test_section_headers_and_not_used_rows_are_excluded` | `[...]["Avery Archer"]["Chess"]` | `[...]["90000001"]["badges"]["Chess"]` |
+| Schedule acquisition and reports | `scout_schedule_cli.py`: `process_scout`, `annotate_requirement_statuses`, `build_missing_requirements`, `write_outputs`, `async_main` | Input formats, retries, inference, CSV/JSON/HTML/email outputs, CLI defaults |
+| PDF extraction | `pdf_to_scouts.py`: `expand_pdf_inputs`, `decode_embedded_qr`, `extract_pdf`, `write_attendees_csv` | PDF discovery, QR extraction, attendee CSV contract, error behavior |
+| Local web application | `ui/server.py`: `start_pdf_extract`, `start_schedule_download`, `operation_events`, `open_report` | Background operations, status/SSE APIs, report launch, pause/resume |
+| Desktop entry point | `run_app.py`: `free_port`, `start_server`, `wait_until_ready`, `run` | Local server startup and desktop window launch |
+| Windows bootstrap | `bootstrap/main.py`: `_acquire_lock`, `_launch_app`, `_run`; `bootstrap/paths.py`: `get_paths`; `bootstrap/source_sync.py`: `sync_app_source` | Installation ownership, source copy, Python/browser setup, application launch |
+| Download and environment setup | `bootstrap/downloader.py`: `download`; `bootstrap/python_env.py`: `provision_python`; `bootstrap/browser_setup.py`: `resolve_browser_channel`; `bootstrap/marker.py`: `is_environment_valid` | Downloads, extraction, dependency install, browser selection, readiness marker |
 
-The *assertions* in each test stay identical — only the lookup path changes. That is the
-point of the characterization net: the shape moved, the behavior did not.
+`ui/server.py` currently mutates `sys.path`; Phase B removes that behavior. The new package must be
+installed into the development environment and copied/installed into release roots through normal
+packaging. No first-party module may add or rewrite import search paths.
 
-- [ ] **Step 8: Commit**
+## Target dependency direction
 
-```bash
-git add scout_schedule_cli.py tests/unit/test_inference_identity.py tests/characterization/test_inference.py
-git commit -m "fix: key inference grouping on attendee id, not display name
-
-Two attendees sharing a display name had their requirements merged into one
-bucket. attendee_id was read at :919 and never used. Grouping, parent lookup,
-and email bucketing now key on attendee identity; the name is display data."
+```text
+CLI / local web / desktop / launcher
+                 |
+          feature services
+                 |
+     ports + pure domain policies
+        /                    \
+input/PDF adapters     ScoutingEvent adapter
+storage/artifacts      browser/session adapter
+                 |
+       explicit composition roots
 ```
 
----
+Rules enforced by architecture tests:
 
-### Task 11: Collision-free output filenames
+- Domain and ports import no adapters, UI, bootstrap, Playwright, OpenCV, or PDF library.
+- Feature services depend on ports and typed DTOs, never global filesystem or network state.
+- Adapters may depend inward; composition roots select adapters and own resource lifetimes.
+- Compatibility modules delegate into `scoutmb` and contain no business logic.
+- Imports work from installed packages and clean copied release roots without `sys.path` mutation.
 
-**Goal:** Email and raw-payload filenames stop colliding for same-named attendees, while staying human-scannable.
+## Test topology
 
-**Files:**
-- Modify: `scout_schedule_cli.py:490` (raw payload), `:935` (email files)
-- Test: `tests/unit/test_output_filenames.py`
-
-**Acceptance Criteria:**
-- [ ] Two same-named attendees produce **four** distinct email files, not two
-- [ ] Raw payload filenames are distinct per attendee
-- [ ] Filenames contain the readable name slug **and** the `AttendeeKey.short` digest
-- [ ] No filename contains the raw `attendee_id`
-
-**Verify:** `.venv/bin/pytest tests/unit/test_output_filenames.py -v` → all pass
-
-**Steps:**
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/unit/test_output_filenames.py
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from scoutmb.domain.identity import AttendeeKey  # noqa: E402
-from scout_schedule_cli import attendee_filename_stem  # noqa: E402
-
-
-def test_same_name_different_ids_produce_distinct_stems():
-    a = attendee_filename_stem("Avery Archer", "90000001")
-    b = attendee_filename_stem("Avery Archer", "90000002")
-
-    assert a != b
-
-
-def test_stem_is_readable_and_hides_the_raw_id():
-    stem = attendee_filename_stem("Avery Archer", "90000042")
-
-    assert stem.startswith("avery-archer-")
-    assert "90000042" not in stem
-    assert stem.endswith(AttendeeKey.from_attendee_id("90000042").short)
-
-
-def test_stem_is_stable_across_calls():
-    assert attendee_filename_stem("Avery Archer", "90000001") == attendee_filename_stem(
-        "Avery Archer", "90000001"
-    )
+```text
+synthetic factories ---> unit and property tests --------------------+
+local fake service ---> gateway/browser contract tests --------------+--> gate suites
+legacy adapters ------> characterization and parity tests ------------+
+private raw_data -----> optional local redacted corpus checks --------+
+throwaway install ----> migration/update/platform rehearsals ---------+
+explicit staging -----> read-only live smoke only; never a PR gate ---+
 ```
 
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `.venv/bin/pytest tests/unit/test_output_filenames.py -v`
-Expected: FAIL with `ImportError: cannot import name 'attendee_filename_stem'`
-
-- [ ] **Step 3: Add the helper to `scout_schedule_cli.py`**
-
-Immediately after `safe_slug` (`:595-597`), add:
-
-```python
-def attendee_filename_stem(scout_name: str, attendee_id: str) -> str:
-    """Readable, collision-free filename stem for one attendee.
-
-    The slug keeps files human-scannable; the digest suffix keeps two
-    same-named attendees from overwriting each other. The raw attendee_id is a
-    bearer token and never appears in a filename.
-    """
-    from scoutmb.domain.identity import AttendeeKey
-
-    cleaned = str(attendee_id or "").strip()
-    key = (
-        AttendeeKey.from_attendee_id(cleaned)
-        if cleaned
-        else AttendeeKey.unresolved(scout_name)
-    )
-    return f"{safe_slug(scout_name)}-{key.short}"
-```
-
-- [ ] **Step 4: Use it for raw payloads**
-
-At `:490`, replace:
-
-```python
-        slug = safe_slug(result.name)
-```
-
-with:
-
-```python
-        slug = attendee_filename_stem(result.name, result.attendee_id)
-```
-
-- [ ] **Step 5: Use it for email files**
-
-At `:935`, replace:
-
-```python
-            slug = safe_slug(scout_name)
-```
-
-with:
-
-```python
-            slug = attendee_filename_stem(scout_name, attendee_id)
-```
-
-- [ ] **Step 6: Run the suite**
-
-Run: `.venv/bin/pytest tests/ -v`
-Expected: all pass.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add scout_schedule_cli.py tests/unit/test_output_filenames.py
-git commit -m "fix: make email and raw payload filenames collision-free per attendee"
-```
-
----
-
-### Task 12: Atomic `scouts.csv` writes
-
-**Goal:** A failed PDF extraction must leave the previous `scouts.csv` intact, rather than truncating it.
-
-**Files:**
-- Modify: `pdf_to_scouts.py` (`write_attendees_csv`, `:448`)
-- Test: `tests/unit/test_atomic_write.py`
-
-**Acceptance Criteria:**
-- [ ] A write that raises mid-way leaves the original file byte-identical
-- [ ] A successful write replaces the file atomically
-- [ ] No `.tmp` file is left behind on either path
-
-**Verify:** `.venv/bin/pytest tests/unit/test_atomic_write.py -v` → all pass
-
-**Steps:**
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/unit/test_atomic_write.py
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from pdf_to_scouts import atomic_write_text  # noqa: E402
-
-
-def test_successful_write_replaces_content(tmp_path):
-    target = tmp_path / "scouts.csv"
-    target.write_text("old", encoding="utf-8")
-
-    atomic_write_text(target, "new")
-
-    assert target.read_text(encoding="utf-8") == "new"
-    assert list(tmp_path.glob("*.tmp")) == []
-
-
-def test_failed_write_preserves_the_original(tmp_path):
-    target = tmp_path / "scouts.csv"
-    target.write_text("irreplaceable", encoding="utf-8")
-
-    def exploding_render() -> str:
-        raise RuntimeError("extraction failed halfway")
-
-    with pytest.raises(RuntimeError):
-        atomic_write_text(target, exploding_render())
-
-    assert target.read_text(encoding="utf-8") == "irreplaceable"
-    assert list(tmp_path.glob("*.tmp")) == []
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `.venv/bin/pytest tests/unit/test_atomic_write.py -v`
-Expected: FAIL with `ImportError: cannot import name 'atomic_write_text'`
-
-- [ ] **Step 3: Add the helper to `pdf_to_scouts.py`**
-
-Add above `write_attendees_csv`:
-
-```python
-def atomic_write_text(path: Path, content: str, encoding: str = "utf-8-sig") -> None:
-    """Write via a temp file and os.replace, so a failure never truncates.
-
-    scouts.csv can represent a season of work that only exists because someone
-    scanned a stack of PDFs. A half-written file is worse than no new file.
-    """
-    tmp_path = path.with_name(path.name + ".tmp")
-    try:
-        tmp_path.write_text(content, encoding=encoding, newline="")
-        os.replace(tmp_path, path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
-```
-
-Add `import os` to the imports if absent.
-
-- [ ] **Step 4: Route `write_attendees_csv` through it**
-
-Replace the body of `write_attendees_csv` so it renders to a string first, then calls
-`atomic_write_text(path, rendered)`:
-
-```python
-def write_attendees_csv(path: Path, attendees: Sequence[ExtractedAttendee]) -> None:
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(
-        ["Attendee Name", "Registrant Type", "QR Code Contents",
-         "Source PDF", "Page", "Decode Method"]
-    )
-    for attendee in attendees:
-        writer.writerow(
-            [attendee.name, attendee.registrant_type, attendee.qr_value,
-             attendee.source_pdf, attendee.page_number, attendee.decode_method]
-        )
-    atomic_write_text(path, buffer.getvalue())
-```
-
-Add `import io` if absent. **Check the existing column order against the current
-implementation before replacing** — the header is a contract `scout_schedule_cli.py`
-depends on.
-
-- [ ] **Step 5: Run the suite**
-
-Run: `.venv/bin/pytest tests/ -v`
-Expected: all pass.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add pdf_to_scouts.py tests/unit/test_atomic_write.py
-git commit -m "fix: write scouts.csv atomically so a failed extraction preserves the old file"
-```
-
----
-
-### Task 13: `UiSettings` with explicit `data_root`
-
-**Goal:** Kill the `__file__`-derived data paths (Hazard 1) **before** any module moves, with a documented resolution order.
-
-**Files:**
-- Create: `src/scoutmb/ui/__init__.py`
-- Create: `src/scoutmb/ui/settings.py`
-- Modify: `ui/server.py:24-41`
-- Test: `tests/unit/test_ui_settings.py`
-
-**Acceptance Criteria:**
-- [ ] Resolution order: explicit argument → `SCOUTMB_DATA_DIR` → platform user-data dir → `Path.cwd()` only in dev mode
-- [ ] `ui/server.py` derives no data path from `__file__`
-- [ ] Static-asset resolution is unchanged in this task (it moves in Plan 2)
-- [ ] A test proves that relocating the module does not move the data root
-
-**Verify:** `.venv/bin/pytest tests/unit/test_ui_settings.py -v` → all pass
-
-**Steps:**
-
-- [ ] **Step 1: Write the failing tests**
-
-```python
-# tests/unit/test_ui_settings.py
-from __future__ import annotations
-
-from pathlib import Path
-
-from scoutmb.ui.settings import UiSettings
-
-
-def test_explicit_argument_wins(tmp_path, monkeypatch):
-    monkeypatch.setenv("SCOUTMB_DATA_DIR", str(tmp_path / "from-env"))
-    settings = UiSettings.resolve(data_root=tmp_path / "explicit")
-
-    assert settings.data_root == tmp_path / "explicit"
-
-
-def test_environment_variable_is_used_when_no_argument(tmp_path, monkeypatch):
-    monkeypatch.setenv("SCOUTMB_DATA_DIR", str(tmp_path / "from-env"))
-    settings = UiSettings.resolve()
-
-    assert settings.data_root == tmp_path / "from-env"
-
-
-def test_dev_mode_falls_back_to_cwd(tmp_path, monkeypatch):
-    monkeypatch.delenv("SCOUTMB_DATA_DIR", raising=False)
-    monkeypatch.chdir(tmp_path)
-    settings = UiSettings.resolve(dev_mode=True)
-
-    assert settings.data_root == tmp_path
-
-
-def test_derived_paths_hang_off_data_root(tmp_path):
-    settings = UiSettings.resolve(data_root=tmp_path)
-
-    assert settings.scouts_csv == tmp_path / "scouts.csv"
-    assert settings.pdf_uploads_dir == tmp_path / "pdf-uploads"
-    assert settings.runs_dir == tmp_path / "runs"
-
-
-def test_data_root_is_independent_of_module_location(tmp_path, monkeypatch):
-    """The whole point of Hazard 1: moving the package must not move the data."""
-    monkeypatch.setenv("SCOUTMB_DATA_DIR", str(tmp_path))
-    settings = UiSettings.resolve()
-
-    assert settings.data_root == tmp_path
-    assert Path(__file__).parent not in settings.data_root.parents
-```
-
-- [ ] **Step 2: Run to verify they fail**
-
-Run: `.venv/bin/pytest tests/unit/test_ui_settings.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'scoutmb.ui'`
-
-- [ ] **Step 3: Write the implementation**
-
-```python
-# src/scoutmb/ui/__init__.py
-```
-
-```python
-# src/scoutmb/ui/settings.py
-"""Where the web UI reads and writes user data.
-
-NEVER derive a data path from __file__. Doing so ties irreplaceable user data
-to the package's location on disk, so moving or reinstalling the package
-silently relocates — or destroys — it.
-"""
-
-from __future__ import annotations
-
-import os
-import sys
-from dataclasses import dataclass
-from pathlib import Path
-
-APP_NAME = "ScoutingMeritBadges"
-DATA_DIR_ENV = "SCOUTMB_DATA_DIR"
-
-
-def platform_data_root() -> Path:
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA")
-        if base:
-            return Path(base) / APP_NAME / "data"
-    elif sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / APP_NAME / "data"
-    return Path.home() / ".local" / "share" / APP_NAME / "data"
-
-
-@dataclass(frozen=True, slots=True)
-class UiSettings:
-    data_root: Path
-
-    @classmethod
-    def resolve(cls, data_root: Path | None = None, dev_mode: bool = False) -> UiSettings:
-        """Resolution order: explicit -> SCOUTMB_DATA_DIR -> platform -> cwd (dev only)."""
-        if data_root is not None:
-            return cls(Path(data_root))
-
-        from_env = os.environ.get(DATA_DIR_ENV)
-        if from_env:
-            return cls(Path(from_env))
-
-        if dev_mode:
-            return cls(Path.cwd())
-
-        return cls(platform_data_root())
-
-    @property
-    def scouts_csv(self) -> Path:
-        return self.data_root / "scouts.csv"
-
-    @property
-    def pdf_uploads_dir(self) -> Path:
-        return self.data_root / "pdf-uploads"
-
-    @property
-    def runs_dir(self) -> Path:
-        return self.data_root / "runs"
-
-    def ensure_dirs(self) -> None:
-        self.data_root.mkdir(parents=True, exist_ok=True)
-        self.runs_dir.mkdir(parents=True, exist_ok=True)
-```
-
-- [ ] **Step 4: Rewire `ui/server.py`**
-
-Replace `ui/server.py:24-41`:
-
-```python
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-import pdf_to_scouts  # noqa: E402
-import scout_schedule_cli  # noqa: E402
-
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile  # noqa: E402
-from fastapi.responses import JSONResponse, StreamingResponse  # noqa: E402
-from fastapi.staticfiles import StaticFiles  # noqa: E402
-
-SCOUTS_CSV = REPO_ROOT / "scouts.csv"
-PDF_UPLOADS_DIR = REPO_ROOT / "pdf-uploads"
-RUNS_DIR = REPO_ROOT / "runs"
-STATIC_DIR = Path(__file__).resolve().parent / "static"
-BROWSER_CHANNEL = os.environ.get("SCOUTMB_BROWSER_CHANNEL") or None
-
-RUNS_DIR.mkdir(exist_ok=True)
-```
-
-with:
-
-```python
-CODE_ROOT = Path(__file__).resolve().parent.parent
-if str(CODE_ROOT) not in sys.path:
-    sys.path.insert(0, str(CODE_ROOT))
-
-import pdf_to_scouts  # noqa: E402
-import scout_schedule_cli  # noqa: E402
-
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile  # noqa: E402
-from fastapi.responses import JSONResponse, StreamingResponse  # noqa: E402
-from fastapi.staticfiles import StaticFiles  # noqa: E402
-
-from scoutmb.ui.settings import UiSettings  # noqa: E402
-
-# Data location is resolved explicitly and NEVER derived from __file__ —
-# see Hazard 1 in the design spec. dev_mode falls back to cwd, which is how
-# the repo-root workflow keeps working during the restructure.
-SETTINGS = UiSettings.resolve(dev_mode=not os.environ.get("SCOUTMB_DATA_DIR"))
-SCOUTS_CSV = SETTINGS.scouts_csv
-PDF_UPLOADS_DIR = SETTINGS.pdf_uploads_dir
-RUNS_DIR = SETTINGS.runs_dir
-
-# STATIC_DIR still resolves from __file__: it locates CODE, not user data.
-# It moves to importlib.resources in Plan 2 when the package relocates.
-STATIC_DIR = Path(__file__).resolve().parent / "static"
-BROWSER_CHANNEL = os.environ.get("SCOUTMB_BROWSER_CHANNEL") or None
-
-SETTINGS.ensure_dirs()
-```
-
-- [ ] **Step 5: Run the suite and start the app once**
-
-Run: `.venv/bin/pytest tests/ -v`
-Expected: all pass.
-
-Run: `.venv/bin/python run_app.py --browser`
-Expected: the UI loads and `/api/status` responds. Ctrl-C to stop.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/scoutmb/ui ui/server.py tests/unit/test_ui_settings.py
-git commit -m "fix: resolve UI data paths explicitly instead of from __file__
-
-Closes Hazard 1 before any module moves: deriving data paths from __file__
-means relocating the package silently relocates scouts.csv, runs/, and
-pdf-uploads/ — and under wheel install, into a directory pip replaces."
-```
-
----
-
-### Task 14: Copy-only legacy data migration
-
-**Goal:** Move the one live installation's data from `app/` to `data/` without ever deleting the originals.
-
-**Files:**
-- Create: `bootstrap/migrate.py`
-- Modify: `bootstrap/paths.py` (add `data_dir`), `bootstrap/main.py` (call migration, export env var)
-- Test: `tests/unit/test_migrate.py`
-
-**Acceptance Criteria:**
-- [ ] Copies `scouts.csv`, `pdf-uploads/`, `runs/` from `app/` to `data/`
-- [ ] **Never deletes or moves** the originals
-- [ ] Idempotent — a second run is a no-op via the `.migrated` marker
-- [ ] Verifies each copy (size for files, recursive count for directories)
-- [ ] A destination collision writes `<name>.legacy` instead of overwriting
-- [ ] The launcher exports `SCOUTMB_DATA_DIR` pointing at `data/`
-
-**Verify:** `.venv/bin/pytest tests/unit/test_migrate.py -v` → all pass
-
-**Steps:**
-
-- [ ] **Step 1: Write the failing tests**
-
-```python
-# tests/unit/test_migrate.py
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from bootstrap.migrate import MIGRATION_MARKER, migrate_legacy_data  # noqa: E402
-
-
-def _legacy_install(root: Path) -> tuple[Path, Path]:
-    app_dir = root / "app"
-    data_dir = root / "data"
-    (app_dir / "pdf-uploads").mkdir(parents=True)
-    (app_dir / "runs" / "2026-07-19_2139").mkdir(parents=True)
-    (app_dir / "scouts.csv").write_text("Attendee Name,QR Code Contents\n", encoding="utf-8")
-    (app_dir / "runs" / "2026-07-19_2139" / "summary.json").write_text("{}", encoding="utf-8")
-    return app_dir, data_dir
-
-
-def test_copies_all_user_data(tmp_path):
-    app_dir, data_dir = _legacy_install(tmp_path)
-
-    migrate_legacy_data(app_dir, data_dir)
-
-    assert (data_dir / "scouts.csv").read_text(encoding="utf-8").startswith("Attendee Name")
-    assert (data_dir / "runs" / "2026-07-19_2139" / "summary.json").is_file()
-    assert (data_dir / "pdf-uploads").is_dir()
-
-
-def test_originals_are_never_deleted(tmp_path):
-    app_dir, data_dir = _legacy_install(tmp_path)
-
-    migrate_legacy_data(app_dir, data_dir)
-
-    assert (app_dir / "scouts.csv").is_file(), "migration must never delete the source"
-    assert (app_dir / "runs" / "2026-07-19_2139" / "summary.json").is_file()
-
-
-def test_is_idempotent(tmp_path):
-    app_dir, data_dir = _legacy_install(tmp_path)
-
-    migrate_legacy_data(app_dir, data_dir)
-    (data_dir / "scouts.csv").write_text("edited after migration", encoding="utf-8")
-    migrate_legacy_data(app_dir, data_dir)
-
-    assert (data_dir / "scouts.csv").read_text(encoding="utf-8") == "edited after migration"
-    assert (data_dir / MIGRATION_MARKER).is_file()
-
-
-def test_collision_writes_alongside_instead_of_overwriting(tmp_path):
-    app_dir, data_dir = _legacy_install(tmp_path)
-    data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / "scouts.csv").write_text("pre-existing", encoding="utf-8")
-
-    migrate_legacy_data(app_dir, data_dir)
-
-    assert (data_dir / "scouts.csv").read_text(encoding="utf-8") == "pre-existing"
-    assert (data_dir / "scouts.csv.legacy").read_text(encoding="utf-8").startswith("Attendee Name")
-
-
-def test_no_legacy_install_is_a_no_op(tmp_path):
-    data_dir = tmp_path / "data"
-
-    migrate_legacy_data(tmp_path / "app", data_dir)
-
-    assert not data_dir.exists() or not any(data_dir.iterdir())
-```
-
-- [ ] **Step 2: Run to verify they fail**
-
-Run: `.venv/bin/pytest tests/unit/test_migrate.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootstrap.migrate'`
-
-- [ ] **Step 3: Write the implementation**
-
-```python
-# bootstrap/migrate.py
-"""One-time copy of user data from the legacy app/ directory into data/.
-
-COPY ONLY. The originals are never moved or deleted. One installation exists
-in the wild holding a season of real Scout records; if this migration is wrong,
-the data must still be sitting where it always was.
-"""
-
-from __future__ import annotations
-
-import json
-import shutil
-import time
-from pathlib import Path
-
-MIGRATION_MARKER = ".migrated"
-
-# (relative name, is_directory)
-_LEGACY_ITEMS: list[tuple[str, bool]] = [
-    ("scouts.csv", False),
-    ("pdf-uploads", True),
-    ("runs", True),
-]
-
-
-def _count_files(path: Path) -> int:
-    return sum(1 for child in path.rglob("*") if child.is_file())
-
-
-def migrate_legacy_data(app_dir: Path, data_dir: Path) -> dict[str, object] | None:
-    """Copy legacy user data into data_dir. Returns a report, or None if skipped."""
-    if (data_dir / MIGRATION_MARKER).is_file():
-        return None
-    if not app_dir.is_dir():
-        return None
-
-    present = [(name, is_dir) for name, is_dir in _LEGACY_ITEMS if (app_dir / name).exists()]
-    if not present:
-        return None
-
-    data_dir.mkdir(parents=True, exist_ok=True)
-    copied: list[str] = []
-    collisions: list[str] = []
-
-    for name, is_dir in present:
-        source = app_dir / name
-        destination = data_dir / name
-
-        if destination.exists():
-            destination = data_dir / f"{name}.legacy"
-            collisions.append(name)
-            if destination.exists():
-                shutil.rmtree(destination) if destination.is_dir() else destination.unlink()
-
-        if is_dir:
-            shutil.copytree(source, destination)
-            if _count_files(source) != _count_files(destination):
-                raise RuntimeError(f"Migration verification failed for directory {name}")
-        else:
-            shutil.copy2(source, destination)
-            if source.stat().st_size != destination.stat().st_size:
-                raise RuntimeError(f"Migration verification failed for file {name}")
-
-        copied.append(destination.name)
-
-    report = {
-        "migrated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "source": str(app_dir),
-        "copied": copied,
-        "collisions": collisions,
-        "originals_retained": True,
-    }
-    (data_dir / MIGRATION_MARKER).write_text(json.dumps(report, indent=2), encoding="utf-8")
-    return report
-```
-
-- [ ] **Step 4: Add `data_dir` to `AppPaths`**
-
-In `bootstrap/paths.py`, add `data_dir: Path` to the `AppPaths` dataclass, include it in
-`ensure_dirs`, and set `data_dir=root / "data"` in `get_paths()`.
-
-- [ ] **Step 5: Call migration and export the env var in `bootstrap/main.py`**
-
-In `_run`, immediately after `source_sync.sync_app_source(paths)`:
-
-```python
-    from bootstrap import migrate
-
-    report = migrate.migrate_legacy_data(paths.app_dir, paths.data_dir)
-    if report is not None:
-        logger.info("Migrated legacy user data: %s", report)
-```
-
-In `_launch_app`, add the data directory to the child environment:
-
-```python
-    env = {
-        **os.environ,
-        "SCOUTMB_BROWSER_CHANNEL": channel or "",
-        "SCOUTMB_DATA_DIR": str(paths.data_dir),
-    }
-```
-
-- [ ] **Step 6: Run the suite**
-
-Run: `.venv/bin/pytest tests/ -v`
-Expected: all pass.
-
-- [ ] **Step 7: Rehearse the migration on a throwaway root**
-
-```bash
-export SCOUTMB_BOOTSTRAP_ROOT=$(mktemp -d)
-mkdir -p "$SCOUTMB_BOOTSTRAP_ROOT/app/runs/2026-07-19_2139" "$SCOUTMB_BOOTSTRAP_ROOT/app/pdf-uploads"
-echo "Attendee Name,QR Code Contents" > "$SCOUTMB_BOOTSTRAP_ROOT/app/scouts.csv"
-.venv/bin/python -c "
-from pathlib import Path
-from bootstrap.migrate import migrate_legacy_data
-root = Path('$SCOUTMB_BOOTSTRAP_ROOT')
-print(migrate_legacy_data(root/'app', root/'data'))
-print('original still present:', (root/'app'/'scouts.csv').is_file())
-"
-```
-Expected: a report dict prints, and `original still present: True`.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add bootstrap/migrate.py bootstrap/paths.py bootstrap/main.py tests/unit/test_migrate.py
-git commit -m "feat: copy-only migration of legacy app/ user data into data/
-
-One install exists in the wild with real Scout records. Migration copies and
-verifies, never moves or deletes; the originals stay put so a bad migration
-is recoverable."
-```
-
----
-
-## Self-Review
-
-**Spec coverage (Phases 0–3):**
-
-| Spec requirement | Task |
+Every production network path receives three layers of denial in default tests: Python socket
+blocking, application network-policy checks, and guarded browser contexts with external-request
+sentinels. The `egress-denied` CI job additionally runs browser tests in a deny-by-default network
+sandbox.
+
+## Execution rules
+
+1. Execute tasks only when every `blockedBy` task in the sidecar is complete.
+2. Write the named RED test before changing production behavior. Characterization tests may start
+   green only when they pin existing behavior.
+3. Run every command listed by the task in order. A task is complete only when all expected results
+   are observed.
+4. If recovery says “preserve legacy,” restore the prior adapter as the default and retain the new
+   code behind the explicit composition seam; do not weaken a test to make the task green.
+5. Gates are stop points, not summaries. Do not begin the next phase with a conditional waiver.
+6. Keep commits task-scoped. Never include `raw_data/`, local state, credentials, generated private
+   reports, or unrelated working-tree changes.
+
+For every implementation task, **Anchors** name the input/change surfaces, **Observable result** is
+the single output, and **Contract** states invariants, failure behavior, and privacy/compatibility
+impact. **Named tests**, **Commands**, **Expected**, and **Recovery** are the acceptance and rollback
+contract. Gate sections use the same acceptance fields but aggregate completed tasks rather than
+introducing another implementation change.
+
+## Parallelization
+
+- Phase A characterization tasks A4-A8 may proceed in parallel after A1-A3, but they must not edit
+  the same fixture or shared test configuration concurrently.
+- After Gate 1, the gateway/acquisition lane (B4-B5), identity/output lane (B6-B8), and runtime lane
+  (B9-B11) may proceed concurrently once their declared dependencies are satisfied.
+- Phase C is intentionally conservative: storage and ownership land before migration and release
+  activation. Do not parallelize edits to bootstrap state, locks, or activation metadata.
+- After Gate 3, capabilities/browser work (D1-D3), observability (D4), and supply-chain evidence
+  (D5) may proceed in parallel. D6 and D7 integrate those results.
+
+## Phase A — Tooling and complete characterization
+
+Production behavior stays in place. This phase creates a reproducible environment, an offline test
+boundary, synthetic/private fixture paths, and a complete contract matrix.
+
+### A1 — Establish Python 3.12 project metadata and the canonical lock
+
+- **Observable result:** A Hatchling `src/` project syncs reproducibly from `uv.lock`, the launcher
+  requirements export is derived from that lock, and the installed package imports without path
+  manipulation.
+- **Anchors:** `pyproject.toml`; `uv.lock`; `bootstrap/requirements-launcher.txt`; `.gitignore`.
+- **Contract:** Core, optional capability, and development dependencies are separate. The export
+  contains runtime dependencies only and never becomes a second source of dependency truth.
+- **Named tests:** `tests/packaging/test_project_metadata.py::test_python_and_build_contract`;
+  `tests/packaging/test_project_metadata.py::test_launcher_export_matches_lock`.
+- **Commands:** `uv lock --check`; `uv sync --locked --all-groups`;
+  `uv export --locked --no-dev --no-emit-project --format requirements.txt --output-file bootstrap/requirements-launcher.txt`;
+  `uv run pytest tests/packaging/test_project_metadata.py -q`.
+- **Expected:** Every command exits 0; the export has no diff after regeneration; Python reports
+  3.12; `import scoutmb` resolves from the installed editable package.
+- **Recovery:** If resolution or export is not reproducible, do not hand-edit exported pins. Correct
+  project groups/markers, regenerate `uv.lock`, and rerun all four commands.
+
+### A2 — Add green quality and lock CI jobs
+
+- **Observable result:** `lint-format`, `types`, `lock`, and an initially narrow `unit-contract` job
+  run on every pull request and pass on supported Python.
+- **Anchors:** `.github/workflows/ci.yml`; Ruff, mypy, pytest, and coverage configuration in
+  `pyproject.toml`.
+- **Contract:** Every introduced job is green when merged. Branch coverage is recorded honestly;
+  thresholds rise with new code instead of hiding the baseline.
+- **Named tests:** `tests/ci/test_workflow_contract.py::test_phase_a_jobs_are_required`;
+  `tests/ci/test_workflow_contract.py::test_ci_uses_locked_sync`.
+- **Commands:** `uv run ruff check .`; `uv run ruff format --check .`;
+  `uv run mypy src tests`; `uv run pytest tests/ci/test_workflow_contract.py -q`.
+- **Expected:** All commands exit 0; the workflow uses Python 3.12 and `uv sync --locked`; no job
+  performs a live-service smoke test.
+- **Recovery:** If existing code blocks strict typing, scope documented mypy overrides to legacy
+  modules only. Do not disable checks for `src/scoutmb` or allow a red CI job.
+
+### A3 — Enforce offline-by-default tests and application egress policy
+
+- **Observable result:** Any default test attempt to reach a non-loopback address, including from
+  Playwright redirects, workers, frames, popups, WebSockets, or a browser subprocess, fails with a
+  named policy error before private data leaves the process.
+- **Anchors:** `tests/conftest.py`; `src/scoutmb/network_policy.py`; `.github/workflows/ci.yml` jobs
+  `local-playwright` and `egress-denied`.
+- **Contract:** Loopback fake services are permitted. `scoutingevent.com` requires the explicit
+  staging/live marker and environment opt-in; the default constructor cannot create that gateway.
+- **Named tests:** `tests/network/test_offline_policy.py::test_non_loopback_socket_is_blocked`;
+  `tests/network/test_offline_policy.py::test_live_gateway_requires_two_part_opt_in`;
+  `tests/integration/test_browser_egress.py::test_all_browser_request_surfaces_are_guarded`.
+- **Commands:** `uv run pytest tests/network tests/integration/test_browser_egress.py -q`;
+  `uv run pytest -m "not live_service" -q`.
+- **Expected:** Both commands exit 0; sentinels record zero non-loopback requests; deliberately
+  injected external URLs fail with `ExternalNetworkBlocked`.
+- **Recovery:** Disable the new network adapter, keep the local fake path, and repair the missing
+  guard. Never recover by allowlisting the real host in default tests.
+
+### A4 — Create synthetic factories and a repository privacy tripwire
+
+- **Observable result:** The committed test corpus covers distinct/same names, IDs, tokens,
+  requirement shapes, malformed payloads, and output trees using demonstrably synthetic values;
+  the suite fails if likely private data is introduced.
+- **Anchors:** `tests/factories/`; `tests/fixtures/synthetic/`; `tests/privacy/test_fixture_hygiene.py`.
+- **Contract:** Factories are deterministic when seeded but UUIDv4 assertions validate version and
+  uniqueness, not fixed values. No fixture is generated by copying private files into the tree.
+- **Named tests:** `tests/privacy/test_fixture_hygiene.py::test_committed_fixtures_are_synthetic`;
+  `tests/factories/test_record_factories.py::test_identity_edge_cases_are_representable`.
+- **Commands:** `uv run pytest tests/factories tests/privacy/test_fixture_hygiene.py -q`;
+  `uv run python tools/check_private_data.py tests`.
+- **Expected:** Both commands exit 0; the scanner prints `private-data findings: 0` and never echoes
+  the matched source text.
+- **Recovery:** Quarantine the new fixture outside the repository, improve the factory or scanner,
+  and rerun. Do not add real values to an allowlist.
+
+### A5 — Add optional private-corpus verification
+
+- **Observable result:** When local `raw_data/` exists, one command runs the same contract corpus in
+  addition to synthetic tests and emits only counts, hashes of fixture definitions, and redacted
+  failures; absence is an explicit skip rather than a failure.
+- **Anchors:** `tools/verify_private_corpus.py`; `tests/tools/test_private_corpus.py`; pytest option
+  `--private-corpus`.
+- **Contract:** The tool is read-only, never creates committed fixtures, rejects paths outside the
+  supplied root, and never sends network traffic.
+- **Named tests:** `tests/tools/test_private_corpus.py::test_absent_corpus_skips_explicitly`;
+  `tests/tools/test_private_corpus.py::test_output_is_aggregate_and_redacted`;
+  `tests/tools/test_private_corpus.py::test_corpus_run_is_offline`.
+- **Commands:** `uv run pytest tests/tools/test_private_corpus.py -q`;
+  `uv run pytest --private-corpus raw_data -m private_corpus -q`.
+- **Expected:** Tool tests exit 0. The corpus command exits 0 with either `private corpus: PASS` or
+  `private corpus: SKIPPED (not present)` and contains no attendee names, IDs, tokens, or URLs.
+- **Recovery:** Stop at the first redaction failure, delete only tool-created temporary summaries,
+  preserve `raw_data/` untouched, and repair the verifier before rerunning.
+
+### A6 — Characterize every input and PDF extraction contract
+
+- **Observable result:** A table-driven suite pins XLSX, CSV, JSON, text, directory/glob expansion,
+  field aliases, deduplication, QR decode variants, attendee CSV order, and failure messages.
+- **Anchors:** `scout_schedule_cli.py`: `load_inputs`, `load_xlsx`, `load_csv`, `load_json`,
+  `load_text`; `pdf_to_scouts.py`: `expand_pdf_inputs`, `decode_embedded_qr`, `extract_pdf`,
+  `write_attendees_csv`.
+- **Contract:** Tests describe current observable behavior, including known awkward cases, without
+  fixing them in this task. PDF/OpenCV imports remain optional at runtime.
+- **Named tests:** `tests/characterization/test_input_matrix.py::test_all_supported_input_shapes`;
+  `tests/characterization/test_pdf_matrix.py::test_pdf_decode_and_error_matrix`;
+  `tests/characterization/test_pdf_matrix.py::test_attendee_csv_schema_is_stable`.
+- **Commands:** `uv run pytest tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py -q`.
+- **Expected:** Command exits 0; each locked-spec matrix row names its fixture and observable; no
+  test opens a browser or imports unavailable optional libraries eagerly.
+- **Recovery:** Correct a mistaken expectation from observed legacy output. Do not alter production
+  parsing until the matrix is reviewed and green.
+
+### A7 — Characterize ScoutingEvent and browser-session behavior against a local fake
+
+- **Observable result:** A loopback fake reproduces login/session responses, payload shapes,
+  redirects, schema drift, retryable/terminal errors, and request counting without contacting the
+  real service.
+- **Anchors:** `scout_schedule_cli.py`: `navigate_and_trigger_schedule`, `post_requirement`,
+  `process_scout`; `tests/fakes/scoutingevent_service.py`.
+- **Contract:** The fake models only observed contracts and has a request ledger. Tests pin current
+  retries and deduplication while reserving intentional changes for Phase B.
+- **Named tests:** `tests/characterization/test_scoutingevent_contract.py::test_observed_payload_matrix`;
+  `tests/characterization/test_scoutingevent_contract.py::test_current_retry_and_error_matrix`;
+  `tests/characterization/test_browser_session.py::test_redirects_and_cookies_stay_in_session`.
+- **Commands:** `uv run pytest tests/characterization/test_scoutingevent_contract.py tests/characterization/test_browser_session.py -q`.
+- **Expected:** Command exits 0; fake request counts match assertions; external-request sentinel
+  remains zero; schema variants are named fixtures rather than inline large payloads.
+- **Recovery:** Extend the local fake with the missing observed shape. Never capture a new live
+  response in an automated test or weaken the egress policy.
+
+### A8 — Characterize inference, artifacts, interfaces, and baseline performance
+
+- **Observable result:** The remaining legacy matrix pins requirement-path parsing, inference and
+  both consumers, non-mutation, CSV/JSON/HTML/email schemas, CLI/UI defaults, errors, request counts,
+  startup, runtime, memory, and artifact sizes.
+- **Anchors:** `scout_schedule_cli.py`: `requirement_path`, `annotate_requirement_statuses`,
+  `build_missing_requirements`, `write_email_reports`, `write_outputs`; `ui/server.py` API routes;
+  `run_app.py`: `run`.
+- **Contract:** Same-name merging is recorded as a known defect to be replaced in B6. Wall-clock
+  numbers are descriptive baselines; request counts and growth are hard assertions.
+- **Named tests:** `tests/characterization/test_inference_matrix.py::test_requirement_and_consumer_matrix`;
+  `tests/characterization/test_artifact_matrix.py::test_all_output_schemas_and_failures`;
+  `tests/characterization/test_interface_matrix.py::test_cli_web_desktop_defaults`;
+  `tests/performance/test_baseline.py::test_request_count_growth_is_bounded`.
+- **Commands:** `uv run pytest tests/characterization tests/performance/test_baseline.py -q`;
+  `uv run python tools/measure_baseline.py --corpus synthetic --output build/baseline.json`.
+- **Expected:** Tests exit 0; the measure command creates redacted `build/baseline.json` with machine
+  class, corpus revision, repeated samples, request counts, memory, sizes, and no placeholders.
+- **Recovery:** Keep the measurement non-blocking for wall time, fix missing observables, and rerun.
+  Do not proceed to package movement while a correctness matrix row is absent or red.
+
+## Gate 1 — Characterization go/no-go
+
+- **Observable result:** Phase A has one reproducible, offline, privacy-safe evidence run and a
+  recorded `GO`; any missing matrix row or failing command records `NO-GO` and blocks Phase B.
+- **Named tests:** `tests/gates/test_gate_1.py::test_characterization_manifest_is_complete`;
+  every named test from A1-A8.
+- **Commands:** `uv sync --locked --all-groups`; `uv run ruff check .`;
+  `uv run ruff format --check .`; `uv run mypy src tests`;
+  `uv run pytest -m "not live_service" --cov=src/scoutmb --cov-branch -q`;
+  `uv run python tools/check_private_data.py tests build/baseline.json`.
+- **Expected GO:** All commands exit 0; all matrix rows are accounted for; no non-loopback request
+  or private-data finding occurs; lock/export checks and baselines are reproducible.
+- **Recovery / NO-GO:** Stop. Assign the failing evidence to its Phase A task, preserve legacy
+  production behavior, and rerun the entire gate after repair. Waivers do not open the gate.
+
+## Phase B — Package boundaries, identity, outputs, and local runtime
+
+Phase B moves behavior behind ports in small slices. Compatibility entry points remain available
+until final acceptance, and parity runs after each move.
+
+### B1 — Introduce package boundaries and compatibility entry points
+
+- **Observable result:** `scoutmb` has domain, ports, features, adapters, and composition packages;
+  legacy top-level scripts delegate to package entry points; no first-party code mutates
+  `sys.path`.
+- **Anchors:** `src/scoutmb/`; `scout_schedule_cli.py`; `pdf_to_scouts.py`; `ui/server.py`;
+  `run_app.py`; console scripts in `pyproject.toml`.
+- **Contract:** This is mechanical movement only. Compatibility wrappers preserve arguments, exit
+  codes, and output. Reverse imports and cycles fail architecture tests.
+- **Named tests:** `tests/architecture/test_dependency_rules.py::test_hexagonal_import_direction`;
+  `tests/architecture/test_dependency_rules.py::test_no_first_party_sys_path_mutation`;
+  `tests/compat/test_legacy_entrypoints.py::test_legacy_entrypoints_delegate_with_parity`.
+- **Commands:** `uv run pytest tests/architecture tests/compat/test_legacy_entrypoints.py -q`;
+  `uv run python -m scoutmb --help`; `uv run scoutmb --help`.
+- **Expected:** All commands exit 0; both help outputs retain the characterized contract; imports
+  work from an installed package without repository-root assumptions.
+- **Recovery:** Keep the compatibility wrapper as the active path, move one symbol group back, and
+  restore parity. Do not add a path mutation or duplicate logic in the wrapper.
+
+### B2 — Establish typed domain, clocks, errors, configuration, and DTO versions
+
+- **Observable result:** Pure immutable models represent attendees, classes, requirements, runs,
+  artifact generations, typed errors, versioned DTOs, UTC wall time, and monotonic deadlines.
+- **Anchors:** `src/scoutmb/domain/`; `src/scoutmb/ports/clock.py`;
+  `src/scoutmb/config.py`; `src/scoutmb/errors.py`; `src/scoutmb/contracts/`.
+- **Contract:** Parsing occurs at boundaries; core policies use typed values. Wall time is persisted;
+  elapsed time and deadlines use the monotonic clock.
+- **Named tests:** `tests/unit/domain/test_models.py::test_invalid_states_are_unrepresentable`;
+  `tests/unit/test_clocks.py::test_deadlines_ignore_wall_clock_changes`;
+  `tests/contracts/test_dto_versions.py::test_unknown_versions_fail_closed`.
+- **Commands:** `uv run pytest tests/unit/domain tests/unit/test_clocks.py tests/contracts/test_dto_versions.py -q`;
+  `uv run mypy --strict src/scoutmb/domain src/scoutmb/ports src/scoutmb/contracts`.
+- **Expected:** Both commands exit 0; domain tests require no filesystem, network, browser, UI, or
+  system clock.
+- **Recovery:** Remove the incomplete DTO from composition, keep boundary dictionaries behind the
+  legacy adapter, and repair typed construction without weakening strict checks.
+
+### B3 — Move input and PDF work behind ports with parity
+
+- **Observable result:** Input loading and PDF extraction are adapter implementations selected by
+  feature services; core-only installation can load non-PDF inputs without importing PDF/OpenCV
+  dependencies.
+- **Anchors:** `src/scoutmb/features/import_attendees/`; `src/scoutmb/adapters/input/`;
+  `src/scoutmb/adapters/pdf/`; legacy loader and PDF symbols characterized in A6.
+- **Contract:** Adapter DTOs preserve field aliases, ordering, deduplication, and errors. Optional
+  dependency absence produces a capability message, not an import crash.
+- **Named tests:** `tests/parity/test_input_adapter_parity.py::test_full_input_matrix_matches_legacy`;
+  `tests/parity/test_pdf_adapter_parity.py::test_pdf_matrix_matches_legacy`;
+  `tests/packaging/test_core_imports.py::test_core_does_not_import_pdf_or_opencv`.
+- **Commands:** `uv run pytest tests/parity/test_input_adapter_parity.py tests/parity/test_pdf_adapter_parity.py tests/packaging/test_core_imports.py -q`.
+- **Expected:** Command exits 0; legacy and new DTO projections match for every A6 fixture; core-only
+  import succeeds with optional libraries absent.
+- **Recovery:** Select the legacy adapter in composition and fix one matrix mismatch at a time. Do
+  not make PDF/OpenCV core dependencies.
+
+### B4 — Implement the ScoutingEvent session gateway and schema-drift boundary
+
+- **Observable result:** One adapter owns the attendee session, URL allowlist, payload validation,
+  schema profiles, redaction, and drift diagnostics while feature code sees only typed port DTOs.
+- **Anchors:** `src/scoutmb/ports/scoutingevent.py`;
+  `src/scoutmb/adapters/scoutingevent/`; `tests/fakes/scoutingevent_service.py`.
+- **Contract:** Only HTTPS approved host/path combinations are valid outside tests. Redirects and
+  discovered URLs are revalidated. Unknown/missing fields fail closed with redacted bounded samples.
+- **Named tests:** `tests/contracts/test_scoutingevent_gateway.py::test_observed_profiles_validate`;
+  `tests/contracts/test_scoutingevent_gateway.py::test_schema_drift_fails_closed_and_redacts`;
+  `tests/security/test_url_allowlist.py::test_redirect_and_discovered_url_are_revalidated`.
+- **Commands:** `uv run pytest tests/contracts/test_scoutingevent_gateway.py tests/security/test_url_allowlist.py -q`.
+- **Expected:** Command exits 0; local fake profiles pass; drift cases return typed errors; diagnostics
+  contain no cookies, tokens, upstream IDs, or raw payload bodies.
+- **Recovery:** Keep the legacy local-fake adapter selected, store only redacted drift metadata, and
+  add a reviewed schema profile. Never fall back to permissive parsing.
+
+### B5 — Add bounded acquisition retries, deadlines, checkpoints, and a circuit breaker
+
+- **Observable result:** The acquisition service bounds attempts and elapsed time, deduplicates
+  requests, checkpoints resumable progress, stops on terminal schema/auth errors, and closes all
+  attendee-session resources.
+- **Anchors:** `src/scoutmb/features/acquire_schedule/`; gateway and clock ports; run checkpoint DTOs.
+- **Contract:** Retry delay uses monotonic time and injectable jitter. Cancellation, timeout, and
+  circuit-open paths cannot leak browser contexts or HTTP sessions.
+- **Named tests:** `tests/unit/acquisition/test_retry_policy.py::test_attempt_and_deadline_budgets`;
+  `tests/unit/acquisition/test_checkpointing.py::test_resume_does_not_repeat_completed_requests`;
+  `tests/integration/test_acquisition_lifecycle.py::test_all_session_resources_close`.
+- **Commands:** `uv run pytest tests/unit/acquisition tests/integration/test_acquisition_lifecycle.py -q`.
+- **Expected:** Command exits 0; fake request ledger proves bounded counts and no duplicates; resource
+  tracker ends at zero on success, failure, timeout, and cancellation.
+- **Recovery:** Disable the new acquisition service at composition, retain its checkpoint for
+  diagnosis, and restore the characterized adapter. Do not increase budgets to mask leaks.
+
+### B6 — Replace name identity with fail-closed upstream IDs and per-run UUIDv4
+
+- **Observable result:** Two same-named attendees remain distinct through acquisition, inference,
+  resume, and reports; blank/malformed upstream IDs stop the attendee before work; shareable IDs are
+  full UUIDv4 values unique within each run.
+- **Anchors:** `src/scoutmb/domain/identity.py`; attendee import/acquisition boundaries;
+  `annotate_requirement_statuses` and `build_missing_requirements` ports.
+- **Contract:** Raw upstream ID remains sensitive adapter state. No unresolved bucket, stable digest,
+  HMAC, UUIDv7, name key, shortened UUID, or cross-run linkable ID is permitted.
+- **Named tests:** `tests/unit/domain/test_identity.py::test_same_name_distinct_upstream_ids_never_merge`;
+  `tests/unit/domain/test_identity.py::test_missing_upstream_id_fails_closed`;
+  `tests/integration/test_identity_flow.py::test_uuidv4_survives_resume_and_outputs_without_raw_id`.
+- **Commands:** `uv run pytest tests/unit/domain/test_identity.py tests/integration/test_identity_flow.py -q`;
+  `uv run python tools/check_private_data.py build/test-artifacts`.
+- **Expected:** Both commands exit 0; UUID version is 4; two runs use unlinkable UUIDs; privacy scan
+  reports zero upstream IDs/tokens; the A8 known-defect expectation is replaced by the correct one.
+- **Recovery:** Fail the affected run before publication, preserve redacted diagnostic state, and
+  restore the legacy adapter only for local fake comparison. Never synthesize identity from a name.
+
+### B7 — Version schemas/templates and publish each artifact atomically
+
+- **Observable result:** CSV, JSON, HTML, and email templates have explicit contract versions;
+  single-artifact writes use same-directory temporary files, flush/fsync where required, atomic
+  replace, and cleanup while preserving the prior file on failure.
+- **Anchors:** `src/scoutmb/contracts/artifacts/`; `src/scoutmb/adapters/artifacts/atomic.py`;
+  external templates under `src/scoutmb/templates/`.
+- **Contract:** Output order and intentional version changes are documented. Shareable schemas omit
+  sensitive adapter state. Templates contain no business logic.
+- **Named tests:** `tests/contracts/test_artifact_schemas.py::test_versioned_golden_artifacts`;
+  `tests/unit/artifacts/test_atomic_file.py::test_failure_preserves_previous_bytes`;
+  `tests/privacy/test_artifacts.py::test_shareable_artifacts_exclude_sensitive_fields`.
+- **Commands:** `uv run pytest tests/contracts/test_artifact_schemas.py tests/unit/artifacts/test_atomic_file.py tests/privacy/test_artifacts.py -q`.
+- **Expected:** Command exits 0; goldens match reviewed versions; injected write/replace failures leave
+  old bytes readable and no orphan temporary file.
+- **Recovery:** Keep the previous schema version active, retain failed output only in private staging,
+  and fix the writer. Do not partially overwrite the published artifact.
+
+### B8 — Publish multi-file report generations atomically
+
+- **Observable result:** A complete report/email set is staged under a generation ID, validated,
+  then activated by one atomic manifest pointer; readers see the prior or new generation, never a
+  mixture.
+- **Anchors:** `src/scoutmb/features/generate_reports/`;
+  `src/scoutmb/adapters/artifacts/generations.py`; generation manifest contract.
+- **Contract:** Interrupted generations remain unreferenced and recoverable. Cleanup never removes
+  the active generation or protected recovery/report generations.
+- **Named tests:** `tests/integration/test_generation_publication.py::test_readers_never_observe_mixed_generation`;
+  `tests/integration/test_generation_publication.py::test_interruption_preserves_active_generation`;
+  `tests/unit/artifacts/test_generation_cleanup.py::test_protected_generations_survive`.
+- **Commands:** `uv run pytest tests/integration/test_generation_publication.py tests/unit/artifacts/test_generation_cleanup.py -q`.
+- **Expected:** Command exits 0 across every injected failure point; active manifest always references
+  a complete hash-validated generation.
+- **Recovery:** Leave the previous manifest active, quarantine the incomplete staging directory, and
+  offer explicit retry/inspection. Never repair by merging directories.
+
+### B9 — Introduce durable run state and lifespan-owned job supervision
+
+- **Observable result:** Legal run transitions, checkpoints, pause/resume/cancel, startup recovery,
+  bounded workers/queue, and graceful shutdown are owned by one supervisor rather than ad hoc
+  threads or module globals.
+- **Anchors:** `src/scoutmb/domain/run_state.py`; `src/scoutmb/features/jobs/`;
+  `ui/server.py` worker and operation routes.
+- **Contract:** Illegal transitions fail closed. Supervisor owns child tasks and resources;
+  cancellation propagates and persists a resumable state before shutdown deadline.
+- **Named tests:** `tests/unit/jobs/test_run_state.py::test_transition_table_rejects_illegal_edges`;
+  `tests/integration/test_job_supervisor.py::test_restart_recovers_resumable_jobs`;
+  `tests/integration/test_job_supervisor.py::test_shutdown_owns_and_closes_children`.
+- **Commands:** `uv run pytest tests/unit/jobs/test_run_state.py tests/integration/test_job_supervisor.py -q`.
+- **Expected:** Command exits 0; no non-daemon worker or resource survives each test; restart produces
+  the documented terminal/resumable outcome.
+- **Recovery:** Stop accepting new jobs, persist current checkpoint, cancel owned children within the
+  grace period, and keep the legacy operation adapter selectable until lifecycle tests pass.
+
+### B10 — Secure the loopback web boundary and stream uploads safely
+
+- **Observable result:** A lifespan-created application uses a random session secret, loopback-only
+  binding, Host/Origin validation, authentication, CSRF protection, CSP, containment-safe paths,
+  streaming upload limits, parser budgets, and redacted errors.
+- **Anchors:** `src/scoutmb/adapters/web/app.py`; `src/scoutmb/adapters/web/security.py`;
+  migrated `ui/server.py` routes; static report response headers.
+- **Contract:** No import-time filesystem/network/job side effects. Uploaded names never become
+  trusted paths. Security checks apply to API, SSE, report, and state-changing routes.
+- **Named tests:** `tests/security/test_local_web.py::test_auth_host_origin_and_csrf_matrix`;
+  `tests/security/test_uploads.py::test_streaming_limits_and_path_containment`;
+  `tests/security/test_report_csp.py::test_reports_have_restrictive_csp`;
+  `tests/integration/test_app_lifespan.py::test_import_has_no_side_effects`.
+- **Commands:** `uv run pytest tests/security tests/integration/test_app_lifespan.py -q`.
+- **Expected:** Command exits 0; unauthorized/cross-origin/oversized/traversal cases are rejected;
+  memory remains within the upload budget; valid loopback flows retain characterized responses.
+- **Recovery:** Keep the prior UI disabled outside loopback, preserve completed runs, and repair the
+  security boundary. Do not bypass authentication for desktop convenience.
+
+### B11 — Compose CLI, web, and desktop entry points with port-zero rendezvous
+
+- **Observable result:** CLI, local web, and desktop launch the same feature services; the server
+  binds port 0 and reports the actual authenticated rendezvous, eliminating bind-close-rebind races.
+- **Anchors:** `src/scoutmb/composition/`; console scripts; `run_app.py`: `free_port`, `start_server`,
+  `wait_until_ready`, `run`; local web status APIs.
+- **Contract:** Entry points differ only in interaction adapter. Configuration resolution and exit
+  semantics are shared and parity-tested.
+- **Named tests:** `tests/integration/test_entrypoint_parity.py::test_cli_web_desktop_share_services`;
+  `tests/integration/test_rendezvous.py::test_port_zero_has_no_rebind_race`;
+  `tests/integration/test_rendezvous.py::test_readiness_requires_session_nonce`.
+- **Commands:** `uv run pytest tests/integration/test_entrypoint_parity.py tests/integration/test_rendezvous.py -q`;
+  `uv run scoutmb doctor --offline`.
+- **Expected:** Both commands exit 0; parallel launches receive distinct OS-assigned ports; doctor
+  reports no live network use and no path/import mutation.
+- **Recovery:** Abort the attempted launch without killing an unrelated process, keep the existing
+  instance/rendezvous intact, and restore the prior entry adapter while fixing composition.
+
+### B12 — Prove clean package and copied-release startup
+
+- **Observable result:** Wheel and sdist install in clean environments; the launcher copies or
+  installs `src/scoutmb`, package data, and compatibility entry points into a clean release root that
+  starts without the repository present.
+- **Anchors:** Hatchling build configuration; `bootstrap/source_sync.py`: `sync_app_source`;
+  `bootstrap/build.spec`; package-data declarations.
+- **Contract:** Source copy is a temporary bridge to packaged release payloads and cannot omit
+  templates/static data. No release depends on repository layout.
+- **Named tests:** `tests/packaging/test_distributions.py::test_wheel_and_sdist_clean_install`;
+  `tests/packaging/test_release_root.py::test_copied_release_starts_without_repo`;
+  `tests/packaging/test_distributions.py::test_expected_package_data_is_present`.
+- **Commands:** `uv build`; `uv run pytest tests/packaging/test_distributions.py tests/packaging/test_release_root.py -q`.
+- **Expected:** Both commands exit 0; artifacts appear under `dist/`; clean installs and release roots
+  answer the offline health probe with all repository paths hidden/unmounted.
+- **Recovery:** Keep the previously working source-copy manifest, correct package-data/build rules,
+  rebuild from clean state, and do not add runtime fallbacks to repository files.
+
+## Gate 2 — Identity, output, and runtime go/no-go
+
+- **Observable result:** Phase B has a complete parity/privacy/failure-injection run and a recorded
+  `GO`; any identity ambiguity, mixed output generation, leaked resource, insecure route, or clean
+  install failure records `NO-GO` and blocks Phase C.
+- **Named tests:** `tests/gates/test_gate_2.py::test_identity_output_runtime_manifest_is_complete`;
+  all parity, privacy, lifecycle, security, architecture, and packaging tests from B1-B12.
+- **Commands:** `uv run pytest tests/architecture tests/compat tests/parity tests/contracts tests/privacy tests/security tests/integration tests/packaging -m "not live_service" -q`;
+  `uv run mypy --strict src/scoutmb`; `uv build`;
+  `uv run python tools/check_private_data.py build/test-artifacts dist`.
+- **Expected GO:** All commands exit 0; same-name attendees stay separate; missing identity fails
+  closed; previous outputs survive injected failures; no sensitive value, leaked resource,
+  unauthorized route, path mutation, or repository dependency remains.
+- **Recovery / NO-GO:** Stop. Restore the relevant compatibility adapter as default, preserve failed
+  generations privately, and return the defect to its B task. Waivers do not open the gate.
+
+## Phase C — Installed data, migration, and transactional releases
+
+This phase operates only on throwaway roots and snapshots until Gate 3. It never rehearses against
+the sole live installation in place.
+
+### C1 — Resolve installed data roots, permissions, retention, backup, and restore
+
+- **Observable result:** All mutable data resolves from explicit/platform roots with secure
+  permissions; retention enforces 120 days for terminal private runs, 45 days for logs, 7 days for
+  staging, and indefinite retention for resumable work, recovery snapshots, and report generations;
+  backup/restore is private, staged, and validated.
+- **Anchors:** `bootstrap/paths.py`: `AppPaths`, `ensure_dirs`, `get_paths`;
+  `src/scoutmb/adapters/storage/`; retention and backup services.
+- **Contract:** Code/static paths never determine data paths. Cleanup is dry-run capable and protects
+  active/resumable/recovery/report references. Restore never overwrites active state directly.
+- **Named tests:** `tests/storage/test_data_roots.py::test_resolution_is_platform_and_code_location_independent`;
+  `tests/storage/test_retention.py::test_retention_classes_and_protected_references`;
+  `tests/integration/test_backup_restore.py::test_restore_is_staged_validated_and_private`.
+- **Commands:** `uv run pytest tests/storage tests/integration/test_backup_restore.py -q`.
+- **Expected:** Command exits 0; permission assertions pass on supported platforms; dry-run and actual
+  cleanup select the same eligible data; protected data remains byte-identical.
+- **Recovery:** Stop cleanup/activation, retain the backup and active root, quarantine invalid
+  restore staging, and require explicit operator retry after diagnostics.
+
+### C2 — Add OS-backed ownership, single-instance rendezvous, and activation
+
+- **Observable result:** Exactly one launcher owns the installation; a second launch authenticates
+  to the live rendezvous, requests foreground activation, and exits without starting another app.
+- **Anchors:** `bootstrap/main.py`: `_acquire_lock`, `_release_lock`, `_launch_app`, `_run`;
+  platform lock/activation adapters; rendezvous metadata.
+- **Contract:** OS lock lifetime matches launcher ownership. PID-only evidence is insufficient;
+  stale rendezvous data cannot authorize activation. macOS/Windows foreground limitations produce a
+  truthful user-visible result.
+- **Named tests:** `tests/launcher/test_single_instance.py::test_concurrent_launch_has_one_owner`;
+  `tests/launcher/test_single_instance.py::test_second_launch_activates_authenticated_instance`;
+  `tests/launcher/test_single_instance.py::test_stale_metadata_cannot_steal_lock`.
+- **Commands:** `uv run pytest tests/launcher/test_single_instance.py -q`.
+- **Expected:** Command exits 0 across repeated concurrent starts; one owner starts, every follower
+  exits 0 after activation, and no unrelated process is signaled.
+- **Recovery:** If ownership cannot be proven, do not launch or break the lock automatically. Show
+  recovery guidance and preserve the lock/rendezvous evidence for diagnosis.
+
+### C3 — Implement copy-only SHA-256 migration and activation marker
+
+- **Observable result:** A throwaway legacy root is inventoried, copied into staging, collision-safe,
+  SHA-256 verified, then activated with a versioned marker; interruption resumes safely and original
+  files remain untouched.
+- **Anchors:** `bootstrap/migrate.py`; data-root inventory and migration marker contracts;
+  launcher startup composition.
+- **Contract:** Never move/delete source data. Existing destination bytes are never overwritten;
+  equal hashes deduplicate, unequal collisions receive deterministic preserved names and manifest
+  entries. Marker is written only after full verification.
+- **Named tests:** `tests/migration/test_copy_migration.py::test_source_is_never_modified`;
+  `tests/migration/test_copy_migration.py::test_collision_and_hash_contract`;
+  `tests/migration/test_copy_migration.py::test_each_interruption_point_resumes_idempotently`.
+- **Commands:** `uv run pytest tests/migration/test_copy_migration.py -q`;
+  `uv run scoutmb migrate --source build/legacy-root --destination build/new-root --dry-run`.
+- **Expected:** Both commands exit 0; dry-run manifest is deterministic; test source tree hashes are
+  identical before/after; activation marker references a complete verified inventory.
+- **Recovery:** Leave source and current active destination untouched, retain staging/manifest, and
+  resume from the last verified item. Never delete a collision or write a success marker early.
+
+### C4 — Detect split-brain writes and preserve recovery snapshots
+
+- **Observable result:** Post-migration writes to legacy and new roots are detected; affected files
+  are snapshotted with hashes and provenance, publication/cleanup pauses, and the operator receives
+  deterministic reconciliation choices.
+- **Anchors:** migration watcher/inventory service; recovery snapshot contract; diagnostics API.
+- **Contract:** Detection is content/inventory based, not timestamp-only. The tool never guesses
+  which divergent private file wins and never auto-merges generated reports.
+- **Named tests:** `tests/migration/test_split_brain.py::test_legacy_write_after_activation_is_detected`;
+  `tests/migration/test_split_brain.py::test_both_versions_are_preserved`;
+  `tests/migration/test_split_brain.py::test_cleanup_stops_while_unresolved`.
+- **Commands:** `uv run pytest tests/migration/test_split_brain.py -q`.
+- **Expected:** Command exits 0; each divergent write creates a bounded redacted diagnostic and
+  content-complete protected snapshots; active data is not silently changed.
+- **Recovery:** Freeze cleanup and affected publication, keep both snapshots indefinitely, and
+  require explicit reconciliation. Rescan hashes before resuming.
+
+### C5 — Version durable state and enforce the activation compatibility tuple
+
+- **Observable result:** Runs, checkpoints, settings, release metadata, and activation pointer carry
+  schema versions; an activation tuple proves executable, state generation, capability set, and
+  protocol compatibility before startup.
+- **Anchors:** internal state contracts; `bootstrap/marker.py`: `compute_marker`, `read_marker`,
+  `write_marker`, `is_environment_valid`; `current.json` contract.
+- **Contract:** Current and previous release read the supported N/N-1 state window. Unknown/newer
+  state fails closed before mutation. State upgrades stage and validate before pointer switch.
+- **Named tests:** `tests/contracts/test_state_compatibility.py::test_n_and_n_minus_one_matrix`;
+  `tests/contracts/test_state_compatibility.py::test_unknown_newer_schema_fails_before_write`;
+  `tests/integration/test_activation_tuple.py::test_all_components_are_validated_together`.
+- **Commands:** `uv run pytest tests/contracts/test_state_compatibility.py tests/integration/test_activation_tuple.py -q`.
+- **Expected:** Command exits 0; incompatible tuples never launch; failed conversions preserve the
+  old state generation and executable pointer.
+- **Recovery:** Reactivate the last-known-good tuple atomically and retain failed staged state as a
+  protected recovery snapshot. Do not downgrade state in place.
+
+### C6 — Harden downloads, archives, disk budgets, and capability cache ownership
+
+- **Observable result:** Downloads are streamed to staging, size/hash/content validated, archives
+  reject traversal/link/device/expansion attacks, disk reserves are checked before writes, and cache
+  eviction respects active/rollback capability references.
+- **Anchors:** `bootstrap/downloader.py`: `download`; Python/browser/capability installers;
+  safe-extraction and cache services.
+- **Contract:** All remote payloads are declared in hash-bound release metadata even while code
+  signing is deferred. Redirects revalidate scheme/host. Cleanup cannot evict active or rollback
+  payloads.
+- **Named tests:** `tests/launcher/test_downloader.py::test_stream_hash_size_and_redirect_policy`;
+  `tests/security/test_safe_extract.py::test_hostile_archive_matrix`;
+  `tests/launcher/test_disk_budget.py::test_active_and_rollback_reserve_is_enforced`;
+  `tests/launcher/test_capability_cache.py::test_referenced_payloads_are_not_evicted`.
+- **Commands:** `uv run pytest tests/launcher/test_downloader.py tests/security/test_safe_extract.py tests/launcher/test_disk_budget.py tests/launcher/test_capability_cache.py -q`.
+- **Expected:** Command exits 0; hostile/oversized/mismatched inputs fail before activation; injected
+  disk exhaustion leaves current install/cache valid and staging recoverable or cleaned.
+- **Recovery:** Delete only verified unreferenced staging through the cache service, keep current and
+  rollback payloads, and offer retry after sufficient disk/network availability.
+
+### C7 — Install releases transactionally with readiness proof and rollback
+
+- **Observable result:** A release installs into a versioned staging directory, validates package and
+  state compatibility, launches with a one-time readiness nonce, then atomically switches
+  `current.json`; any failure returns executable and state to the last-known-good tuple.
+- **Anchors:** launcher release installer/activator; `bootstrap/main.py`: `_run`;
+  `bootstrap/marker.py`; authenticated health/readiness endpoint.
+- **Contract:** Readiness means the expected release, state generation, capability manifest, and
+  nonce responded. Process-alive or open-port checks alone cannot activate a release.
+- **Named tests:** `tests/launcher/test_transactional_update.py::test_each_failure_point_rolls_back_tuple`;
+  `tests/launcher/test_transactional_update.py::test_readiness_nonce_and_release_identity`;
+  `tests/launcher/test_transactional_update.py::test_offline_restart_uses_last_known_good`.
+- **Commands:** `uv run pytest tests/launcher/test_transactional_update.py -q`.
+- **Expected:** Command exits 0 for success and injected failures; pointer is always old or new valid
+  JSON; after rollback the prior app starts and reads the restored state generation offline.
+- **Recovery:** Atomically restore the last-known-good pointer and state generation, retain failed
+  release diagnostics/staging within budget, and never mutate the working release in place.
+
+## Gate 3 — Migration and release go/no-go
+
+- **Observable result:** A throwaway copy of the live layout completes migrate, N-to-N+1 update,
+  forced rollback, and N restart with a recorded `GO`; any source mutation, ownership ambiguity,
+  corruption, split-brain loss, or rollback incompatibility records `NO-GO` and blocks Phase D.
+- **Named tests:** `tests/gates/test_gate_3.py::test_migration_release_manifest_is_complete`;
+  all storage, launcher, migration, state compatibility, and activation tests from C1-C7.
+- **Commands:** `uv run pytest tests/storage tests/migration tests/launcher tests/contracts/test_state_compatibility.py tests/integration/test_backup_restore.py tests/integration/test_activation_tuple.py -q`;
+  `uv run python tools/rehearse_upgrade.py --legacy-root build/gate3/legacy --work-root build/gate3/work --sequence N,N+1,N`;
+  `uv run python tools/check_private_data.py build/gate3/reports`.
+- **Expected GO:** All commands exit 0; source hashes remain unchanged; simultaneous launchers have
+  one owner; collisions and split-brain data are preserved; disk-full/interruption cannot corrupt
+  active data; N restarts offline after rollback; reports are redacted.
+- **Recovery / NO-GO:** Stop. Preserve the throwaway evidence and recovery snapshots, reactivate N,
+  and return the failure to its C task. Do not run migration against the live installation.
+
+## Phase D — Thin installer, optional capabilities, and operational hardening
+
+Gate 3 permits release engineering to begin. Phase D has no fourth gate: D7 is final acceptance and
+may complete only after every Phase D task and all three earlier gates are green.
+
+### D1 — Split core, acquisition, browser, and PDF capability payloads
+
+- **Observable result:** Core, ScoutingEvent acquisition, managed Chromium, and PDF/OpenCV payloads
+  have separate manifests, dependency closures, cache identities, compatibility ranges, install
+  state, and removal rules; a core install imports without optional payloads.
+- **Anchors:** optional dependencies in `pyproject.toml`; capability manifest contracts; launcher
+  capability installer/cache; composition capability registry.
+- **Contract:** Playwright code and browser binaries are separate payloads. PDF/OpenCV is separate.
+  Capability activation is transactional and compatible with the active release/state tuple.
+- **Named tests:** `tests/packaging/test_capability_split.py::test_core_has_no_optional_dependency_closure`;
+  `tests/launcher/test_capabilities.py::test_install_activate_remove_and_rollback`;
+  `tests/contracts/test_capability_compatibility.py::test_release_ranges_fail_closed`.
+- **Commands:** `uv run pytest tests/packaging/test_capability_split.py tests/launcher/test_capabilities.py tests/contracts/test_capability_compatibility.py -q`;
+  `uv run python tools/build_capabilities.py --output build/capabilities`.
+- **Expected:** Both commands exit 0; manifests and hashes are deterministic; core starts offline;
+  each optional feature reports unavailable until installed and never imports eagerly.
+- **Recovery:** Keep the prior compatible capability active, quarantine the failed staged payload,
+  and leave the requested feature unavailable with actionable diagnostics.
+
+### D2 — Implement platform browser selection and readiness
+
+- **Observable result:** Windows selects system Edge, then system Chrome, then managed Chromium;
+  macOS selects system Chrome, then managed Chromium; Safari appears only as an explicit experimental
+  option with a truthful compatibility warning and no Playwright promise.
+- **Anchors:** `bootstrap/browser_setup.py`: `probe_msedge_channel`,
+  `install_chromium_fallback`, `resolve_browser_channel`; browser capability adapter and diagnostics.
+- **Contract:** Browser presence is insufficient: a local-fake readiness transaction must pass.
+  Browser/system detection is platform-adapter code and never launches the real service in tests.
+- **Named tests:** `tests/launcher/test_browser_selection.py::test_windows_preference_matrix`;
+  `tests/launcher/test_browser_selection.py::test_macos_preference_and_experimental_safari`;
+  `tests/integration/test_browser_readiness.py::test_selected_engine_completes_local_fake_flow`.
+- **Commands:** `uv run pytest tests/launcher/test_browser_selection.py tests/integration/test_browser_readiness.py -q`.
+- **Expected:** Command exits 0 for simulated platform matrices; supported choices pass the local fake
+  flow; unsupported/experimental choices explain limitations and never silently change engine.
+- **Recovery:** Fall back only in the documented order, retain the previous compatible managed
+  browser, and leave acquisition unavailable if readiness fails.
+
+### D3 — Build and verify sub-18 MB Windows and macOS installers
+
+- **Observable result:** Windows 11 x64 and macOS 14+ arm64 thin installers are each at most 18 MB,
+  install core on a clean machine, optionally fetch capabilities, and restart offline; the unchanged
+  Windows payload records Windows 10 results as best effort.
+- **Anchors:** PyInstaller/launcher build definitions; platform bootstrap adapters; release metadata;
+  CI jobs `launcher-windows` and `launcher-macos`.
+- **Contract:** Installer contains launcher essentials only, not Playwright, browser binaries,
+  OpenCV, or PDF engines. D23 remains deferred and release notes state the internal-only trust model.
+- **Named tests:** `tests/release/test_installer_budget.py::test_each_thin_installer_is_at_most_18_mb`;
+  `tests/release/test_clean_machine.py::test_first_install_then_offline_restart`;
+  `tests/release/test_platform_contract.py::test_supported_and_best_effort_metadata`.
+- **Commands:** `uv run python tools/build_installers.py --platform all --output dist/installers`;
+  `uv run pytest tests/release/test_installer_budget.py tests/release/test_platform_contract.py -q`;
+  `uv run python tools/rehearse_clean_install.py --artifacts dist/installers --offline-restart`.
+- **Expected:** All commands exit 0 on supported CI runners; each installer is no larger than 18 MB;
+  clean first launch works, optional payloads remain separate, and restart succeeds with egress denied.
+- **Recovery:** Do not publish an oversized or failed platform artifact. Remove only build staging,
+  keep last-known-good installers, and reduce launcher closure rather than raising the budget.
+
+### D4 — Add redacted diagnostics and an offline OpenTelemetry seam
+
+- **Observable result:** Structured logs, support bundles, metrics/traces interfaces, an in-memory
+  no-op exporter, and a bounded encrypted-at-rest or access-controlled offline spool operate without
+  network access; future sync can be added behind a port.
+- **Anchors:** `src/scoutmb/observability/`; diagnostic bundle service; log/retention configuration;
+  telemetry exporter port.
+- **Contract:** Telemetry is disabled/no-op by default. Spool records are versioned, bounded,
+  redacted, retention-aware, and never contain upstream IDs, QR tokens, cookies, raw payloads, names,
+  or report bodies.
+- **Named tests:** `tests/observability/test_telemetry_seam.py::test_default_exporter_never_uses_network`;
+  `tests/observability/test_spool.py::test_bounded_offline_spool_and_future_sync_contract`;
+  `tests/privacy/test_diagnostics.py::test_support_bundle_is_redacted`.
+- **Commands:** `uv run pytest tests/observability tests/privacy/test_diagnostics.py -q`;
+  `uv run python tools/check_private_data.py build/support-bundles`.
+- **Expected:** Both commands exit 0; forced telemetry events create only bounded local records;
+  network sentinel remains zero; scanner reports zero sensitive findings.
+- **Recovery:** Disable the exporter, retain only schema-valid redacted spool records within policy,
+  and delete corrupt spool segments through the spool manager without affecting application runs.
+
+### D5 — Produce release supply-chain evidence
+
+- **Observable result:** Locked vulnerability results, approved licenses, CycloneDX SBOMs, secret
+  scans, artifact hashes, source revision, capability manifests, and clean-build metadata form one
+  release evidence bundle.
+- **Anchors:** CI job `supply-chain`; `uv.lock`; release tooling and metadata contracts.
+- **Contract:** Findings are policy-gated and reviewed; suppressions are narrow, expiring, and
+  documented. Hash verification does not claim publisher authenticity while D23 is deferred.
+- **Named tests:** `tests/release/test_evidence_bundle.py::test_bundle_is_complete_and_reproducible`;
+  `tests/release/test_evidence_bundle.py::test_deferred_signing_is_stated_truthfully`.
+- **Commands:** `uv audit`; `uv export --locked --format cyclonedx1.5 --output-file build/evidence/python-sbom.json`;
+  `uv run python tools/check_licenses.py`; `uv run python tools/build_release_evidence.py --artifacts dist --output build/evidence`;
+  `uv run pytest tests/release/test_evidence_bundle.py -q`.
+- **Expected:** All commands exit 0; evidence references exact artifact hashes and git revision;
+  no unreviewed vulnerability/license/secret finding remains; signing status is `deferred-internal`.
+- **Recovery:** Block publication, keep the last clean evidence bundle, update or remove the affected
+  dependency/artifact, rebuild from the lock, and regenerate all evidence together.
+
+### D6 — Lock measured resource and performance limits
+
+- **Observable result:** Release configuration contains measured non-placeholder limits for uploads,
+  PDF pages/image dimensions, parse time/memory, archive entries/expanded bytes, concurrent jobs and
+  workers, queue depth, shutdown grace, cache budget, disk reserve, startup, request counts, runtime,
+  installer size, and installed footprint.
+- **Anchors:** typed configuration limits; `tools/measure_baseline.py`; performance CI job; synthetic
+  corpus and optional private-corpus runner.
+- **Contract:** Request counts and algorithmic growth are hard assertions. Controlled wall-time jobs
+  compare repeated samples on named machine classes with documented variance and threshold.
+- **Named tests:** `tests/performance/test_resource_limits.py::test_every_release_limit_is_bounded`;
+  `tests/performance/test_complexity.py::test_request_and_memory_growth`;
+  `tests/performance/test_regression_policy.py::test_baseline_metadata_and_thresholds`.
+- **Commands:** `uv run pytest tests/performance/test_resource_limits.py tests/performance/test_complexity.py tests/performance/test_regression_policy.py -q`;
+  `uv run python tools/measure_baseline.py --corpus synthetic --repetitions 5 --compare build/baseline.json --output build/release-baseline.json`.
+- **Expected:** Both commands exit 0 on the controlled runner; every limit has value, unit, source
+  measurement, headroom rationale, safe configurable range, and failure behavior; no regression
+  exceeds its locked threshold.
+- **Recovery:** Keep the prior measured limits, reject the release candidate, profile the regressed
+  path, and rerun on the same machine class. Do not widen a limit without new evidence and review.
+
+### D7 — Final acceptance, documentation, and legacy retirement
+
+- **Observable result:** All three gate records and every Phase D task are green; operators can
+  install, recover, migrate, run offline, add capabilities, collect redacted diagnostics, and perform
+  an explicit staging smoke from current documentation; redundant legacy implementation code is
+  removed while compatibility entry points remain for the documented transition window.
+- **Anchors:** `README.md`; operator/install/recovery/privacy documentation; `CLAUDE.md` and
+  `AGENTS.md` if commands changed; compatibility entry points; release checklist.
+- **Contract:** No default command or automated test contacts the real service. The only live smoke
+  is read-only, manual/staging, marked `live_service`, and requires explicit two-part opt-in. D23 is
+  listed as deferred follow-up before distribution scope expands.
+- **Named tests:** `tests/acceptance/test_documented_commands.py::test_all_documented_offline_commands`;
+  `tests/acceptance/test_release_contract.py::test_three_gates_and_phase_d_evidence_are_green`;
+  `tests/acceptance/test_legacy_retirement.py::test_compatibility_entrypoints_contain_no_business_logic`.
+- **Commands:** `uv sync --locked --all-groups`; `uv run ruff check .`;
+  `uv run ruff format --check .`; `uv run mypy --strict src/scoutmb`;
+  `uv run pytest -m "not live_service" --cov=src/scoutmb --cov-branch -q`;
+  `uv build`; `uv run python tools/verify_release.py --evidence build/evidence --installers dist/installers --capabilities build/capabilities`.
+- **Expected:** Every command exits 0; branch coverage meets locked policy; wheel/sdist/installers and
+  capabilities verify; all documented offline flows work; no stale implementation path, sensitive
+  artifact, network escape, or unresolved decision remains.
+- **Recovery:** Do not publish or migrate the live installation. Restore the last-known-good release
+  bundle, return the failed check to its owning task, and rerun D7 in full after repair.
+
+## Failure-mode coverage
+
+| Path | Injected failure | Named coverage | Required behavior |
+| --- | --- | --- | --- |
+| Input/PDF import | Malformed row, QR miss, missing capability, oversized document | A6, B3, D1, D6 | Typed bounded error; no eager optional import; no partial attendee file |
+| ScoutingEvent | Redirect, auth expiry, schema drift, timeout, cancellation | A3, A7, B4, B5 | Revalidate, fail closed, bounded retry, redact, close session |
+| Identity/inference | Same names, blank/malformed ID, resume | B6 | Never merge; reject missing identity; keep full run UUIDv4 stable only within run |
+| Single artifact | Write/flush/replace failure | B7 | Prior bytes remain readable; temporary file cleaned or quarantined |
+| Report generation | Failure between files or manifest activation | B8 | Readers see one complete generation; previous generation remains active |
+| Local web | Forged Host/Origin/CSRF, traversal, oversized/slow upload | B10 | Reject before state change; bounded memory/time; redacted response |
+| Jobs | Illegal transition, crash, timeout, shutdown | B9 | Persist legal state; own/cancel children; leave resumable checkpoint |
+| Ownership | Simultaneous/stale second launcher | C2 | One owner; authenticated activation; no lock stealing or unrelated signals |
+| Migration | Collision, interruption, disk full, legacy write | C3, C4 | Source untouched; preserve both; resume; pause cleanup/publication |
+| Update | Bad hash/archive, readiness failure, incompatible state | C5-C7 | No activation or atomic rollback of executable and state tuple |
+| Capabilities | Missing/incompatible/corrupt payload | D1, D2 | Core stays usable; prior capability retained; feature truthfully unavailable |
+| Diagnostics | Sensitive value or spool corruption | D4 | Redaction test fails; exporter disabled; app data unaffected |
+| Resource limits | Queue/cache/disk/memory/time budget exceeded | C6, D6 | Reject or pause safely with actionable bounded diagnostics |
+
+## CI growth by phase
+
+| Phase | Jobs required by phase completion |
 | --- | --- |
-| pyproject, ruff, mypy, pytest, coverage config | 1 |
-| Staged CI (no test/build job before they can pass) | 2, 6 |
-| `ruff format` as a separate commit | 2 |
-| `tools/verify_corpus.py`, aggregates only | 3 |
-| Self-verifying scrubber with leaky-input suite | 4 |
-| Reduced fixtures, conftest tripwire, factories | 5 |
-| `requirement_path` across all 18 shapes + property test | 6 |
-| Inference non-mutation guard | 7 |
-| Both inference consumers pinned separately | 7 |
-| `process_scout` characterized without a browser | 8 |
-| Retry pinned at 3 attempts | 8 |
-| CSV headers guarding `__dataclass_fields__` order | 8 |
-| `AttendeeKey`, non-reversible digest | 9 |
-| Identity fix in grouping and lookup | 10 |
-| Collision-free filenames | 11 |
-| Atomic writes | 12 |
-| `data_root` resolution order, Hazard 1 | 13 |
-| Legacy migration, copy-only, idempotent | 14 |
+| A | `lint-format`, `types`, `lock`, `unit-contract`, `local-playwright`, `egress-denied` |
+| B | A jobs plus `local-web-security`, `package`, `architecture` |
+| C | B jobs plus `launcher-windows`, `launcher-macos` migration/update slices |
+| D | Full platform launcher matrices, `supply-chain`, `performance`; local-only `private-corpus`; manual-only `live-smoke` |
 
-**Deferred to Plan 2 (spec Phases 4–8), by design:** package restructure, template
-extraction, `SchedulePort`, typed config, logging/`ProgressSink`, `JobRegistry`, the four
-UI defects, and the `app.js` half of the report-opening change. **Plan 3 (Phases 9–11):**
-bootstrap rebuild, macOS, cleanup.
+## Implementation task index
 
-**Known gaps carried forward, deliberately:**
-- Schedule dedup (`:510`) is listed in Task 8's acceptance criteria but has no dedicated
-  test; the `fake_schedule` fixture supplies a single row. **Add a duplicate-row fixture
-  when `payloads.py` is extracted in Plan 2**, where dedup becomes a pure function.
-- `bootstrap/webview2.py`'s module-level `import winreg` still prevents importing
-  `bootstrap` on macOS. Task 14's tests import `bootstrap.migrate` directly, which does
-  not transitively import `webview2`, so they pass. The `winreg` fix lands in Plan 3.
+| ID | Observable result | Blocked by |
+| --- | --- | --- |
+| A1 | Reproducible Python 3.12 package and lock | — |
+| A2 | Green quality/lock CI | A1 |
+| A3 | Offline-by-default enforcement | A1 |
+| A4 | Synthetic factories and privacy tripwire | A1, A3 |
+| A5 | Optional private-corpus verifier | A4 |
+| A6 | Input/PDF contract matrix | A4 |
+| A7 | Local-fake ScoutingEvent contract matrix | A3, A4 |
+| A8 | Inference/artifact/interface/performance matrix | A4, A6, A7 |
+| G1 | Characterization GO | A2-A8 |
+| B1 | Package boundaries and shims | G1 |
+| B2 | Typed core contracts | B1 |
+| B3 | Input/PDF adapter parity | B1, B2 |
+| B4 | Session gateway and drift detection | B1, B2, A7 |
+| B5 | Bounded acquisition service | B2, B4 |
+| B6 | Correct attendee identity | B2, A8 |
+| B7 | Versioned atomic artifacts | B2, B6, A8 |
+| B8 | Atomic report generations | B7 |
+| B9 | Durable run supervisor | B2 |
+| B10 | Secure local web boundary | B3, B5, B8, B9 |
+| B11 | Entrypoint parity and rendezvous | B10 |
+| B12 | Clean distributions and release root | B1, B11 |
+| G2 | Identity/output/runtime GO | B3-B12 |
+| C1 | Data roots, retention, backup/restore | G2 |
+| C2 | OS ownership and activation | G2, B11 |
+| C3 | Copy/hash migration | C1, C2 |
+| C4 | Split-brain preservation | C3 |
+| C5 | State/activation compatibility | C1 |
+| C6 | Safe downloads/cache/disk budgets | C2 |
+| C7 | Transactional release and rollback | C2, C5, C6 |
+| G3 | Migration/release GO | C3-C7 |
+| D1 | Optional capability payloads | G3 |
+| D2 | Platform browser selection | D1, B4 |
+| D3 | Sub-18 MB platform installers | D1, D2, C7 |
+| D4 | Offline telemetry/diagnostic seam | G3, B9 |
+| D5 | Release supply-chain evidence | D1, D3, D4 |
+| D6 | Measured resource/performance limits | D1-D4 |
+| D7 | Final acceptance and legacy retirement | D3-D6 |
 
-**Type consistency check:** `attendee_filename_stem(scout_name, attendee_id)` is defined
-in Task 11 and used identically in both call sites. `AttendeeKey.from_attendee_id` /
-`.unresolved` / `.short` are defined in Task 9 and used consistently in Tasks 10, 11.
-`build_missing_requirements` returns `dict[str, dict[str, Any]]` with `display_name` and
-`badges` keys as of Task 10; Task 10 Step 7 updates the Task 7 test that assumed the old
-shape.
+## GSTACK REVIEW REPORT
 
-**Placeholder scan:** no TBD/TODO markers; every code step carries complete code; every
-verify step names an exact command and expected output.
+| Review | Trigger | Why | Runs | Status | Findings |
+| --- | --- | --- | ---: | --- | --- |
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | NOT RUN | — |
+| Codex Review | `/codex review` | Independent second opinion | 0 | NOT RUN | — |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN) | 5 issues, 0 critical gaps; all folded into the rewrite |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | NOT RUN | — |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | NOT RUN | — |
+
+**VERDICT:** ENG CLEARED — ready to implement
+
+NO UNRESOLVED DECISIONS

@@ -1227,8 +1227,8 @@ must name the baseline command, corpus, machine class, permitted variance, and r
 
 The plan also records exact release defaults for upload count and bytes, PDF pages and image
 dimensions, parse time and memory, archive entry and expanded-byte limits, concurrent jobs/workers,
-queue depth, shutdown grace, cache budget, and disk safety reserve. Gate 4 cannot close with
-unbounded values or placeholders. Limits derive from measured synthetic and private-corpus needs
+queue depth, shutdown grace, cache budget, and disk safety reserve. Final acceptance cannot complete
+with unbounded values or placeholders. Limits derive from measured synthetic and private-corpus needs
 plus documented headroom and are independently configurable only within a tested safe range.
 
 ## Continuous integration
@@ -1256,7 +1256,8 @@ CI grows with the four execution phases but every introduced job is green when m
 ## Execution phases and go/no-go gates
 
 The specification owns why and behavioral contracts. The implementation plan owns file-by-file
-execution order and commands. There is one plan with four phases, not several disconnected plans.
+execution order and commands. There is one plan with four phases and three blocking go/no-go gates,
+not several disconnected plans.
 
 ### Phase A: Tooling and complete characterization
 
@@ -1302,10 +1303,12 @@ ScoutingEvent, Chromium fallback, and PDF capabilities, finish browser selection
 diagnostics and telemetry stubs, enforce archive and capability compatibility limits, and run the
 supported-platform, resource-exhaustion, and performance verification.
 
-**Gate 4:** The installer satisfies the size budget, first install and offline restart work on
-Windows and macOS, browser fallback is proven with local fixtures, optional capabilities are
-isolated and version-compatible, hostile archives and oversized uploads fail safely, diagnostics
-are redacted, retention is enforceable, and no automated default path contacts the real service.
+**Final acceptance:** After all three earlier gates are green, the installer satisfies the size
+budget, first install and offline restart work on Windows and macOS, browser fallback is proven with
+local fixtures, optional capabilities are isolated and version-compatible, hostile archives and
+oversized uploads fail safely, diagnostics are redacted, retention is enforceable, and no automated
+default path contacts the real service. This is the completion criterion for Phase D, not a fourth
+go/no-go gate.
 
 ### Plan task contract
 
