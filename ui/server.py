@@ -16,6 +16,7 @@ import sys
 import time
 import webbrowser
 from argparse import Namespace
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -32,13 +33,64 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile  # noqa: E
 from fastapi.responses import JSONResponse, StreamingResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-SCOUTS_CSV = REPO_ROOT / "scouts.csv"
-PDF_UPLOADS_DIR = REPO_ROOT / "pdf-uploads"
-RUNS_DIR = REPO_ROOT / "runs"
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+APP_NAME = "ScoutingMeritBadges"
+DATA_DIR_ENV = "SCOUTMB_DATA_DIR"
+
+
+def _platform_data_root() -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base) / APP_NAME / "data"
+    elif sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME / "data"
+    return Path.home() / ".local" / "share" / APP_NAME / "data"
+
+
+@dataclass(frozen=True, slots=True)
+class UiSettings:
+    """Where the UI reads/writes user data. NEVER derive a data path from __file__ —
+    that ties irreplaceable data to the code's on-disk location, so moving or reinstalling
+    silently relocates or destroys it (Hazard 1)."""
+
+    data_root: Path
+
+    @classmethod
+    def resolve(cls, data_root: Path | None = None, dev_mode: bool = False) -> "UiSettings":
+        if data_root is not None:
+            return cls(Path(data_root))
+        env = os.environ.get(DATA_DIR_ENV)
+        if env:
+            return cls(Path(env))
+        if dev_mode:
+            return cls(Path.cwd())
+        return cls(_platform_data_root())
+
+    @property
+    def scouts_csv(self) -> Path:
+        return self.data_root / "scouts.csv"
+
+    @property
+    def pdf_uploads_dir(self) -> Path:
+        return self.data_root / "pdf-uploads"
+
+    @property
+    def runs_dir(self) -> Path:
+        return self.data_root / "runs"
+
+    def ensure_dirs(self) -> None:
+        self.data_root.mkdir(parents=True, exist_ok=True)
+        self.runs_dir.mkdir(parents=True, exist_ok=True)
+
+
+SETTINGS = UiSettings.resolve(dev_mode=bool(os.environ.get("SCOUTMB_DEV")))
+SCOUTS_CSV = SETTINGS.scouts_csv
+PDF_UPLOADS_DIR = SETTINGS.pdf_uploads_dir
+RUNS_DIR = SETTINGS.runs_dir
+STATIC_DIR = Path(__file__).resolve().parent / "static"  # locates CODE, not data — OK to keep
 BROWSER_CHANNEL = os.environ.get("SCOUTMB_BROWSER_CHANNEL") or None
 
-RUNS_DIR.mkdir(exist_ok=True)
+SETTINGS.ensure_dirs()
 
 app = FastAPI(title="Troop 349 Summer Camp Command Program UI")
 
