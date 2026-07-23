@@ -12,7 +12,7 @@
     "value": "8ee816675967fb594fc49609a84115bea96f0f90554578c1d57dee4ed0bd634d",
     "mismatchBehavior": "Do not execute; regenerate this sidecar from the final Markdown plan."
   },
-  "lastUpdated": "2026-07-23T17:24:28Z",
+  "lastUpdated": "2026-07-23T22:11:01Z",
   "tasks": [
     {
       "id": 16,
@@ -100,7 +100,7 @@
     {
       "id": 18,
       "subject": "Task 18: Complete the PDF and PDF-CLI matrix",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [
         16
       ],
@@ -132,7 +132,7 @@
     {
       "id": 19,
       "subject": "Task 19: Complete acquisition, strict-fake, retry, and guarded-browser coverage",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [
         16,
         17
