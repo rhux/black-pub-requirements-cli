@@ -212,7 +212,116 @@ _PDF_BOUNDARIES: tuple[BoundarySpec, ...] = (
     ),
 )
 
-# Populated by later slices; Task 17 adds the input-domain load_* seams, Task 18 the PDF seams.
-BOUNDARIES: tuple[BoundarySpec, ...] = _INPUT_BOUNDARIES + _PDF_BOUNDARIES
+# Acquisition-domain boundaries (Task 19): the browser-driven acquisition seams in
+# scout_schedule_cli, plus the network-policy boundary created in Slice 1a. Each
+# ``required_case_ids`` names acquisition-domain cases that drive the seam.
+_ACQUISITION_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="ACQ-B-FORM-VALUES",
+        qualified_name="scout_schedule_cli.form_values",
+        domain=Domain.ACQUISITION,
+        required_case_ids=frozenset(
+            {"ACQ-ID-001", "ACQ-ID-002", "ACQ-ID-003", "ACQ-ID-004"}
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="ACQ-B-IS-SCHEDULE-RESPONSE",
+        qualified_name="scout_schedule_cli.is_schedule_response",
+        domain=Domain.ACQUISITION,
+        required_case_ids=frozenset(
+            {"ACQ-RESP-001", "ACQ-RESP-002", "ACQ-RESP-003", "ACQ-RESP-004"}
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="ACQ-B-NAVIGATE",
+        qualified_name="scout_schedule_cli.navigate_and_trigger_schedule",
+        domain=Domain.ACQUISITION,
+        required_case_ids=frozenset(
+            {"ACQ-RESP-001", "ACQ-SCHED-002", "ACQ-IDENTITY-001"}
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="ACQ-B-POST-REQUIREMENT",
+        qualified_name="scout_schedule_cli.post_requirement",
+        domain=Domain.ACQUISITION,
+        required_case_ids=frozenset(
+            {
+                "ACQ-REQ-001",
+                "ACQ-REQ-002",
+                "ACQ-REQ-003",
+                "ACQ-REQ-004",
+                "ACQ-REQ-005",
+                "ACQ-REQ-006",
+                "ACQ-RETRY-001",
+                "ACQ-RETRY-002",
+                "ACQ-RETRY-003",
+                "ACQ-DELAY-001",
+                "ACQ-DELAY-002",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="ACQ-B-PROCESS-SCOUT",
+        qualified_name="scout_schedule_cli.process_scout",
+        domain=Domain.ACQUISITION,
+        required_case_ids=frozenset(
+            {
+                "ACQ-SCHED-001",
+                "ACQ-SCHED-002",
+                "ACQ-SCHED-003",
+                "ACQ-SCHED-004",
+                "ACQ-SCHED-005",
+                "ACQ-DEDUP-001",
+                "ACQ-DEDUP-002",
+                "ACQ-DEDUP-003",
+                "ACQ-DEDUP-004",
+                "ACQ-DEDUP-005",
+                "ACQ-HASREQ-001",
+                "ACQ-HASREQ-002",
+                "ACQ-HASREQ-003",
+                "ACQ-CLEAN-001",
+                "ACQ-CLEAN-002",
+                "ACQ-CLEAN-003",
+                "ACQ-ASSET-001",
+                "ACQ-ASSET-002",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="ACQ-B-OUTPUT-ID",
+        qualified_name="scout_schedule_cli.RunIdentity.output_id",
+        domain=Domain.ACQUISITION,
+        required_case_ids=frozenset(
+            {
+                "ACQ-RAW-001",
+                "ACQ-RAW-002",
+                "ACQ-RAW-003",
+                "ACQ-IDENTITY-001",
+                "ACQ-IDENTITY-002",
+                "ACQ-IDENTITY-003",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="ACQ-B-EGRESS",
+        qualified_name="scoutmb.network_policy.assert_egress_allowed",
+        domain=Domain.ACQUISITION,
+        required_case_ids=frozenset(
+            {"NET-POLICY-001", "NET-POLICY-002", "NET-POLICY-003"}
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="ACQ-B-ASYNC-MAIN",
+        qualified_name="scout_schedule_cli.async_main",
+        domain=Domain.ACQUISITION,
+        required_case_ids=frozenset({"ACQ-CLEAN-002", "ACQ-CLEAN-003"}),
+    ),
+)
+
+# Populated by later slices; Task 17 adds the input-domain load_* seams, Task 18 the PDF seams,
+# Task 19 the acquisition + network-policy seams.
+BOUNDARIES: tuple[BoundarySpec, ...] = (
+    _INPUT_BOUNDARIES + _PDF_BOUNDARIES + _ACQUISITION_BOUNDARIES
+)
 EXCLUSIONS: tuple[BranchExclusion, ...] = ()
 COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = ()

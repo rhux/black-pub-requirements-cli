@@ -287,5 +287,210 @@ _PDF_AXES: tuple[AxisSpec, ...] = (
     ),
 )
 
+# Acquisition-domain axes (Task 19). Each member set is exhaustive for the behavior it names.
+# ``boundaries`` name the scout_schedule_cli acquisition seams and the assert_egress_allowed
+# network-policy boundary an axis exercises. ACQ-BREAKER / ACQ-RESUME / NET-WIRE members are
+# new-acceptance placeholders owned by Slice 2 -- they carry no current boundary since nothing
+# in the current branch implements a breaker, a resumable checkpoint, or an extracted gateway.
+_ACQUISITION_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="ACQ-RESP",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"correct", "wrong-url", "wrong-method", "wrong-body"}),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-IS-SCHEDULE-RESPONSE", "ACQ-B-NAVIGATE"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-ID",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"present", "absent", "blank", "repeated-last-wins"}),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-FORM-VALUES"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-SCHED",
+        domain=Domain.ACQUISITION,
+        members=frozenset(
+            {"empty-data", "one-class", "multiple-classes", "failed-status", "missing-data"}
+        ),
+        min_focused_cases=5,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-PROCESS-SCOUT"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-DEDUP",
+        domain=Domain.ACQUISITION,
+        members=frozenset(
+            {
+                "unique-ids",
+                "missing-ids",
+                "incomplete-to-complete",
+                "complete-to-incomplete",
+                "equal-duplicate",
+            }
+        ),
+        min_focused_cases=5,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-PROCESS-SCOUT"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-HASREQ",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"has-req-1", "has-req-0", "blank-class-id"}),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-PROCESS-SCOUT"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-REQ",
+        domain=Domain.ACQUISITION,
+        members=frozenset(
+            {
+                "success",
+                "failed-status",
+                "empty-data",
+                "missing-fields",
+                "unknown-fields",
+                "non-list-data",
+            }
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-POST-REQUIREMENT"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-RETRY",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"immediate-success", "two-failures-then-success", "three-failures"}),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-POST-REQUIREMENT"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-DELAY",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"zero-delay", "positive-delay"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-POST-REQUIREMENT"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-RAW",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"schedule-file", "requirement-file", "distinct-uuid-filenames"}),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-OUTPUT-ID"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-CLEAN",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"success", "schedule-exception", "terminal-requirement-failure"}),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-PROCESS-SCOUT", "ACQ-B-ASYNC-MAIN"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-ASSET",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"dead-asset-aborted", "allowed-dead-asset"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-PROCESS-SCOUT"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-IDENTITY",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"missing-id-fails-closed", "uuidv4-stable", "runs-unlinkable"}),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-OUTPUT-ID"}),
+    ),
+    AxisSpec(
+        axis_id="ACQ-BREAKER",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"below-threshold", "threshold-opens", "recovery-resets"}),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="ACQ-RESUME",
+        domain=Domain.ACQUISITION,
+        members=frozenset(
+            {
+                "new-checkpoint",
+                "completed-not-repeated",
+                "uuid-survives-resume",
+                "corrupt-checkpoint-fails-closed",
+            }
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="FAKE-STRICT",
+        domain=Domain.ACQUISITION,
+        members=frozenset(
+            {
+                "wrong-attendee-id",
+                "wrong-class-id",
+                "wrong-order",
+                "wrong-delay",
+                "unexpected-retry",
+                "extra-call",
+                "unconsumed-response",
+            }
+        ),
+        min_focused_cases=7,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="BROWSER-LOCAL",
+        domain=Domain.ACQUISITION,
+        members=frozenset(
+            {
+                "capture-schedule-post",
+                "serve-requirement-json",
+                "real-interception",
+                "full-local-success",
+            }
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="BROWSER-EGRESS",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"navigation", "redirect", "frame", "popup", "worker-fetch", "websocket"}),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="NET-POLICY",
+        domain=Domain.ACQUISITION,
+        members=frozenset({"loopback-allowed", "non-loopback-denied", "opt-in-allowed"}),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ACQ-B-EGRESS"}),
+    ),
+    AxisSpec(
+        axis_id="NET-WIRE",
+        domain=Domain.ACQUISITION,
+        members=frozenset(
+            {"http-gateway-consults-policy", "playwright-gateway-consults-policy"}
+        ),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+)
+
 # Domain axes are declared by later slices (Tasks 19-21) and appended here.
-AXES: tuple[AxisSpec, ...] = _INPUT_AXES + _PDF_AXES
+AXES: tuple[AxisSpec, ...] = _INPUT_AXES + _PDF_AXES + _ACQUISITION_AXES
