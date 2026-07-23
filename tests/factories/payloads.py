@@ -66,6 +66,9 @@ def schedule_payload(classes: list[dict[str, Any]] | None = None) -> dict[str, A
         "LOCATION_ROOM_NAME": "Pavilion",
         "HAS_REQ": "1",
         "CLASS_COMPLETED": "0",
+        # SES_LKP_PERIOD_TYPE_ID completes the real 11-field schedule-class schema so that
+        # tools.verify_corpus.is_schedule_row recognizes this row; process_scout ignores it.
+        "SES_LKP_PERIOD_TYPE_ID": "1",
     }
     rows = [default] if classes is None else classes
     return {"status": {"status": 1}, "data": rows}

@@ -61,18 +61,47 @@ ignore = ["E501", "B008"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ARG"]
+# model.py / pytest_support.py are locked shared-contract files (verbatim per the Slice 1b
+# plan); keep their exact Generic/Protocol + TypeVar form rather than PEP 695 rewrites.
+"tests/matrix/model.py" = ["UP046"]
+"tests/matrix/pytest_support.py" = ["UP047"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "tools"]
+files = [
+    "src",
+    "tools",
+    "tests/matrix",
+    "tests/fakes",
+    "tests/harnesses",
+    "tests/factories",
+    "tests/plugins",
+]
 ignore_missing_imports = true
 warn_unused_ignores = true
+
+# model.py is a locked contract: its Runner Protocol uses invariant TypeVars by design, which
+# mypy flags as a variance [misc] error. Suppress only that module's [misc] to keep it verbatim.
+[[tool.mypy.overrides]]
+module = "tests.matrix.model"
+disable_error_code = ["misc"]
+
+# pdf_to_scouts is legacy (excluded from ruff, rewritten in a later slice); the corpus harness
+# imports it lazily for the authentic PDF aggregate. Don't type-check the legacy module here.
+[[tool.mypy.overrides]]
+module = "pdf_to_scouts"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
     "live_service: test may contact the real scoutingevent.com (deselected by default)",
     "playwright: test needs a real browser (deselected by default)",
+    "private_corpus: read-only characterization against the private corpus (skipped when absent)",
+    "scale: larger synthetic-volume characterization row",
+    "vertical: end-to-end vertical-slice characterization row",
+    "intentional_change: locks a deliberately changed behavior owned by a later slice",
+    "matrix_case: binds a test to one matrix execution key (case_id, context_id, lane)",
 ]
 addopts = "-m 'not live_service and not playwright' --strict-markers --strict-config"
 asyncio_mode = "auto"
@@ -80,4 +109,16 @@ xfail_strict = true
 
 [tool.coverage.run]
 branch = true
-source = ["src/scoutmb", "tools"]
+# `include` (not `source`) so coverage does not import ui.server at startup before the pytest
+# data sandbox from tests/conftest.py is installed.
+include = [
+    "scout_schedule_cli.py",
+    "pdf_to_scouts.py",
+    "ui/server.py",
+    "run_app.py",
+    "bootstrap/paths.py",
+    "bootstrap/marker.py",
+    "bootstrap/source_sync.py",
+    "src/scoutmb/*.py",
+    "tools/*.py",
+]

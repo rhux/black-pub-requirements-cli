@@ -9,13 +9,32 @@ break asyncio loop internals on Windows.
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
+import tempfile
 
-import pytest
-import pytest_socket
-from tools.check_private_data import load_corpus_identifiers, scan_corpus, scan_patterns
+# Install a private data sandbox BEFORE importing anything that might reach ui.server, and
+# before test modules are collected — some modules read SCOUTMB_DATA_DIR at import time, so a
+# fixture (which runs post-import) would be too late. Do NOT set SCOUTMB_DEV.
+_TEST_DATA_ROOT = tempfile.TemporaryDirectory(prefix="scoutmb-pytest-")
+os.environ["SCOUTMB_DATA_DIR"] = _TEST_DATA_ROOT.name
+
+pytest_plugins = ("tests.plugins.matrix_gate",)
+
+from pathlib import Path  # noqa: E402
+
+import pytest  # noqa: E402
+import pytest_socket  # noqa: E402
+from tools.check_private_data import (  # noqa: E402
+    load_corpus_identifiers,
+    scan_corpus,
+    scan_patterns,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    _TEST_DATA_ROOT.cleanup()
 
 
 def pytest_runtest_setup(item):
