@@ -94,6 +94,49 @@ def test_read_001_injected_permission_error_becomes_unreadable(tmp_path):
     assert "secret-name" not in message and str(tmp_path) not in message
 
 
+# ============================================================== CORP-READ-002 ===========
+def test_read_002_malformed_payload_redacts_path(tmp_path):
+    raw = tmp_path / "run-1" / "raw"
+    raw.mkdir(parents=True)
+    bad = raw / "secret-scout-id.json"
+    bad.write_text("{ this is not valid json", encoding="utf-8")
+
+    with pytest.raises(UnreadableCorpusEntry) as excinfo:
+        raw_payload_multiset(tmp_path / "run-1")
+    message = str(excinfo.value)
+    assert message == "read-error"  # reason code only, not the JSONDecodeError text
+    assert "secret-scout-id" not in message and str(tmp_path) not in message
+
+
+def test_read_002_unreadable_payload_redacts_path(tmp_path, monkeypatch):
+    raw = tmp_path / "run-1" / "raw"
+    raw.mkdir(parents=True)
+    (raw / "secret-scout-id.json").write_text('{"data": []}', encoding="utf-8")
+
+    def deny(_self, *args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(raw / "secret-scout-id.json"))
+
+    monkeypatch.setattr(Path, "read_text", deny)
+    with pytest.raises(UnreadableCorpusEntry) as excinfo:
+        raw_payload_multiset(tmp_path / "run-1")
+    message = str(excinfo.value)
+    assert message == "permission-denied"
+    assert "secret-scout-id" not in message and str(tmp_path) not in message
+
+
+# ============================================================== CORP-PDF-002 ============
+def test_pdf_002_open_failure_redacts_path(tmp_path):
+    pytest.importorskip("fitz")  # aggregate extraction needs the optional PDF stack
+    bogus = tmp_path / "secret-attendee-roster.pdf"
+    bogus.write_bytes(b"not a real pdf")  # PyMuPDF raises with the real path embedded
+
+    with pytest.raises(UnreadableCorpusEntry) as excinfo:
+        extract_pdf_aggregate(bogus)
+    message = str(excinfo.value)
+    assert message in {"read-error", "permission-denied"}
+    assert "secret-attendee-roster" not in message and str(tmp_path) not in message
+
+
 # ============================================================== CORP-SNAPSHOT-002 ========
 def test_snapshot_002_changed_payload_breaks_multiset_equality(tmp_path):
     schedule = schedule_payload()["data"][0]

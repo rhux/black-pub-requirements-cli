@@ -8,6 +8,9 @@ from tests.matrix.boundaries import BoundarySpec, BranchExclusion
 from tests.matrix.model import CaseMetadata, Classification, ExecutionKey, Lane
 from tests.matrix.policies import SurfacePolicy
 
+# Terms are split with "+" concatenation so the literal placeholder substrings never appear
+# in this file's own source — otherwise the metadata-scanning gate that consumes this list
+# would flag registry.py itself as containing a forbidden term.
 _FORBIDDEN_METADATA_TERMS = (
     "t" + "bd",
     "t" + "odo",

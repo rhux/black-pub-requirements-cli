@@ -9,9 +9,10 @@ filename, value, or the underlying exception text (which could embed a private f
 from __future__ import annotations
 
 import collections
+import contextlib
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,27 @@ class UnsafeCorpusEntry(Exception):
 
 class UnreadableCorpusEntry(Exception):
     """A corpus entry could not be read; carries a reason code only (never a path/value)."""
+
+
+@contextlib.contextmanager
+def _redact_read_failures() -> Iterator[None]:
+    """Translate any read/parse failure into a reason-coded ``UnreadableCorpusEntry``.
+
+    The underlying exceptions (``PermissionError``/``OSError``/``json.JSONDecodeError``, plus
+    the arbitrary types PyMuPDF raises for malformed PDFs) embed a real absolute path,
+    filename, or payload snippet in their ``str()``. Catching them here — and re-raising with
+    ``from None`` so the original traceback frame is dropped — keeps that text out of every
+    assertion and CI log. ``permission-denied`` is distinguished; everything else collapses
+    to ``read-error``. ``BaseException`` (``KeyboardInterrupt``/``SystemExit``) is not caught.
+    """
+    try:
+        yield
+    except (UnsafeCorpusEntry, UnreadableCorpusEntry):
+        raise  # already reason-coded; do not reclassify
+    except PermissionError:
+        raise UnreadableCorpusEntry("permission-denied") from None
+    except Exception:
+        raise UnreadableCorpusEntry("read-error") from None
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -61,12 +83,8 @@ def fingerprint_tree(
             continue
         if not path.is_file():
             raise UnsafeCorpusEntry("non-regular entry rejected")
-        try:
+        with _redact_read_failures():  # never leak exc text
             data = read_bytes(path)
-        except PermissionError:
-            raise UnreadableCorpusEntry("permission-denied") from None  # never leak exc text
-        except OSError:
-            raise UnreadableCorpusEntry("read-error") from None
         entries.append(
             CorpusEntry(rel, "file", len(data), hashlib.sha256(data).hexdigest())
         )
@@ -101,7 +119,8 @@ def raw_payload_multiset(run_dir: Path) -> collections.Counter[str]:
     payloads = sorted(raw.glob("*.json")) if raw.is_dir() else []
     counter: collections.Counter[str] = collections.Counter()
     for payload in payloads:
-        data = json.loads(payload.read_text(encoding="utf-8")).get("data")
+        with _redact_read_failures():  # a bad/unreadable payload must not leak its path
+            data = json.loads(payload.read_text(encoding="utf-8")).get("data")
         canonical = json.dumps(data, sort_keys=True, ensure_ascii=False)
         counter[hashlib.sha256(canonical.encode("utf-8")).hexdigest()] += 1
     return counter
@@ -140,9 +159,10 @@ def extract_pdf_aggregate(
     import fitz
     from pdf_to_scouts import extract_pdf
 
-    with fitz.open(pdf_path) as document:
-        pages = document.page_count
-    attendees, errors = extract_pdf(pdf_path, dpis, normalize_case=True, debug_dir=None)
+    with _redact_read_failures():  # PyMuPDF/pdf_to_scouts errors embed the real PDF path
+        with fitz.open(pdf_path) as document:
+            pages = document.page_count
+        attendees, errors = extract_pdf(pdf_path, dpis, normalize_case=True, debug_dir=None)
     embedded = sum(1 for a in attendees if a.qr_decode_method.startswith("embedded-image"))
     rendered = sum(1 for a in attendees if a.qr_decode_method.startswith("rendered"))
     return PdfAggregate(

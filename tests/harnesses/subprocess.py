@@ -32,5 +32,12 @@ def run_main(main: Callable[[Sequence[str]], int], argv: Sequence[str]) -> Comma
         try:
             code = main(list(argv))
         except SystemExit as exc:  # argparse errors raise SystemExit(2)
-            code = int(exc.code) if isinstance(exc.code, int) else 1
+            # POSIX/Python convention (matches sys.exit()): None means success (0), an int is
+            # the code itself, and a non-int (e.g. sys.exit("message")) means failure (1).
+            if exc.code is None:
+                code = 0
+            elif isinstance(exc.code, int):
+                code = exc.code
+            else:
+                code = 1
     return CommandResult(code, out.getvalue(), err.getvalue())

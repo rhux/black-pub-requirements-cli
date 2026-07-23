@@ -68,9 +68,6 @@ def is_requirement_row(row: object) -> bool:
 def classify_row(row: object) -> str:
     if not isinstance(row, dict):
         return "unrecognized"
-    fields = frozenset(row)
-    if fields >= SCHEDULE_FIELDS and fields >= REQUIREMENT_FIELDS:
-        return "unrecognized"
     schedule = is_schedule_row(row)
     requirement = is_requirement_row(row)
     if schedule == requirement:
