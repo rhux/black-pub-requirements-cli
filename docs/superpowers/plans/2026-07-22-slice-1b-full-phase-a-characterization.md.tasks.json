@@ -2,21 +2,233 @@
   "schemaVersion": 1,
   "planPath": "docs/superpowers/plans/2026-07-22-slice-1b-full-phase-a-characterization.md",
   "specPath": "docs/superpowers/specs/2026-07-21-scoutmb-refactor-design.md",
-  "slice": "1b of 5 (IN PROGRESS)",
-  "dependsOn": "2026-07-22-slice-1a-in-place-correctness.md (tooling, factories, fakes, offline harness)",
-  "reviewStatus": "Core tasks authored + runnable; exhaustive Completeness-checklist rows still to add before Gate 1b. Gate 1b unblocks Slice 2.",
-  "planDigest": { "algorithm": "sha256", "value": "bf1475838124efb4c7f1bae69ee24f3e28e66db053163710031c4a693ee5e781", "mismatchBehavior": "Regenerate this sidecar if the plan .md changes." },
-  "lastUpdated": "2026-07-22T00:00:00Z",
+  "matrixSpecPath": "docs/superpowers/specs/2026-07-22-phase-a-characterization-matrix-design.md",
+  "slice": "1b of 5 (READY FOR EXECUTION)",
+  "dependsOn": "2026-07-22-slice-1a-in-place-correctness.md (Gate 1a complete)",
+  "reviewStatus": "Approved matrix design hardened after written-spec review; seven concrete tasks and fail-closed Gate 1b lanes are ready for execution.",
+  "planDigest": {
+    "algorithm": "sha256",
+    "value": "a5c5c36aec2eb4058e2210888b5842609b7449dc95cd6be2c3e669ad7ba91249",
+    "mismatchBehavior": "Regenerate this sidecar if the plan .md changes."
+  },
+  "lastUpdated": "2026-07-23T00:38:10Z",
   "tasks": [
-    { "id": 16, "subject": "Task 16: Full input & PDF matrix (A7)", "status": "pending", "blockedBy": [],
-      "description": "**Goal:** Exhaustive characterization of every input format and PDF-extraction behavior — the parity oracle for Slice 2's ingest move.\n\n**Files:** tests/characterization/test_input_matrix.py, tests/characterization/test_pdf_matrix.py, tests/factories/pdf_builder.py\n\n**Acceptance Criteria:** representative rows runnable; Completeness checklist (XLSX, text, dedup, recursive/glob, strict mode, corrupt PDF, rendered-QR fallback) all concrete before Gate 1b\n\n**Verify:** `uv sync --locked --all-extras && uv run pytest tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_input_matrix.py\",\"tests/characterization/test_pdf_matrix.py\",\"tests/factories/pdf_builder.py\"],\"verifyCommand\":\"uv sync --locked --all-extras && uv run pytest tests/characterization/test_input_matrix.py tests/characterization/test_pdf_matrix.py -q\",\"acceptanceCriteria\":[\"loaders+aliases\",\"expand_pdf file/dir/glob/recursive\",\"generated-PDF QR + rendered fallback\",\"strict + corrupt cases\",\"7-col schema\"],\"modelTier\":\"careful\",\"notes\":\"IN PROGRESS: complete the exhaustive rows in the plan's Completeness checklist.\"}\n```" },
-    { "id": 17, "subject": "Task 17: ScoutingEvent payload/retry/error contract (A8)", "status": "pending", "blockedBy": [16],
-      "description": "**Goal:** Pin schedule/requirement payload shapes, dedup, retry, terminal error, and the zero-class + transient-then-success cases via monkeypatch.\n\n**Files:** tests/characterization/test_scoutingevent_contract.py\n\n**Acceptance Criteria:** dedup-prefers-completed, multiple/no-requirement classes, terminal-error-accumulates, missing-flag coerces false, PLUS zero-class and transient-then-success (Completeness)\n\n**Verify:** `uv sync --locked --all-extras && uv run pytest tests/characterization/test_scoutingevent_contract.py -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_scoutingevent_contract.py\"],\"verifyCommand\":\"uv sync --locked --all-extras && uv run pytest tests/characterization/test_scoutingevent_contract.py -q\",\"acceptanceCriteria\":[\"dedup prefers completed\",\"terminal error accumulates\",\"missing flag -> false\",\"zero-class case\",\"transient-then-success attempt count\"],\"modelTier\":\"careful\",\"notes\":\"schedule_payload([]) now yields zero classes (fixed in 1a Task 4).\"}\n```" },
-    { "id": 18, "subject": "Task 18: Artifact schemas, interface defaults, baseline (A9)", "status": "pending", "blockedBy": [16],
-      "description": "**Goal:** Pin all output schemas, CLI/UI defaults, and the pre-refactor request-count baseline.\n\n**Files:** tests/characterization/test_artifact_matrix.py, tests/characterization/test_interface_matrix.py, tests/performance/test_baseline.py, tools/measure_baseline.py\n\n**Acceptance Criteria:** errors.csv/scouts.json/summary.json keys; report.html injected-JSON structure; scout_schedule_cli.parse_args AND pdf_to_scouts.parse_args defaults; request-count baseline; measure_baseline.py IMPLEMENTED (Completeness)\n\n**Verify:** `uv sync --locked --all-extras && uv run pytest tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_artifact_matrix.py\",\"tests/characterization/test_interface_matrix.py\",\"tests/performance/test_baseline.py\",\"tools/measure_baseline.py\"],\"verifyCommand\":\"uv sync --locked --all-extras && uv run pytest tests/characterization/test_artifact_matrix.py tests/characterization/test_interface_matrix.py tests/performance/test_baseline.py -q\",\"acceptanceCriteria\":[\"artifact schemas\",\"report.html structural\",\"both CLIs + UI defaults\",\"request-count baseline\",\"measure_baseline.py implemented\"],\"modelTier\":\"careful\",\"notes\":\"IN PROGRESS: implement measure_baseline.py; add pdf parse_args + full summary keys.\"}\n```" },
-    { "id": 19, "subject": "Task 19: Bootstrap, local web, lifecycle, static UI (A10)", "status": "pending", "blockedBy": [16],
-      "description": "**Goal:** Pin bootstrap marker/paths, local-web routes (TestClient), lifecycle (pause/resume, NO cancel), SSE framing + terminal events, and the --quiet defect.\n\n**Files:** tests/characterization/test_bootstrap_matrix.py, tests/characterization/test_local_web_matrix.py, tests/characterization/test_run_lifecycle_matrix.py\n\n**Acceptance Criteria:** get_paths override + valid/invalid markers; health/status/scouts; pause/resume present + cancel absent; SSE type set; --quiet defect pinned (pdf_to_scouts.py:571) (Completeness)\n\n**Verify:** `uv sync --locked --all-extras && SCOUTMB_DEV=1 uv run pytest tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py -q`\n\n```json:metadata\n{\"files\":[\"tests/characterization/test_bootstrap_matrix.py\",\"tests/characterization/test_local_web_matrix.py\",\"tests/characterization/test_run_lifecycle_matrix.py\"],\"verifyCommand\":\"uv sync --locked --all-extras && SCOUTMB_DEV=1 uv run pytest tests/characterization/test_bootstrap_matrix.py tests/characterization/test_local_web_matrix.py tests/characterization/test_run_lifecycle_matrix.py -q\",\"acceptanceCriteria\":[\"bootstrap marker+paths\",\"web read routes\",\"pause/resume present, cancel absent\",\"SSE type set + terminal events\",\"--quiet defect pinned\"],\"modelTier\":\"careful\",\"notes\":\"Import bootstrap.marker/paths only (not bootstrap.main -> winreg). TestClient at a tmp data root.\"}\n```" },
-    { "id": 90, "subject": "Gate 1b: Full Phase A characterization go/no-go", "status": "pending", "blockedBy": [16,17,18,19],
-      "description": "**Goal:** The complete legacy behavior matrix is pinned and classified; unblocks Slice 2.\n\n**Files:** (aggregation)\n\n**Acceptance Criteria:** every Completeness-checklist box concrete; full matrix green; baseline recorded; private-data findings 0\n\n**Verify:** `uv sync --locked --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy && SCOUTMB_DEV=1 uv run pytest -m 'not live_service and not playwright' --cov=src/scoutmb --cov-branch -q && uv run python tools/check_private_data.py --corpus raw_data tests`\n\n```json:metadata\n{\"files\":[],\"verifyCommand\":\"uv sync --locked --all-extras && SCOUTMB_DEV=1 uv run pytest -m 'not live_service and not playwright' -q && uv run python tools/check_private_data.py --corpus raw_data tests\",\"acceptanceCriteria\":[\"full matrix green\",\"no representative-only gaps\",\"baseline recorded\",\"0 private-data findings\"],\"modelTier\":\"careful\",\"notes\":\"GATE. Slice 2 does not start until this is green.\"}\n```" }
+    {
+      "id": 16,
+      "subject": "Task 16: Correct corpus truth and build the matrix kernel",
+      "status": "pending",
+      "blockedBy": [],
+      "description": "Correct verify_corpus row classification; add typed case metadata, independent AxisSpec and boundary manifests, surface policies, registry audits, pre-collection sandboxing, corpus/browser options, lane execution accounting, and read-only corpus fingerprinting.",
+      "metadata": {
+        "files": [
+          "tools/verify_corpus.py",
+          "tests/tools/test_verify_corpus.py",
+          "tests/conftest.py",
+          "pyproject.toml",
+          "tests/matrix/model.py",
+          "tests/matrix/axes.py",
+          "tests/matrix/policies.py",
+          "tests/matrix/registry.py",
+          "tests/matrix/boundaries.py",
+          "tests/matrix/test_registry.py",
+          "tests/harnesses/corpus.py",
+          "tests/harnesses/subprocess.py",
+          "tests/plugins/matrix_gate.py",
+          "tests/private_corpus/test_authentic.py"
+        ],
+        "verifyCommand": "uv run pytest tests/tools/test_verify_corpus.py tests/matrix/test_registry.py -q && uv run pytest tests/private_corpus/test_authentic.py --corpus-dir raw_data --require-corpus --matrix-lane authentic -q",
+        "acceptanceCriteria": [
+          "103 schedule, 4858 requirement, 4961 total canonical split",
+          "schema-based classification with unrecognized-row failure",
+          "typed data-only catalog and independent completeness manifests",
+          "fail-closed lane accounting",
+          "read-only private tree fingerprint"
+        ],
+        "modelTier": "careful"
+      }
+    },
+    {
+      "id": 17,
+      "subject": "Task 17: Complete the input-loader matrix",
+      "status": "pending",
+      "blockedBy": [16],
+      "description": "Add exhaustive CSV/XLSX/JSON/text formats, aliases, headers, sheets, filters, dedup, empty/error, and fresh-subprocess optional-import characterization through stable IN-* cases.",
+      "metadata": {
+        "files": [
+          "tests/matrix/cases/input_cases.py",
+          "tests/factories/inputs.py",
+          "tests/characterization/test_input_matrix.py",
+          "tests/harnesses/subprocess.py",
+          "tests/matrix/axes.py",
+          "tests/matrix/boundaries.py"
+        ],
+        "verifyCommand": "uv run pytest tests/characterization/test_input_matrix.py tests/matrix/test_registry.py -q",
+        "acceptanceCriteria": [
+          "all finite aliases and formats",
+          "at least two focused cases per input behavior",
+          "fresh subprocess dependency profiles",
+          "full ordered observations",
+          "no private fixture data"
+        ],
+        "modelTier": "careful"
+      }
+    },
+    {
+      "id": 18,
+      "subject": "Task 18: Complete the PDF and PDF-CLI matrix",
+      "status": "pending",
+      "blockedBy": [16],
+      "description": "Generate synthetic PDFs at test time and characterize discovery, identity fields, case normalization, embedded/rendered QR paths, corrupt input, filters, schemas, strict exits, quiet output, and cleanup through stable PDF-* cases.",
+      "metadata": {
+        "files": [
+          "tests/matrix/cases/pdf_cases.py",
+          "tests/factories/pdf_builder.py",
+          "tests/characterization/test_pdf_matrix.py",
+          "tests/matrix/axes.py",
+          "tests/matrix/boundaries.py"
+        ],
+        "verifyCommand": "uv run pytest tests/characterization/test_pdf_matrix.py tests/matrix/test_registry.py -q",
+        "acceptanceCriteria": [
+          "embedded and rendered QR tiers",
+          "every missing-field combination",
+          "exact attendee and error schemas",
+          "exact CLI exit and stdout stderr contracts",
+          "no committed binary fixtures"
+        ],
+        "modelTier": "careful"
+      }
+    },
+    {
+      "id": 19,
+      "subject": "Task 19: Complete acquisition retry strict-fake and local-browser coverage",
+      "status": "pending",
+      "blockedBy": [16],
+      "description": "Add strict acquisition/browser/clock fakes, full payload/dedup/retry/delay/raw/cleanup characterization, fake self-tests, loopback Playwright interception, and browser subprocess egress denial.",
+      "metadata": {
+        "files": [
+          "tests/matrix/cases/acquisition_cases.py",
+          "tests/fakes/acquisition.py",
+          "tests/fakes/browser.py",
+          "tests/fakes/clock.py",
+          "tests/fakes/test_strict_fakes.py",
+          "tests/harnesses/browser.py",
+          "tests/characterization/test_acquisition_matrix.py",
+          "tests/characterization/test_browser_matrix.py"
+        ],
+        "verifyCommand": "uv run pytest tests/fakes/test_strict_fakes.py tests/characterization/test_acquisition_matrix.py tests/matrix/test_registry.py -q && uv run pytest tests/characterization/test_browser_matrix.py -m playwright --require-browser --matrix-lane browser -q",
+        "acceptanceCriteria": [
+          "success recovery and terminal retry paths",
+          "HAS_REQ zero current request tripwire",
+          "strict fake parameter order and consumption checks",
+          "resource cleanup",
+          "zero browser egress"
+        ],
+        "modelTier": "careful"
+      }
+    },
+    {
+      "id": 20,
+      "subject": "Task 20: Complete inference artifact failure and privacy coverage",
+      "status": "pending",
+      "blockedBy": [16],
+      "description": "Exercise all 26 number shapes in path and tree contexts; all flags, types, class states, inference interactions, exact artifact schemas, formula prefixes, failure injection, and every file/non-file privacy surface.",
+      "metadata": {
+        "files": [
+          "tests/matrix/cases/requirement_cases.py",
+          "tests/matrix/cases/artifact_cases.py",
+          "tests/characterization/test_requirement_matrix.py",
+          "tests/characterization/test_artifact_matrix.py",
+          "tests/privacy/test_surface_policies.py",
+          "tests/factories/payloads.py",
+          "tests/factories/scale.py",
+          "tests/matrix/policies.py"
+        ],
+        "verifyCommand": "uv run pytest tests/characterization/test_requirement_matrix.py tests/characterization/test_artifact_matrix.py tests/privacy/test_surface_policies.py tests/matrix/test_registry.py -q && uv run python tools/check_private_data.py tests",
+        "acceptanceCriteria": [
+          "26 shapes in two independent contexts",
+          "all finite flag type and class states",
+          "exact full artifact schemas",
+          "formula and filesystem failure cases",
+          "six surface classes and ten egress paths"
+        ],
+        "modelTier": "careful"
+      }
+    },
+    {
+      "id": 21,
+      "subject": "Task 21: Complete interfaces lifecycle desktop and scoped-platform coverage",
+      "status": "pending",
+      "blockedBy": [16, 19],
+      "description": "Characterize both CLIs, every local route/method, real SSE framing and cleanup, static UI flows, desktop startup/readiness, scoped bootstrap, and simulated Windows/macOS path seams without claiming native installer behavior.",
+      "metadata": {
+        "files": [
+          "tests/matrix/cases/interface_cases.py",
+          "tests/matrix/cases/platform_cases.py",
+          "tests/characterization/test_interface_matrix.py",
+          "tests/characterization/test_platform_matrix.py",
+          "tests/characterization/test_static_ui.py",
+          "tests/harnesses/legacy.py",
+          "tests/harnesses/browser.py"
+        ],
+        "verifyCommand": "uv run pytest tests/characterization/test_interface_matrix.py tests/characterization/test_platform_matrix.py tests/matrix/test_registry.py -q && uv run pytest tests/characterization/test_static_ui.py -m playwright --require-browser --matrix-lane browser -q",
+        "acceptanceCriteria": [
+          "exact route and method inventory",
+          "executed SSE framing not source presence",
+          "no async resource leaks",
+          "Windows and macOS simulated seam cases",
+          "scoped bootstrap only"
+        ],
+        "modelTier": "careful"
+      }
+    },
+    {
+      "id": 22,
+      "subject": "Task 22: Add vertical flows scale profiles baselines and close Gate 1b",
+      "status": "pending",
+      "blockedBy": [17, 18, 19, 20, 21],
+      "description": "Add variable attendees, canonical and larger profiles, explicitly synthetic marginal pairing, two real-boundary vertical flows, local browser flow, request/growth baselines, scoped branch evidence, and all fail-closed Gate 1b lanes.",
+      "metadata": {
+        "files": [
+          "tests/factories/scale.py",
+          "tests/matrix/scale_profile.py",
+          "tests/scale/test_profiles.py",
+          "tests/vertical/test_legacy_flows.py",
+          "tests/performance/test_phase_a_baseline.py",
+          "tools/measure_baseline.py",
+          "tests/baselines/phase_a.json",
+          "tests/matrix/axes.py",
+          "tests/matrix/boundaries.py",
+          "tests/matrix/registry.py"
+        ],
+        "verifyCommand": "Run every command in the plan's Gate 1b section; no combined marker command may replace a lane.",
+        "acceptanceCriteria": [
+          "zero one two small canonical-22 large-50 and property profiles",
+          "intentional synthetic pairing cannot support correlation assertions",
+          "success partial and browser vertical flows",
+          "reviewed aggregate baseline and scoped branch evidence",
+          "default browser authentic and static lanes all green"
+        ],
+        "modelTier": "careful"
+      }
+    },
+    {
+      "id": 90,
+      "subject": "Gate 1b: Full Phase A characterization go/no-go",
+      "status": "pending",
+      "blockedBy": [16, 17, 18, 19, 20, 21, 22],
+      "description": "All four lanes pass; every required stable ID executes exactly once; corpus is unchanged; privacy and egress findings are zero; all axes/boundaries/flows and scoped branches are covered or reviewed; baseline contains no placeholder or private data.",
+      "metadata": {
+        "files": [],
+        "verifyCommand": "Run the Static quality, Default synthetic, Required local browser, Required authentic, Scoped legacy branch coverage, and Baseline/immutability commands in the plan verbatim.",
+        "acceptanceCriteria": [
+          "no required skip deselection duplicate or empty lane",
+          "no external network",
+          "private corpus unchanged",
+          "no uncovered scoped branch without reviewed exclusion",
+          "Gate 1b unblocks Slice 2"
+        ],
+        "modelTier": "careful"
+      }
+    }
   ]
 }

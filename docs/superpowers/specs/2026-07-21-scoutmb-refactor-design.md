@@ -22,71 +22,75 @@ Windows installer.
 
 | Component | Lines (`wc -l`) | Role |
 | --- | --- | --- |
-| `scout_schedule_cli.py` | 1,798 | Stage 2: scrape, infer, report |
-| `pdf_to_scouts.py` | 579 | Stage 1: PDF to CSV |
-| `ui/server.py` | 339 | Local FastAPI app |
+| `scout_schedule_cli.py` | 1,889 | Stage 2: scrape, infer, report |
+| `pdf_to_scouts.py` | 600 | Stage 1: PDF to CSV |
+| `ui/server.py` | 391 | Local FastAPI app |
 | `ui/static/app.js` | 328 | Frontend |
 | `run_app.py` | 89 | Native-window entry point |
 | `bootstrap/` | 14 modules | Windows self-installing launcher |
 
-There is no package, no `pyproject.toml`, no tests, no linter, no type checker, and no
-CI. Nothing pins current behavior. All line references below were verified against the
-current tree.
+Slice 1a established the Python project foundation: `pyproject.toml`, `uv.lock`, CI,
+ruff, mypy, pytest, offline enforcement, privacy scanning, synthetic factories, and the
+first focused characterization tests now exist. It also fixed stable attendee identity,
+atomic single-file publication, data-root resolution, and copy-only migration in place.
+The legacy application is still primarily implemented by the flat modules above; Slice 1b
+must complete their behavior contract before Slice 2 moves them into the package.
 
-### Confirmed correctness defects in shipped code
+Source references in this specification are symbol based. Plans may include a line number
+only as a navigation aid and must pair it with the owning symbol because Slice 1a and later
+slices legitimately move lines.
 
-1. **Attendee identity is the display name, not a stable ID.** Inference groups on
-   `(scout_name, class_p4_id)` (`:675`); `build_missing_requirements` builds `by_key` on
-   `(scout_name, class_p4_id, requirement_number)` (`:786`) and buckets output by
-   `scout_name` (`:838-840`); email lookup is `missing.get(scout_name)` (`:920`); email
-   filenames are `safe_slug(scout_name)` (`:935`); raw audit payloads are
-   `safe_slug(result.name)` (`:490`). **Two attendees with the same name have their
-   requirements merged and their output files overwritten.** `attendee_id` is read at
-   `:919` and then never used. The failure mode is a child being told they completed
-   requirements they did not.
-2. **`build_missing_requirements` keys bookkeeping on `id(item)`** (`:801`, `:807`,
-   `:808`, `:825`, `:835`). Not a live bug — the dicts stay referenced by `annotated`
-   for the call — but it cannot survive the move to frozen dataclasses, so the inference
-   decomposition must re-express the ancestor walk over explicit node indices.
-3. **Unreferenced background tasks.** `ui/server.py:162,223` call
-   `asyncio.create_task(worker())` without retaining the result; CPython holds only weak
-   references, so a long job can be collected mid-execution.
-4. **Four UI defects.** `stale.unlink()` without an `is_file()` guard (`:114-116`);
-   `os.startfile` (`:334`) is Windows-only; `webbrowser.open` server-side (`:301`);
-   unguarded `json.loads` at `:205`, `:296`, `:311`.
-5. **`--quiet` is not honored** at `pdf_to_scouts.py:571`, despite guards at `:515`/`:557`.
+### Remaining correctness and behavior risks in the legacy code
+
+1. **`build_missing_requirements` keys bookkeeping on `id(item)`.** This is not a live
+   failure while the dictionaries remain referenced by `annotated`, but it cannot survive
+   the move to frozen dataclasses. The inference decomposition must re-express the ancestor
+   walk over explicit node indices.
+2. **Unreferenced background tasks.** `ui.server.start_pdf_extract` and
+   `ui.server.start_schedule_download` create worker tasks without retaining the result;
+   CPython holds only weak references, so a long job can be collected mid-execution.
+3. **Four UI defects.** The PDF-upload cleanup unlinks every directory entry without an
+   `is_file()` guard; `open_emails_folder` calls Windows-only `os.startfile`;
+   `open_report` launches a browser from the server process; and persisted JSON reads in
+   the run/report/email routes are not consistently guarded.
+4. **Sensitive adapter fields cross outward-facing surfaces.** Current JSON/CSV/HTML/email,
+   stdout, and progress/SSE observations can contain upstream attendee IDs or QR material.
+   Slice 1b characterizes each surface with synthetic sentinels; Slice 2 owns the assigned
+   privacy changes.
+
+`pdf_to_scouts --quiet` intentionally suppresses progress and aggregate summaries while
+still printing errors and the final output path. That matches the CLI help contract and is
+not a defect.
 
 ### Structural defects
 
-6. `scout_schedule_cli.py` has no internal boundaries: argparse, four input loaders,
+1. `scout_schedule_cli.py` has no internal boundaries: argparse, four input loaders,
    Playwright control, AJAX scraping, inference, email rendering, a 658-line embedded
    HTML string, and six output writers in one module.
-7. `process_scout` (141 lines) fuses browser control, retry, dedup, JSON→record mapping,
+2. `process_scout` fuses browser control, retry, dedup, JSON→record mapping,
    and filesystem writes.
-8. `argparse.Namespace` is threaded into the scraping layer (`ui/server.py:188-201`
-   hand-builds a fake one; core defends with `getattr(args, …)` at `:1726`, `:1779`).
-9. Two `sys.path` hacks (`ui/server.py:25`; `python_env.py:62`).
-10. Heavyweight imports block testing (`openpyxl` at module scope, `:27`).
-11. `parse_args()` takes no `argv` (`:88`).
-12. `print()` is the logging system — 19 calls, three silent `except Exception` (`:363`,
-    `:400`, `:468`).
-13. Nondeterminism in business logic (`time.strftime`/`datetime.now()` `:1644-1645`,
-    `random.uniform` `:1765`, `uuid4` `ui/server.py:110,174`).
-14. Untyped external payloads flow through as `dict[str, Any]`.
-15. Duplication: `DEFAULT_ADULT_TYPES` re-declared (`pdf_to_scouts.py:23`,
-    `scout_schedule_cli.py:212`); header aliases three times.
-16. User data commingled with replaceable source (`scouts.csv`, `pdf-uploads/`, `runs/`
-    in the directory the launcher overwrites).
+3. `argparse.Namespace` is threaded into the scraping layer; `ui.server` hand-builds one
+   while `async_main` and collaborators defend with `getattr`.
+4. `ui.server` and `bootstrap.python_env` still contain import-path manipulation.
+5. Heavyweight optional dependencies are imported at legacy module scope.
+6. `scout_schedule_cli.parse_args` takes no explicit `argv`.
+7. `print()` remains the logging system and broad exception handling remains in adapter
+   paths.
+8. Wall-clock time, random attendee pacing, and UUID creation remain embedded in business
+   and interface flows.
+9. Untyped external payloads flow through as `dict[str, Any]`.
+10. `DEFAULT_ADULT_TYPES` and header aliases remain duplicated.
 
 ### Claims that must not be reintroduced
 
 Inspection disproved three earlier assertions. Recorded so they do not return:
 
-- Inference does **not** mutate caller-owned dictionaries — `:672` copies every input.
+- Inference does **not** mutate caller-owned dictionaries —
+  `annotate_requirement_statuses` copies every input.
 - The two inference consumers do **not** receive differently-shaped input — both pass
-  `asdict(RequirementRecord)`; `requirement_type_id` is coerced with `str(...)` at `:574`.
+  `asdict(RequirementRecord)` and acquisition coerces `requirement_type_id` to `str`.
 - `write_html_report` does **not** read the wall clock — it takes both timestamps as
-  parameters (`:975`).
+  parameters.
 
 ## What already exists
 
@@ -95,7 +99,7 @@ Inspection disproved three earlier assertions. Recorded so they do not return:
 | Schedule acquisition + reports | `scout_schedule_cli.py`: `process_scout`, `annotate_requirement_statuses`, `build_missing_requirements`, `write_outputs`, `async_main` | Input formats, retries, inference, CSV/JSON/HTML/email outputs, CLI defaults |
 | PDF extraction | `pdf_to_scouts.py`: `expand_pdf_inputs`, `decode_embedded_qr`, `extract_pdf`, `write_attendees_csv` | PDF discovery, QR decode, 7-column attendee CSV contract, errors |
 | Local web app | `ui/server.py`: `start_pdf_extract`, `start_schedule_download`, `operation_events`, `open_report` | Background ops, status/SSE APIs, report launch, pause/resume |
-| Desktop entry | `run_app.py`: `free_port`, `start_server`, `wait_until_ready`, `run` | Local server startup, desktop window |
+| Desktop entry | `run_app.py`: `free_port`, `start_server`, `wait_until_ready`, `main` | Local server startup, desktop window |
 | Windows bootstrap | `bootstrap/main.py`, `bootstrap/paths.py`, `bootstrap/source_sync.py` | Install ownership, source copy, Python/browser setup, launch |
 | Download + env setup | `bootstrap/downloader.py`, `bootstrap/python_env.py`, `bootstrap/browser_setup.py`, `bootstrap/marker.py` | Downloads, extraction, dependency install, browser selection, readiness marker |
 
@@ -249,7 +253,8 @@ written render-first → exclusive same-directory temp → flush/fsync/close →
 → parent-dir sync → cleanup, preserving prior bytes on any injected failure or returning
 a documented post-replace indeterminate-durability result without a second overwrite.
 Output column/field order is pinned by golden tests (guards `__dataclass_fields__` order
-at `:1666`, `:1671`). The multi-file whole-generation pointer is POSTPONED (vNext).
+for `ClassRecord` and `RequirementRecord`). The multi-file whole-generation pointer is
+POSTPONED (vNext).
 
 ### Typed configuration and path resolution (D6 — KEEP)
 
@@ -285,11 +290,11 @@ testable. Illegal transitions fail closed.
 `annotate_requirement_statuses` decomposes into pure `core/inference/{numbering, tree,
 status, missing}.py` — dataclasses in, dataclasses out. The `id(item)` ancestor walk in
 `build_missing_requirements` is re-expressed over explicit node indices from the tree.
-Both consumers (HTML `:981`, email `:783`) are pinned separately before the move. The two
-suspect behaviors (label-row grafting `Note.` → child of the prior requirement; 31
-empty-number requirement rows per canonical snapshot → path `()`) are characterized as-is;
-any fix is a separate change. The former 402 count mixed schedule rows into requirement
-rows and multiplied across three equivalent private snapshots.
+Both consumers (`write_html_report` and `write_email_reports`) are pinned separately before
+the move. The two suspect behaviors (label-row grafting `Note.` → child of the prior
+requirement; 31 empty-number requirement rows per canonical snapshot → path `()`) are
+characterized as-is; any fix is a separate change. The former 402 count mixed schedule rows
+into requirement rows and multiplied across three equivalent private snapshots.
 
 ### ScoutingEvent gateway (D22 — KEEP port + drift + breaker + checkpoints; deadline/allowlist POSTPONED)
 
@@ -417,9 +422,12 @@ lifecycle flows — is pinned to a named test and classified `preserve`,
 
 The authoritative matrix design is
 `docs/superpowers/specs/2026-07-22-phase-a-characterization-matrix-design.md`. Cases live in
-a central typed catalog reused by legacy characterization and Slice 2 parity. Each
-independent behavior has at least two focused synthetic cases; finite observed sets receive
-full coverage; failures receive immediate-success, recovery, and terminal cases.
+a central typed catalog reused by legacy characterization and Slice 2 parity. An independent
+`AxisSpec`/boundary manifest—not the cases themselves—declares completeness. Domain-specific
+frozen case/observation types, strict external-boundary fakes, and typed harness protocols
+avoid a universal `Any`-based test framework. Each independent behavior has at least two
+focused synthetic cases; finite observed sets receive full coverage; failures receive
+immediate-success, recovery, and terminal cases.
 
 ### Network policy (D9, D27 — KEEP)
 
@@ -435,14 +443,19 @@ Synthetic factories → unit/property tests; local fake service → gateway/brow
 tests; legacy adapters → characterization/parity tests; private `raw_data` → automatic
 redacted read-only local augmentation when present (D12); throwaway installs →
 migration/update rehearsals; explicit staging → read-only live smoke only, never a PR gate.
+The Gate 1b authentic lane additionally requires `--require-corpus`, and the browser lane
+requires `--require-browser`; neither may pass through a skip or empty marker selection.
 
 ### Synthetic and private corpora (D7, D12 — KEEP)
 
-Committed fixtures are deterministic and fully synthetic; a privacy tripwire fails closed
-on likely private data in both fixture sources and generated artifacts. The default local
-pytest run always executes focused and variable/scale synthetic profiles. When `raw_data/`
-exists, it also runs redacted read-only private-corpus checks; `--corpus-dir` selects another
-location. CI runs the synthetic suite and skips the absent private corpus.
+Committed fixtures are deterministic and fully synthetic. A typed surface-policy inventory
+distinguishes input-private, adapter-private, operational-private, audience-shareable, local
+user-interface, and diagnostic egress. Fixture sources and every non-adapter generated
+surface fail closed on forbidden sentinels; authorized adapter-private surfaces instead use
+narrow field, containment, filename, and no-copy allowlists. The default local pytest run
+always executes focused and variable/scale synthetic profiles. When `raw_data/` exists, it
+also runs redacted read-only private-corpus checks; `--corpus-dir` selects another location.
+CI runs the synthetic suite and skips the absent private corpus.
 
 ### Legacy-to-new parity (D13 — KEEP)
 
@@ -459,9 +472,14 @@ requirement flag combinations in leaf and parent/consumer contexts, 31 empty-num
 single-file failure matrix; schema drift (critical vs
 optional vs unknown); loaders (all formats + aliases); PDF (decode tiers, corrupt,
 strict, adult filter); scraper (retry ×3 at 500/1000/1500 ms, dedup, circuit breaker,
-checkpoint resume); template (`__REPORT_JS__` scout, `</script>`, U+2028/2029); migration
+checkpoint resume); template (`__REPORT_DATA__` sentinel, `</script>`, U+2028/2029); migration
 (copy-only, idempotent, collision, reinstall survival); run-state transitions; download
-hash/size + hostile-archive matrix; scrubber leaky-input suite.
+hash/size + hostile-archive matrix; scrubber leaky-input suite. Slice 1b additionally pins
+spreadsheet formula/control prefixes; file and non-file privacy egress; stdout/stderr/SSE/API
+channels; clean-subprocess dependency profiles; strict-fake self-tests; async disconnect and
+pending-resource cleanup; corpus absent/wrong/symlink/mutation states; traversal and
+symlinks; Windows reserved/drive/UNC/case paths; macOS NFC/NFD/volume/case paths; and two
+real-boundary vertical flows. Native filesystem/installer behavior remains in Slices 3/4.
 
 ### Coverage policy (D10 — KEEP)
 
@@ -591,7 +609,9 @@ Locked unless a later review supersedes.
 2. Default tests provably cannot call `scoutingevent.com` (sockets, gateway, Playwright,
    browser subprocess, redirects, workers, frames, popups, WebSockets).
 3. Two same-named attendees stay separate through acquisition, inference, reports, resume.
-4. Shareable artifacts and logs contain no upstream IDs or QR tokens.
+4. Every declared file and non-file surface satisfies its typed egress policy; upstream IDs,
+   QR/session material, raw payload state, and unredacted exceptions appear only on explicitly
+   authorized adapter-private surfaces.
 5. Single-file output writers survive injected failures without corrupting prior artifacts.
 6. External schemas are versioned and compatibility-tested.
 7. A clean sdist and wheel install outside the repository run the CLI and local web app.
