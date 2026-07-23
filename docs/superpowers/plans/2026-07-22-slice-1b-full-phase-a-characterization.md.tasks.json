@@ -9,10 +9,10 @@
   "reviewStatus": "Writing-plans review complete: exact execution-key semantics, task-local versus Gate lane behavior, missing spec cases, typed interfaces, coverage/baseline checks, private-corpus safeguards, and sidecar parity are resolved.",
   "planDigest": {
     "algorithm": "sha256",
-    "value": "cdd8d91b0c4e328a733c0e9cd01b2673e9c9596b7f334a82558914a60b839c8e",
+    "value": "8ee816675967fb594fc49609a84115bea96f0f90554578c1d57dee4ed0bd634d",
     "mismatchBehavior": "Do not execute; regenerate this sidecar from the final Markdown plan."
   },
-  "lastUpdated": "2026-07-23T01:25:44Z",
+  "lastUpdated": "2026-07-23T12:17:59Z",
   "tasks": [
     {
       "id": 16,
@@ -67,7 +67,9 @@
       "id": 17,
       "subject": "Task 17: Complete the input-loader matrix",
       "status": "pending",
-      "blockedBy": [16],
+      "blockedBy": [
+        16
+      ],
       "stepCount": 8,
       "description": "Add exhaustive CSV, XLSX, JSON, and text formats; aliases, headers, sheet selection, filters, deduplication, errors, bounded properties, and isolated optional-dependency profiles through stable IN execution keys.",
       "metadata": {
@@ -99,7 +101,9 @@
       "id": 18,
       "subject": "Task 18: Complete the PDF and PDF-CLI matrix",
       "status": "pending",
-      "blockedBy": [16],
+      "blockedBy": [
+        16
+      ],
       "stepCount": 7,
       "description": "Generate PDFs at test time and characterize discovery, identity fields, case normalization, embedded and rendered QR tiers, ordering, corruption, debug images, filters, exact schemas, exits, channels, and cleanup.",
       "metadata": {
@@ -129,7 +133,10 @@
       "id": 19,
       "subject": "Task 19: Complete acquisition, strict-fake, retry, and guarded-browser coverage",
       "status": "pending",
-      "blockedBy": [16, 17],
+      "blockedBy": [
+        16,
+        17
+      ],
       "stepCount": 11,
       "description": "Add strict acquisition/browser/clock fakes, complete payload/dedup/retry/delay/raw/cleanup characterization, fake misuse tests, loopback Playwright interception, browser egress denial, preserve tests for the existing application policy, and Slice 2 ownership for breaker, checkpoint, resume, and gateway-policy wiring.",
       "metadata": {
@@ -167,7 +174,9 @@
       "id": 20,
       "subject": "Task 20: Complete requirement, artifact, publication-failure, and privacy coverage",
       "status": "pending",
-      "blockedBy": [16],
+      "blockedBy": [
+        16
+      ],
       "stepCount": 9,
       "description": "Exercise 26 shapes via context-aware execution keys; all flags, types, class states, tree/choice/identity interactions, exact artifact schemas, formula prefixes, path collisions and symlinks, publication failures, and every privacy surface and egress path.",
       "metadata": {
@@ -206,7 +215,10 @@
       "id": 21,
       "subject": "Task 21: Complete interfaces, lifecycle, desktop, and scoped-platform coverage",
       "status": "pending",
-      "blockedBy": [16, 19],
+      "blockedBy": [
+        16,
+        19
+      ],
       "stepCount": 10,
       "description": "Characterize both CLIs, 12 routes and wrong methods, complete route states, executed SSE and cleanup, static UI flows, desktop readiness/modes, scoped bootstrap, simulated Windows/macOS seams, and migrate every listed legacy test helper without path mutation.",
       "metadata": {
@@ -255,7 +267,13 @@
       "id": 22,
       "subject": "Task 22: Add variable/scale profiles, vertical flows, baselines, CI, and Gate 1b",
       "status": "pending",
-      "blockedBy": [17, 18, 19, 20, 21],
+      "blockedBy": [
+        17,
+        18,
+        19,
+        20,
+        21
+      ],
       "stepCount": 15,
       "description": "Add exact variable and canonical generators with intentionally synthetic marginal pairing, three real-boundary flows, request/growth checks, coverage JSON enforcement, explicit baseline update/check modes, CI egress denial, and all final Gate lanes.",
       "metadata": {
@@ -302,9 +320,17 @@
     },
     {
       "id": 90,
-      "subject": "Gate 1b — go/no-go",
+      "subject": "Gate 1b \u2014 go/no-go",
       "status": "pending",
-      "blockedBy": [16, 17, 18, 19, 20, 21, 22],
+      "blockedBy": [
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22
+      ],
       "stepCount": 0,
       "description": "Run static, default, browser, authentic, coverage, baseline, and privacy commands exactly; every required execution key, axis, interaction, boundary, flow, aggregate, and reviewed branch decision must pass without skip, egress, mutation, or baseline rewrite.",
       "metadata": {
