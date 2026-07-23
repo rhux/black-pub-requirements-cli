@@ -12,12 +12,12 @@
     "value": "8ee816675967fb594fc49609a84115bea96f0f90554578c1d57dee4ed0bd634d",
     "mismatchBehavior": "Do not execute; regenerate this sidecar from the final Markdown plan."
   },
-  "lastUpdated": "2026-07-23T12:17:59Z",
+  "lastUpdated": "2026-07-23T16:57:11Z",
   "tasks": [
     {
       "id": 16,
       "subject": "Task 16: Correct corpus truth and build the matrix kernel",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [],
       "stepCount": 16,
       "description": "Correct schema-based corpus partitioning; add typed case metadata, context-aware execution keys, independent axis/boundary/policy manifests, registry tripwires, pre-collection sandboxing, plugin registration, fail-closed lane accounting, read-only fingerprints, and exact authentic JSON/PDF aggregates.",
@@ -66,7 +66,7 @@
     {
       "id": 17,
       "subject": "Task 17: Complete the input-loader matrix",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [
         16
       ],
