@@ -485,10 +485,12 @@ real-boundary vertical flows. Native filesystem/installer behavior remains in Sl
 
 Honest baseline, no regression; new core/payload-validation code ≥ 95% branch, new
 feature/file-adapter code ≥ 90%, lower platform/UI results require explicit
-uncovered-line justification. Per-area floors are enforced by explicit
-`coverage report --include=<glob> --fail-under=<n>` (not pytest's single global gate),
-with branch coverage on. Coverage is not the correctness gate — the behavior matrix,
-failure injection, parity, and privacy scans are separate gates.
+uncovered-line justification. Per-area floors are enforced from coverage JSON by a checked-in
+area baseline and exact reviewed line/branch exclusion manifest (equivalent to separate
+`coverage report --include=<glob> --fail-under=<n>` gates, not pytest's single global gate),
+with branch coverage on. Stale exclusions fail, baseline updates are explicit, and Gate runs
+use check mode only. Coverage is not the correctness gate — the behavior matrix, failure
+injection, parity, and privacy scans are separate gates.
 
 ### Performance gate (D21 — KEEP)
 

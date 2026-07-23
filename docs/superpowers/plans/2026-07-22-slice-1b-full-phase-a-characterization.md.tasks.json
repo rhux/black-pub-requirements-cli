@@ -1,48 +1,64 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "planPath": "docs/superpowers/plans/2026-07-22-slice-1b-full-phase-a-characterization.md",
   "specPath": "docs/superpowers/specs/2026-07-21-scoutmb-refactor-design.md",
   "matrixSpecPath": "docs/superpowers/specs/2026-07-22-phase-a-characterization-matrix-design.md",
-  "slice": "1b of 5 (READY FOR EXECUTION)",
+  "slice": "1b of 5",
+  "status": "ready-for-execution",
   "dependsOn": "2026-07-22-slice-1a-in-place-correctness.md (Gate 1a complete)",
-  "reviewStatus": "Approved matrix design hardened after written-spec review; seven concrete tasks and fail-closed Gate 1b lanes are ready for execution.",
+  "reviewStatus": "Writing-plans review complete: exact execution-key semantics, task-local versus Gate lane behavior, missing spec cases, typed interfaces, coverage/baseline checks, private-corpus safeguards, and sidecar parity are resolved.",
   "planDigest": {
     "algorithm": "sha256",
-    "value": "a5c5c36aec2eb4058e2210888b5842609b7449dc95cd6be2c3e669ad7ba91249",
-    "mismatchBehavior": "Regenerate this sidecar if the plan .md changes."
+    "value": "cdd8d91b0c4e328a733c0e9cd01b2673e9c9596b7f334a82558914a60b839c8e",
+    "mismatchBehavior": "Do not execute; regenerate this sidecar from the final Markdown plan."
   },
-  "lastUpdated": "2026-07-23T00:38:10Z",
+  "lastUpdated": "2026-07-23T01:25:44Z",
   "tasks": [
     {
       "id": 16,
       "subject": "Task 16: Correct corpus truth and build the matrix kernel",
       "status": "pending",
       "blockedBy": [],
-      "description": "Correct verify_corpus row classification; add typed case metadata, independent AxisSpec and boundary manifests, surface policies, registry audits, pre-collection sandboxing, corpus/browser options, lane execution accounting, and read-only corpus fingerprinting.",
+      "stepCount": 16,
+      "description": "Correct schema-based corpus partitioning; add typed case metadata, context-aware execution keys, independent axis/boundary/policy manifests, registry tripwires, pre-collection sandboxing, plugin registration, fail-closed lane accounting, read-only fingerprints, and exact authentic JSON/PDF aggregates.",
       "metadata": {
         "files": [
-          "tools/verify_corpus.py",
-          "tests/tools/test_verify_corpus.py",
-          "tests/conftest.py",
-          "pyproject.toml",
+          "tests/matrix/__init__.py",
+          "tests/matrix/cases/__init__.py",
+          "tests/fakes/__init__.py",
+          "tests/harnesses/__init__.py",
+          "tests/plugins/__init__.py",
           "tests/matrix/model.py",
           "tests/matrix/axes.py",
           "tests/matrix/policies.py",
-          "tests/matrix/registry.py",
           "tests/matrix/boundaries.py",
+          "tests/matrix/registry.py",
+          "tests/matrix/pytest_support.py",
           "tests/matrix/test_registry.py",
+          "tests/plugins/matrix_gate.py",
+          "tests/plugins/test_matrix_gate.py",
           "tests/harnesses/corpus.py",
           "tests/harnesses/subprocess.py",
-          "tests/plugins/matrix_gate.py",
-          "tests/private_corpus/test_authentic.py"
+          "tests/private_corpus/test_authentic.py",
+          "tools/verify_corpus.py",
+          "tests/tools/test_verify_corpus.py",
+          "tests/conftest.py",
+          "pyproject.toml"
         ],
-        "verifyCommand": "uv run pytest tests/tools/test_verify_corpus.py tests/matrix/test_registry.py -q && uv run pytest tests/private_corpus/test_authentic.py --corpus-dir raw_data --require-corpus --matrix-lane authentic -q",
+        "verifyCommands": [
+          "uv run pytest tests/tools/test_verify_corpus.py tests/matrix/test_registry.py tests/plugins/test_matrix_gate.py -q",
+          "uv run pytest tests/private_corpus/test_authentic.py --corpus-dir raw_data --require-corpus -q",
+          "uv run python tools/check_private_data.py --corpus raw_data tests",
+          "uv run ruff check tests/matrix tests/harnesses tests/plugins tools/verify_corpus.py",
+          "uv run mypy tests/matrix tests/harnesses tests/plugins tools/verify_corpus.py"
+        ],
         "acceptanceCriteria": [
-          "103 schedule, 4858 requirement, 4961 total canonical split",
-          "schema-based classification with unrecognized-row failure",
-          "typed data-only catalog and independent completeness manifests",
-          "fail-closed lane accounting",
-          "read-only private tree fingerprint"
+          "exact 103 schedule, 4858 requirement, 4961 total split",
+          "one PDF, 26 pages, 26 embedded decodes, zero extraction errors",
+          "schema-based classification including ambiguous, non-mapping, and unreadable failures",
+          "ExecutionKey case and context accounting with fail-closed plugin self-tests",
+          "registered pre-collection data sandbox and no private-tree mutation",
+          "typed matrix and helper packages included in Mypy scope"
         ],
         "modelTier": "careful"
       }
@@ -52,7 +68,8 @@
       "subject": "Task 17: Complete the input-loader matrix",
       "status": "pending",
       "blockedBy": [16],
-      "description": "Add exhaustive CSV/XLSX/JSON/text formats, aliases, headers, sheets, filters, dedup, empty/error, and fresh-subprocess optional-import characterization through stable IN-* cases.",
+      "stepCount": 8,
+      "description": "Add exhaustive CSV, XLSX, JSON, and text formats; aliases, headers, sheet selection, filters, deduplication, errors, bounded properties, and isolated optional-dependency profiles through stable IN execution keys.",
       "metadata": {
         "files": [
           "tests/matrix/cases/input_cases.py",
@@ -62,13 +79,18 @@
           "tests/matrix/axes.py",
           "tests/matrix/boundaries.py"
         ],
-        "verifyCommand": "uv run pytest tests/characterization/test_input_matrix.py tests/matrix/test_registry.py -q",
+        "verifyCommands": [
+          "uv run pytest tests/characterization/test_input_matrix.py tests/matrix/test_registry.py -q",
+          "uv run pytest tests/characterization/test_input_matrix.py -k import -q",
+          "uv run ruff check tests/matrix/cases/input_cases.py tests/factories/inputs.py tests/characterization/test_input_matrix.py",
+          "uv run mypy tests/matrix/cases/input_cases.py tests/factories/inputs.py tests/harnesses/subprocess.py"
+        ],
         "acceptanceCriteria": [
-          "all finite aliases and formats",
-          "at least two focused cases per input behavior",
-          "fresh subprocess dependency profiles",
-          "full ordered observations",
-          "no private fixture data"
+          "all finite format and alias members execute in declared contexts",
+          "at least two focused rows per independent input axis",
+          "base, pdf, acquisition, and all subprocess profiles are isolated",
+          "complete ordered observations and exact bounded errors",
+          "no committed binary or private input fixture"
         ],
         "modelTier": "careful"
       }
@@ -78,7 +100,8 @@
       "subject": "Task 18: Complete the PDF and PDF-CLI matrix",
       "status": "pending",
       "blockedBy": [16],
-      "description": "Generate synthetic PDFs at test time and characterize discovery, identity fields, case normalization, embedded/rendered QR paths, corrupt input, filters, schemas, strict exits, quiet output, and cleanup through stable PDF-* cases.",
+      "stepCount": 7,
+      "description": "Generate PDFs at test time and characterize discovery, identity fields, case normalization, embedded and rendered QR tiers, ordering, corruption, debug images, filters, exact schemas, exits, channels, and cleanup.",
       "metadata": {
         "files": [
           "tests/matrix/cases/pdf_cases.py",
@@ -87,23 +110,28 @@
           "tests/matrix/axes.py",
           "tests/matrix/boundaries.py"
         ],
-        "verifyCommand": "uv run pytest tests/characterization/test_pdf_matrix.py tests/matrix/test_registry.py -q",
+        "verifyCommands": [
+          "uv run pytest tests/characterization/test_pdf_matrix.py tests/matrix/test_registry.py -q",
+          "uv run ruff check tests/matrix/cases/pdf_cases.py tests/factories/pdf_builder.py tests/characterization/test_pdf_matrix.py",
+          "uv run mypy tests/matrix/cases/pdf_cases.py tests/factories/pdf_builder.py"
+        ],
         "acceptanceCriteria": [
-          "embedded and rendered QR tiers",
-          "every missing-field combination",
-          "exact attendee and error schemas",
-          "exact CLI exit and stdout stderr contracts",
-          "no committed binary fixtures"
+          "embedded and rendered QR tiers use generated PDFs",
+          "all eight missing-field combinations are explicit",
+          "attendee and error schemas compare every ordered column and row",
+          "CLI exits and stdout stderr line tuples are exact",
+          "no PDF or debug image is committed"
         ],
         "modelTier": "careful"
       }
     },
     {
       "id": 19,
-      "subject": "Task 19: Complete acquisition retry strict-fake and local-browser coverage",
+      "subject": "Task 19: Complete acquisition, strict-fake, retry, and guarded-browser coverage",
       "status": "pending",
-      "blockedBy": [16],
-      "description": "Add strict acquisition/browser/clock fakes, full payload/dedup/retry/delay/raw/cleanup characterization, fake self-tests, loopback Playwright interception, and browser subprocess egress denial.",
+      "blockedBy": [16, 17],
+      "stepCount": 11,
+      "description": "Add strict acquisition/browser/clock fakes, complete payload/dedup/retry/delay/raw/cleanup characterization, fake misuse tests, loopback Playwright interception, browser egress denial, preserve tests for the existing application policy, and Slice 2 ownership for breaker, checkpoint, resume, and gateway-policy wiring.",
       "metadata": {
         "files": [
           "tests/matrix/cases/acquisition_cases.py",
@@ -113,25 +141,35 @@
           "tests/fakes/test_strict_fakes.py",
           "tests/harnesses/browser.py",
           "tests/characterization/test_acquisition_matrix.py",
-          "tests/characterization/test_browser_matrix.py"
+          "tests/characterization/test_browser_matrix.py",
+          "tests/matrix/axes.py",
+          "tests/matrix/boundaries.py",
+          "tests/matrix/policies.py"
         ],
-        "verifyCommand": "uv run pytest tests/fakes/test_strict_fakes.py tests/characterization/test_acquisition_matrix.py tests/matrix/test_registry.py -q && uv run pytest tests/characterization/test_browser_matrix.py -m playwright --require-browser --matrix-lane browser -q",
+        "verifyCommands": [
+          "uv run pytest tests/fakes/test_strict_fakes.py tests/characterization/test_acquisition_matrix.py tests/matrix/test_registry.py -q",
+          "uv run pytest tests/characterization/test_browser_matrix.py -m playwright --require-browser -q",
+          "uv run ruff check tests/fakes tests/harnesses/browser.py tests/matrix/cases/acquisition_cases.py tests/characterization/test_acquisition_matrix.py tests/characterization/test_browser_matrix.py",
+          "uv run mypy tests/fakes tests/harnesses/browser.py tests/matrix/cases/acquisition_cases.py"
+        ],
         "acceptanceCriteria": [
-          "success recovery and terminal retry paths",
-          "HAS_REQ zero current request tripwire",
-          "strict fake parameter order and consumption checks",
-          "resource cleanup",
-          "zero browser egress"
+          "immediate, recovery, and terminal retry waits are exact",
+          "HAS_REQ zero and missing-field intentional-change observations are owned",
+          "strict fake validates parameters order waits retries and consumption",
+          "success and failure resources are closed",
+          "browser guard covers navigation redirect frame popup worker fetch and WebSocket",
+          "existing application policy is executable while future breaker checkpoint resume and gateway-policy wiring are metadata-only with Slice 2 owners"
         ],
         "modelTier": "careful"
       }
     },
     {
       "id": 20,
-      "subject": "Task 20: Complete inference artifact failure and privacy coverage",
+      "subject": "Task 20: Complete requirement, artifact, publication-failure, and privacy coverage",
       "status": "pending",
       "blockedBy": [16],
-      "description": "Exercise all 26 number shapes in path and tree contexts; all flags, types, class states, inference interactions, exact artifact schemas, formula prefixes, failure injection, and every file/non-file privacy surface.",
+      "stepCount": 9,
+      "description": "Exercise 26 shapes via context-aware execution keys; all flags, types, class states, tree/choice/identity interactions, exact artifact schemas, formula prefixes, path collisions and symlinks, publication failures, and every privacy surface and egress path.",
       "metadata": {
         "files": [
           "tests/matrix/cases/requirement_cases.py",
@@ -140,26 +178,37 @@
           "tests/characterization/test_artifact_matrix.py",
           "tests/privacy/test_surface_policies.py",
           "tests/factories/payloads.py",
-          "tests/factories/scale.py",
-          "tests/matrix/policies.py"
+          "tests/factories/records.py",
+          "tests/factories/test_factories_smoke.py",
+          "tests/matrix/axes.py",
+          "tests/matrix/policies.py",
+          "tests/matrix/boundaries.py"
         ],
-        "verifyCommand": "uv run pytest tests/characterization/test_requirement_matrix.py tests/characterization/test_artifact_matrix.py tests/privacy/test_surface_policies.py tests/matrix/test_registry.py -q && uv run python tools/check_private_data.py tests",
+        "verifyCommands": [
+          "uv run pytest tests/characterization/test_requirement_matrix.py tests/characterization/test_artifact_matrix.py tests/privacy/test_surface_policies.py tests/matrix/test_registry.py -q",
+          "uv run python tools/check_private_data.py --corpus raw_data tests",
+          "uv run ruff check tests/matrix/cases/requirement_cases.py tests/matrix/cases/artifact_cases.py tests/factories tests/characterization/test_requirement_matrix.py tests/characterization/test_artifact_matrix.py tests/privacy/test_surface_policies.py",
+          "uv run mypy tests/matrix/cases/requirement_cases.py tests/matrix/cases/artifact_cases.py tests/factories"
+        ],
         "acceptanceCriteria": [
-          "26 shapes in two independent contexts",
-          "all finite flag type and class states",
-          "exact full artifact schemas",
-          "formula and filesystem failure cases",
-          "six surface classes and ten egress paths"
+          "all 26 shapes execute through path and tree consumer contexts",
+          "all finite flag type class state and choice members execute",
+          "HTML and email reuse has distinct execution keys",
+          "exact complete artifact schemas and publication state",
+          "formula prefixes cover every outward spreadsheet field",
+          "six surface classes and ten egress paths have allow and deny evidence",
+          "symlink and duplicate output behavior is explicit"
         ],
         "modelTier": "careful"
       }
     },
     {
       "id": 21,
-      "subject": "Task 21: Complete interfaces lifecycle desktop and scoped-platform coverage",
+      "subject": "Task 21: Complete interfaces, lifecycle, desktop, and scoped-platform coverage",
       "status": "pending",
       "blockedBy": [16, 19],
-      "description": "Characterize both CLIs, every local route/method, real SSE framing and cleanup, static UI flows, desktop startup/readiness, scoped bootstrap, and simulated Windows/macOS path seams without claiming native installer behavior.",
+      "stepCount": 10,
+      "description": "Characterize both CLIs, 12 routes and wrong methods, complete route states, executed SSE and cleanup, static UI flows, desktop readiness/modes, scoped bootstrap, simulated Windows/macOS seams, and migrate every listed legacy test helper without path mutation.",
       "metadata": {
         "files": [
           "tests/matrix/cases/interface_cases.py",
@@ -168,63 +217,122 @@
           "tests/characterization/test_platform_matrix.py",
           "tests/characterization/test_static_ui.py",
           "tests/harnesses/legacy.py",
-          "tests/harnesses/browser.py"
+          "tests/harnesses/browser.py",
+          "tests/matrix/axes.py",
+          "tests/matrix/boundaries.py",
+          "tests/matrix/policies.py",
+          "tests/characterization/test_inference.py",
+          "tests/characterization/test_inputs_and_outputs.py",
+          "tests/characterization/test_process_scout.py",
+          "tests/characterization/test_requirement_path.py",
+          "tests/unit/test_atomic_write.py",
+          "tests/unit/test_identity.py",
+          "tests/unit/test_inference_identity.py",
+          "tests/unit/test_migrate.py",
+          "tests/unit/test_output_filenames.py",
+          "tests/unit/test_ui_settings.py"
         ],
-        "verifyCommand": "uv run pytest tests/characterization/test_interface_matrix.py tests/characterization/test_platform_matrix.py tests/matrix/test_registry.py -q && uv run pytest tests/characterization/test_static_ui.py -m playwright --require-browser --matrix-lane browser -q",
+        "verifyCommands": [
+          "uv run pytest tests/characterization/test_interface_matrix.py tests/characterization/test_platform_matrix.py tests/matrix/test_registry.py -q",
+          "uv run pytest tests/characterization/test_static_ui.py -m playwright --require-browser -q",
+          "uv run pytest tests/unit tests/characterization -m \"not playwright\" -q",
+          "uv run ruff check tests/matrix/cases/interface_cases.py tests/matrix/cases/platform_cases.py tests/harnesses tests/characterization tests/unit",
+          "uv run mypy tests/matrix/cases/interface_cases.py tests/matrix/cases/platform_cases.py tests/harnesses"
+        ],
         "acceptanceCriteria": [
-          "exact route and method inventory",
-          "executed SSE framing not source presence",
-          "no async resource leaks",
-          "Windows and macOS simulated seam cases",
-          "scoped bootstrap only"
+          "12 exact route method pairs plus wrong-method rows",
+          "31 explicit route-state rows and complete SSE framing",
+          "no async operation queue task busy flag or browser leak",
+          "three guarded static UI flows",
+          "desktop and scoped bootstrap use injected external seams",
+          "Windows and macOS rows remain pure simulated contracts",
+          "all listed sys.path and private fake imports are removed"
         ],
         "modelTier": "careful"
       }
     },
     {
       "id": 22,
-      "subject": "Task 22: Add vertical flows scale profiles baselines and close Gate 1b",
+      "subject": "Task 22: Add variable/scale profiles, vertical flows, baselines, CI, and Gate 1b",
       "status": "pending",
       "blockedBy": [17, 18, 19, 20, 21],
-      "description": "Add variable attendees, canonical and larger profiles, explicitly synthetic marginal pairing, two real-boundary vertical flows, local browser flow, request/growth baselines, scoped branch evidence, and all fail-closed Gate 1b lanes.",
+      "stepCount": 15,
+      "description": "Add exact variable and canonical generators with intentionally synthetic marginal pairing, three real-boundary flows, request/growth checks, coverage JSON enforcement, explicit baseline update/check modes, CI egress denial, and all final Gate lanes.",
       "metadata": {
         "files": [
-          "tests/factories/scale.py",
           "tests/matrix/scale_profile.py",
+          "tests/factories/scale.py",
           "tests/scale/test_profiles.py",
           "tests/vertical/test_legacy_flows.py",
           "tests/performance/test_phase_a_baseline.py",
           "tools/measure_baseline.py",
+          "tools/check_phase_a_coverage.py",
           "tests/baselines/phase_a.json",
           "tests/matrix/axes.py",
           "tests/matrix/boundaries.py",
-          "tests/matrix/registry.py"
+          "tests/matrix/registry.py",
+          "tests/conftest.py",
+          "pyproject.toml",
+          ".github/workflows/ci.yml"
         ],
-        "verifyCommand": "Run every command in the plan's Gate 1b section; no combined marker command may replace a lane.",
+        "verifyCommands": [
+          "uv run pytest tests/scale/test_profiles.py tests/matrix/test_registry.py -q",
+          "uv run pytest tests/vertical/test_legacy_flows.py -k \"success or partial\" -q",
+          "uv run pytest tests/vertical/test_legacy_flows.py -m playwright --require-browser -q",
+          "uv run pytest tests/performance/test_phase_a_baseline.py -q",
+          "uv run coverage erase",
+          "uv run coverage run --branch -m pytest -m \"not live_service and not playwright and not private_corpus\" -q",
+          "uv run coverage json -o build/phase-a-coverage.json",
+          "uv run python tools/check_phase_a_coverage.py --coverage-json build/phase-a-coverage.json --exclusions tests/matrix/boundaries.py --require-complete",
+          "uv run python tools/measure_baseline.py --profile canonical-22 --coverage-json build/phase-a-coverage.json --check tests/baselines/phase_a.json",
+          "uv run python tools/check_private_data.py --corpus raw_data tests tools/measure_baseline.py"
+        ],
         "acceptanceCriteria": [
-          "zero one two small canonical-22 large-50 and property profiles",
-          "intentional synthetic pairing cannot support correlation assertions",
-          "success partial and browser vertical flows",
-          "reviewed aggregate baseline and scoped branch evidence",
-          "default browser authentic and static lanes all green"
+          "zero one two small canonical 22 large 50 and bounded property profiles",
+          "exact canonical topology and all safe marginals",
+          "synthetic pairing cannot support correlation evidence",
+          "success partial and guarded browser flows prove real boundaries",
+          "request and growth assertions use exact formulas without wall time",
+          "coverage gaps and stale exclusions fail per area",
+          "baseline update is explicit and Gate check never writes",
+          "default browser authentic static and CI egress-denied evidence is green"
         ],
         "modelTier": "careful"
       }
     },
     {
       "id": 90,
-      "subject": "Gate 1b: Full Phase A characterization go/no-go",
+      "subject": "Gate 1b — go/no-go",
       "status": "pending",
       "blockedBy": [16, 17, 18, 19, 20, 21, 22],
-      "description": "All four lanes pass; every required stable ID executes exactly once; corpus is unchanged; privacy and egress findings are zero; all axes/boundaries/flows and scoped branches are covered or reviewed; baseline contains no placeholder or private data.",
+      "stepCount": 0,
+      "description": "Run static, default, browser, authentic, coverage, baseline, and privacy commands exactly; every required execution key, axis, interaction, boundary, flow, aggregate, and reviewed branch decision must pass without skip, egress, mutation, or baseline rewrite.",
       "metadata": {
         "files": [],
-        "verifyCommand": "Run the Static quality, Default synthetic, Required local browser, Required authentic, Scoped legacy branch coverage, and Baseline/immutability commands in the plan verbatim.",
+        "verifyCommands": [
+          "uv run ruff check .",
+          "uv run ruff format --check .",
+          "uv run mypy",
+          "uv lock --check",
+          "uv run pytest tests/matrix/test_registry.py tests/plugins/test_matrix_gate.py -q",
+          "uv run python tools/check_private_data.py tests",
+          "uv run pytest -m \"not live_service and not playwright and not private_corpus\" --matrix-lane default -q",
+          "uv run pytest -m playwright --require-browser --matrix-lane browser -q",
+          "uv run pytest -m private_corpus --corpus-dir raw_data --require-corpus --matrix-lane authentic -q",
+          "uv run python tools/check_private_data.py --corpus raw_data tests",
+          "uv run coverage erase",
+          "uv run coverage run --branch -m pytest -m \"not live_service and not playwright and not private_corpus\" --matrix-lane default -q",
+          "uv run coverage json -o build/phase-a-coverage.json",
+          "uv run python tools/check_phase_a_coverage.py --coverage-json build/phase-a-coverage.json --baseline tests/baselines/phase_a.json --exclusions tests/matrix/boundaries.py --require-complete",
+          "uv run python tools/measure_baseline.py --profile canonical-22 --coverage-json build/phase-a-coverage.json --check tests/baselines/phase_a.json"
+        ],
         "acceptanceCriteria": [
-          "no required skip deselection duplicate or empty lane",
-          "no external network",
-          "private corpus unchanged",
-          "no uncovered scoped branch without reviewed exclusion",
+          "no required execution skip deselection duplicate missing key or empty lane",
+          "no external network in default or browser lanes",
+          "private corpus content fingerprint unchanged and exact aggregates match",
+          "no private data finding",
+          "no uncovered scoped branch without an exact reviewed exclusion and no stale exclusion",
+          "checked-in baseline matches without a write or wall-clock threshold",
           "Gate 1b unblocks Slice 2"
         ],
         "modelTier": "careful"

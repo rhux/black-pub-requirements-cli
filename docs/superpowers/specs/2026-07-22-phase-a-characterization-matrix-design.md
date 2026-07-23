@@ -45,7 +45,8 @@ One canonical private snapshot contains:
 | Requirements | 98 | 4,858 requirement rows |
 | Total | 120 | 4,961 `data` rows |
 
-The 103 schedule rows deduplicate to 98 classes. The requirement rows have one stable
+Deduplicating separately within each schedule payload reduces the 103 schedule rows to 98
+attendee-class rows. The requirement rows have one stable
 ten-field schema, four observed completion-flag combinations, three requirement types, and
 26 distinct normalized number shapes. There are 31 requirement rows with an empty display
 number and 125 `Note.`-shape rows per canonical snapshot.
@@ -97,6 +98,7 @@ tests/matrix/
   axes.py
   policies.py
   registry.py
+  pytest_support.py
   cases/
     input_cases.py
     pdf_cases.py
@@ -150,15 +152,21 @@ Finite sets are audited against the `AxisSpec` members rather than inferred from
 themselves. A separate boundary inventory maps every scoped public legacy boundary and
 critical flow to case IDs; branch exclusions require a stable ID and reviewed rationale.
 
+A case ID names one behavior row. A required execution is the pair
+`ExecutionKey(case_id, context_id)`. Reusing one case through path, tree, HTML, email, CLI, or
+browser harnesses therefore creates explicit independent execution keys without duplicating
+the case data. Lane accounting is over execution keys, not bare case IDs.
+
 ### Classification semantics
 
 - **Preserve:** the legacy and target observations are the same.
 - **Intentional change:** Slice 1b asserts the current legacy behavior as a temporary
   executable tripwire and records the different target. The owning later slice replaces or
   supplements the legacy assertion deliberately.
-- **New acceptance:** no meaningful legacy implementation exists. Slice 1b validates the
-  case metadata and ownership but does not pretend the legacy code passes the future
-  contract.
+- **New acceptance:** no meaningful legacy implementation exists. Slice 1b infrastructure
+  acceptances are executable self-tests owned by Slice 1b; future application acceptances are
+  metadata-only and name a later implementing slice. Neither form pretends the legacy
+  application passes a contract it does not implement.
 
 ## Execution model
 
@@ -209,7 +217,7 @@ UUID, timestamp, path, or ordering shape before normalization.
 - Pairwise interaction cases are added only when one axis materially changes another.
 - Critical public legacy boundaries and execution flows map to stable case IDs. Branch
   coverage is a completeness backstop, not the definition of correctness.
-- Every executable lane audits selected and executed case IDs; a marker expression, missing
+- Every executable lane audits selected and executed execution keys; a marker expression, missing
   optional dependency, or empty registry may not produce a green no-op.
 
 ## Synthetic data layers
@@ -234,7 +242,7 @@ The generator supports:
 - bounded property-generated attendee counts.
 
 Only the canonical profile reproduces the safe production topology: 103 raw class rows,
-five duplicate-class rows, 98 deduplicated classes and requirement payloads, and 4,858
+five within-payload duplicate-class rows, 98 deduplicated attendee-class rows and requirement payloads, and 4,858
 requirements. It reproduces exact safe marginal counts for number shapes, flags, types, and
 class-completion states. Pairing those independent marginal assignments onto the same
 synthetic rows is **intentionally synthetic**: it is deterministic test construction, not an
@@ -416,6 +424,10 @@ emit only aggregates, schema field names, counts, and redacted findings. The aut
 validates the canonical payload split, number/flag/type profiles, PDF page/decode aggregates,
 and the generator's structural fidelity.
 
+The canonical PDF aggregate is one source PDF, 26 pages, 26 extracted attendees, zero
+extraction errors, and 26 `embedded-image` decodes. This aggregate is asserted only in the
+read-only authentic lane; no PDF, filename, decoded value, or derived fixture is committed.
+
 ## Phase ownership
 
 Slice 1b builds the observation harness, legacy assertions, normalization, evidence, and
@@ -434,9 +446,8 @@ portable performance comparison thresholds.
 6. Web, SSE, static UI, desktop, and scoped platforms.
 7. Vertical flows, variable/scale profiles, baselines, and Gate 1b.
 
-Each plan task must name concrete case IDs and assertions. It may not defer breadth through
-phrases such as "representative rows", "optionally extend", or an unchecked completeness
-list.
+Each plan task must name concrete case IDs, execution contexts, and assertions. It may not
+defer breadth through an unchecked completeness list.
 
 ## Gate 1b
 
@@ -449,13 +460,19 @@ Gate 1b has four lanes:
 - static quality: lint, format, types, privacy, registry audit, and scoped legacy branch
   coverage.
 
-The gate is green only when every preserve and intentional-change case executes, every new
-acceptance has a later owner, every independent axis has at least two cases, every critical
+The gate is green only when every preserve and intentional-change execution key passes, every new
+acceptance has an implementing owner (Slice 1b for infrastructure self-tests, a later slice for
+future application behavior), every independent axis has at least two cases, every critical
 boundary/flow maps to case IDs, no scoped branch lacks either coverage or an explicit
 reviewed justification, the private corpus remains unchanged, privacy findings are zero,
 browser/default tests make no external requests, the variable and canonical scale profiles
 pass, and baseline evidence is recorded without a premature portable timing threshold. Each
-lane records selected and executed stable IDs and fails if its required set is empty,
+lane records selected and executed keys and fails if its required set is empty,
 deselected, skipped, duplicated, or incomplete. Scoped coverage measures the legacy flat
 modules and scoped bootstrap code actually moved by Slice 2; `src/scoutmb` coverage alone
 cannot satisfy Gate 1b.
+
+Full-lane accounting is enabled only by an explicit `--matrix-lane`; focused task commands do
+not claim whole-lane completeness. Coverage JSON is checked per scoped area against the
+checked-in no-regression baseline and an independent exact line/branch exclusion manifest.
+Baseline update and Gate check are separate commands; a Gate run never rewrites evidence.
