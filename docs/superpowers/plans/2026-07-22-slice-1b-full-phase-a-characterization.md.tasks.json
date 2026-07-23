@@ -12,7 +12,7 @@
     "value": "8ee816675967fb594fc49609a84115bea96f0f90554578c1d57dee4ed0bd634d",
     "mismatchBehavior": "Do not execute; regenerate this sidecar from the final Markdown plan."
   },
-  "lastUpdated": "2026-07-23T16:57:11Z",
+  "lastUpdated": "2026-07-23T17:24:28Z",
   "tasks": [
     {
       "id": 16,
@@ -66,7 +66,7 @@
     {
       "id": 17,
       "subject": "Task 17: Complete the input-loader matrix",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [
         16
       ],
@@ -100,7 +100,7 @@
     {
       "id": 18,
       "subject": "Task 18: Complete the PDF and PDF-CLI matrix",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [
         16
       ],
