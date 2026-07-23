@@ -120,7 +120,99 @@ _INPUT_BOUNDARIES: tuple[BoundarySpec, ...] = (
     ),
 )
 
-# Populated by later slices; Task 17 adds the input-domain load_* seams.
-BOUNDARIES: tuple[BoundarySpec, ...] = _INPUT_BOUNDARIES
+# PDF-domain boundaries (Task 18): the extraction and CLI seams in pdf_to_scouts. Each
+# ``required_case_ids`` names PDF-domain cases that drive the seam.
+_PDF_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="PDF-B-EXPAND",
+        qualified_name="pdf_to_scouts.expand_pdf_inputs",
+        domain=Domain.PDF,
+        required_case_ids=frozenset(
+            {
+                "PDF-DISC-001",
+                "PDF-DISC-002",
+                "PDF-DISC-003",
+                "PDF-DISC-004",
+                "PDF-DISC-005",
+                "PDF-DISC-006",
+                "PDF-CLI-002",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="PDF-B-IDENTITY",
+        qualified_name="pdf_to_scouts.extract_page_identity",
+        domain=Domain.PDF,
+        required_case_ids=frozenset(
+            {
+                "PDF-ID-001",
+                "PDF-ID-002",
+                "PDF-ID-003",
+                "PDF-ID-004",
+                "PDF-ID-005",
+                "PDF-ID-006",
+                "PDF-ID-007",
+                "PDF-ID-008",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="PDF-B-NORMALIZE",
+        qualified_name="pdf_to_scouts.normalize_obvious_case",
+        domain=Domain.PDF,
+        required_case_ids=frozenset(
+            {"PDF-CASE-001", "PDF-CASE-002", "PDF-CASE-003", "PDF-CASE-004"}
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="PDF-B-EMBEDDED",
+        qualified_name="pdf_to_scouts.decode_embedded_qr",
+        domain=Domain.PDF,
+        required_case_ids=frozenset({"PDF-QR-001", "PDF-QR-003", "PDF-QR-005"}),
+    ),
+    BoundarySpec(
+        boundary_id="PDF-B-RENDERED",
+        qualified_name="pdf_to_scouts.decode_rendered_qr",
+        domain=Domain.PDF,
+        required_case_ids=frozenset(
+            {"PDF-QR-002", "PDF-QR-006", "PDF-DEBUG-001", "PDF-DEBUG-002", "PDF-CORRUPT-002"}
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="PDF-B-EXTRACT",
+        qualified_name="pdf_to_scouts.extract_pdf",
+        domain=Domain.PDF,
+        required_case_ids=frozenset(
+            {
+                "PDF-ID-001",
+                "PDF-PAGE-001",
+                "PDF-PAGE-002",
+                "PDF-CORRUPT-001",
+                "PDF-CORRUPT-002",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="PDF-B-ATTENDEE-CSV",
+        qualified_name="pdf_to_scouts.write_attendees_csv",
+        domain=Domain.PDF,
+        required_case_ids=frozenset({"PDF-SCHEMA-001", "PDF-FILTER-001"}),
+    ),
+    BoundarySpec(
+        boundary_id="PDF-B-ERRORS-CSV",
+        qualified_name="pdf_to_scouts.write_errors_csv",
+        domain=Domain.PDF,
+        required_case_ids=frozenset({"PDF-SCHEMA-002", "PDF-CLI-006"}),
+    ),
+    BoundarySpec(
+        boundary_id="PDF-B-MAIN",
+        qualified_name="pdf_to_scouts.main",
+        domain=Domain.PDF,
+        required_case_ids=frozenset({"PDF-CLI-005", "PDF-CLI-007", "PDF-FILTER-003"}),
+    ),
+)
+
+# Populated by later slices; Task 17 adds the input-domain load_* seams, Task 18 the PDF seams.
+BOUNDARIES: tuple[BoundarySpec, ...] = _INPUT_BOUNDARIES + _PDF_BOUNDARIES
 EXCLUSIONS: tuple[BranchExclusion, ...] = ()
 COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = ()

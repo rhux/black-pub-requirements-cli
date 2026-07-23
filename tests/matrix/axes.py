@@ -164,5 +164,128 @@ _INPUT_AXES: tuple[AxisSpec, ...] = (
     ),
 )
 
-# Domain axes are declared by later slices (Tasks 18-21) and appended here.
-AXES: tuple[AxisSpec, ...] = _INPUT_AXES
+# PDF-domain axes (Task 18). Each member set is exhaustive for the behavior it names, and
+# ``min_focused_cases`` equals the member count because the catalog declares exactly one focused
+# case per member. ``boundaries`` name the pdf_to_scouts seams the axis exercises.
+_PDF_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="PDF-DISC",
+        domain=Domain.PDF,
+        members=frozenset(
+            {"file", "directory", "glob", "recursive", "overlapping", "missing"}
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PDF-B-EXPAND"}),
+    ),
+    AxisSpec(
+        axis_id="PDF-ID",
+        domain=Domain.PDF,
+        members=frozenset(
+            {
+                "all-fields",
+                "missing-name",
+                "missing-type",
+                "missing-qr",
+                "missing-name-type",
+                "name-qr",
+                "type-qr",
+                "all-missing",
+            }
+        ),
+        min_focused_cases=8,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PDF-B-IDENTITY", "PDF-B-EXTRACT"}),
+    ),
+    AxisSpec(
+        axis_id="PDF-CASE",
+        domain=Domain.PDF,
+        members=frozenset(
+            {"normalize-miles", "normalization-disabled", "preserve-mcdonald", "preserve-aj"}
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PDF-B-NORMALIZE"}),
+    ),
+    AxisSpec(
+        axis_id="PDF-QR",
+        domain=Domain.PDF,
+        members=frozenset(
+            {"embedded", "rendered", "preferred", "first-other", "multi-symbol", "total-failure"}
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PDF-B-EMBEDDED", "PDF-B-RENDERED"}),
+    ),
+    AxisSpec(
+        axis_id="PDF-PAGE",
+        domain=Domain.PDF,
+        members=frozenset({"multipage-order", "multi-pdf-order"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PDF-B-EXTRACT"}),
+    ),
+    AxisSpec(
+        axis_id="PDF-CORRUPT",
+        domain=Domain.PDF,
+        members=frozenset({"corrupt-open", "corrupt-embedded"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PDF-B-EXTRACT"}),
+    ),
+    AxisSpec(
+        axis_id="PDF-DEBUG",
+        domain=Domain.PDF,
+        members=frozenset({"with-root", "without-root"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PDF-B-RENDERED"}),
+    ),
+    AxisSpec(
+        axis_id="PDF-FILTER",
+        domain=Domain.PDF,
+        members=frozenset(
+            {
+                "default-adult",
+                "custom-adult",
+                "include-adults",
+                "scoutingevent-only",
+                "duplicate-removed",
+                "duplicates-retained",
+            }
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PDF-B-MAIN", "PDF-B-ATTENDEE-CSV"}),
+    ),
+    AxisSpec(
+        axis_id="PDF-SCHEMA",
+        domain=Domain.PDF,
+        members=frozenset({"attendee-columns", "error-columns"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PDF-B-ATTENDEE-CSV", "PDF-B-ERRORS-CSV"}),
+    ),
+    AxisSpec(
+        axis_id="PDF-CLI",
+        domain=Domain.PDF,
+        members=frozenset(
+            {
+                "help",
+                "no-match",
+                "dpi-low",
+                "dpi-high",
+                "success",
+                "strict-exit",
+                "quiet",
+                "stale",
+            }
+        ),
+        min_focused_cases=8,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PDF-B-MAIN", "PDF-B-EXPAND", "PDF-B-ERRORS-CSV"}),
+    ),
+)
+
+# Domain axes are declared by later slices (Tasks 19-21) and appended here.
+AXES: tuple[AxisSpec, ...] = _INPUT_AXES + _PDF_AXES
