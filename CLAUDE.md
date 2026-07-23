@@ -81,7 +81,7 @@ There is no test suite, linter, or CI config in this repo. Verify changes by run
 
 ## Data/privacy notes
 
-- QR URLs and attendee IDs act as bearer access tokens for real scouts' data. `.gitignore` already excludes generated output directories (`scouting-output*/`, `heritage-results*/`), input files (`scouts*.csv`, `*.xlsx`), and `.venv/` — keep it that way and don't commit real PDFs, CSVs, or generated reports.
+- QR URLs and attendee IDs act as bearer access tokens for real scouts' data. `.gitignore` already excludes generated output directories (`scouting-output*/`, `heritage-results*/`), input files (`scouts*.csv`, `*.xlsx`), and `.venv/` — keep it that way and don't commit real PDFs, CSVs, or generated reports. `permissions.deny` in `.claude/settings.json` blocks Claude from reading these paths directly.
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph

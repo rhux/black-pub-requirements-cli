@@ -24,5 +24,21 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Read(./**/*.key)",
+      "Read(./**/*.pem)",
+      "Read(./scouts*.csv)",
+      "Read(./*.xlsx)",
+      "Read(./scouting-output*/**)",
+      "Read(./heritage-results*/**)",
+      "Read(./pdf-uploads/**)",
+      "Read(./runs/**)",
+      "Read(./raw_data/**)"
+    ]
   }
 }
