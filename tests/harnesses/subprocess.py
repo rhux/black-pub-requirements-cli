@@ -23,7 +23,8 @@ _TRACKED_IMPORT_ROOTS = ("playwright", "fitz", "cv2", "openpyxl")
 # Runs in a clean ``python -I`` child. Installs a meta-path finder that raises ImportError for
 # the blocked top-level names, then executes the legacy module straight from its file (no
 # sys.path mutation) and reports which tracked roots ended up imported. argv carries the
-# profile name, the module file path, then the blocked top-level names.
+# profile name, the module file path, the tracked root names (JSON), then the blocked
+# top-level names.
 _IMPORT_PROBE_SOURCE = """
 import importlib.util
 import json
@@ -31,8 +32,8 @@ import sys
 
 profile = sys.argv[1]
 module_path = sys.argv[2]
-blocked = set(sys.argv[3:])
-tracked = {"playwright", "fitz", "cv2", "openpyxl"}
+tracked = set(json.loads(sys.argv[3]))
+blocked = set(sys.argv[4:])
 
 
 class _Blocker:
@@ -79,11 +80,25 @@ def run_import_probe(
     """
     # Fixed executable, no shell, fully controlled argv -- the child cannot run arbitrary code.
     completed = subprocess.run(
-        [sys.executable, "-I", "-c", _IMPORT_PROBE_SOURCE, profile, str(module_path), *blocked],
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            _IMPORT_PROBE_SOURCE,
+            profile,
+            str(module_path),
+            json.dumps(list(_TRACKED_IMPORT_ROOTS)),
+            *blocked,
+        ],
         capture_output=True,
         text=True,
         check=False,
     )
+    if not completed.stdout.strip():
+        raise RuntimeError(
+            "import probe produced no stdout "
+            f"(returncode={completed.returncode!r}, stderr={completed.stderr!r})"
+        )
     payload = json.loads(completed.stdout)
     return ImportProbeResult(
         profile=str(payload["profile"]),
