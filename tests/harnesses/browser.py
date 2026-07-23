@@ -3,22 +3,37 @@
 ``scout_schedule_cli`` drives a REAL Chromium subprocess, which pytest-socket cannot see (it
 only patches sockets inside this Python process -- see ``src/scoutmb/network_policy.py``'s
 docstring). This harness is the browser-lane equivalent of that same defense-in-depth idea:
-every request/navigation/redirect/frame/popup/worker/WebSocket a guarded context's pages make
-is checked against ``LOOPBACK_HOSTS`` before it can leave the sandbox.
+every request/navigation/redirect/frame/popup/worker/WebSocket/download a guarded context's
+pages make is checked against ``LOOPBACK_HOSTS`` before it can leave the sandbox.
 
-Two enforcement paths, because Playwright does not offer one mechanism that covers everything:
+Three enforcement paths, because Playwright does not offer one mechanism that covers everything:
 
-* Ordinary requests (navigation, redirects -- each hop is its own request, in-page fetch/XHR,
-  frame subresources, and popups, since a context-level route also covers pages opened later in
-  that same context) go through ``context.route("**/*", ...)``, which can genuinely abort the
-  request before it reaches the network.
-* Dedicated Web Workers and WebSocket connections are NOT interceptable through
-  ``route()`` in Playwright, so those are caught with ``page.on("worker", ...)`` /
-  ``page.on("websocket", ...)`` listeners instead. Playwright dispatches those as fire-and-forget
-  sync callbacks -- an exception raised inside one is logged, not propagated to the awaiting
-  caller -- so ``GuardedContext.violations`` is the durable, awaitable-safe record a test reads
-  after the action, in addition to ``assert_loopback`` raising on the spot wherever a caller can
-  actually observe it (the route handler, and direct unit tests of ``assert_loopback`` itself).
+* Ordinary requests (navigation, in-page fetch/XHR, frame subresources, and popups, since a
+  context-level route also covers pages opened later in that same context) go through
+  ``context.route("**/*", ...)``, which can genuinely abort the request before it reaches the
+  network.
+* Navigation redirects need special handling within that same route handler: verified
+  empirically against this Playwright/Chromium build, ``context.route()``'s handler is never
+  re-invoked for the redirected hop of a main-frame navigation -- Chromium's Fetch-domain
+  request interception treats that hop as part of the same network-service-level redirect, not
+  a fresh renderer-issued request, so it never reaches Playwright's routing layer a second time
+  (confirmed by instrumenting every Playwright/CDP event: ``page.on("request")`` sees the
+  redirected URL, but the registered route handler never fires for it, with or without a
+  detector attached). The fix: for a navigation request, fetch the response ourselves with
+  ``route.fetch(max_redirects=0)`` -- so nothing is auto-followed -- inspect its ``Location``
+  header BEFORE the browser ever sees it, and abort in place (``route.fulfill`` with a 403) if
+  that target is non-loopback. Nothing reaches the network for that hop. A loopback ``Location``
+  is relayed back to the browser as a genuine redirect response via ``route.fulfill(response=...)``,
+  which makes the browser issue a brand-new top-level navigation request for it -- and that
+  fresh request re-enters this same route handler normally.
+* Dedicated Web Workers, WebSocket connections, and triggered downloads are NOT interceptable
+  through ``route()`` in Playwright, so those are caught with ``page.on("worker", ...)`` /
+  ``page.on("websocket", ...)`` / ``page.on("download", ...)`` listeners instead. Playwright
+  dispatches those as fire-and-forget sync callbacks -- an exception raised inside one is
+  logged, not propagated to the awaiting caller -- so ``GuardedContext.violations`` is the
+  durable, awaitable-safe record a test reads after the action, in addition to
+  ``assert_loopback`` raising on the spot wherever a caller can actually observe it (the route
+  handler, and direct unit tests of ``assert_loopback`` itself).
 
 The blocked-request message never carries more than the scheme/host: never a path, query
 string, request body, or header, even though every URL used against this harness in tests is
@@ -33,12 +48,12 @@ import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from playwright.async_api import BrowserContext, Page
+    from playwright.async_api import BrowserContext, Download, Page
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -75,41 +90,61 @@ class GuardedContext:
 async def install_egress_guard(context: BrowserContext) -> GuardedContext:
     """Install the guard on ``context`` BEFORE the first page is created.
 
-    Covers, per the member list this harness backs: navigation, redirects (each hop is its own
-    request), frames (iframe subresources route through the same context), popups (a
-    context-level route also applies to pages opened later in that context), in-page
-    fetch/XHR, and -- via the two ``page.on`` listeners below, since routing does not reach
-    them -- dedicated Worker network access and WebSocket connection attempts.
+    Covers, per the member list this harness backs: navigation, redirects (handled specially --
+    see the module docstring -- because Chromium never re-invokes ``route()`` for a
+    navigation's redirected hop), frames (iframe subresources route through the same context),
+    popups (a context-level route also applies to pages opened later in that context), in-page
+    fetch/XHR, and -- via the ``page.on`` listeners below, since routing does not reach them --
+    dedicated Worker network access, WebSocket connection attempts, and triggered downloads.
     """
     guard = GuardedContext(context)
 
     async def _route_handler(route: object) -> None:
         request = route.request  # type: ignore[attr-defined]
         host = urlsplit(request.url).hostname
-        if host in LOOPBACK_HOSTS:
-            guard.allowed.append(host)
+        if host not in LOOPBACK_HOSTS:
+            guard.violations.append(f"external browser request blocked: {host or '<none>'}")
+            await route.abort()  # type: ignore[attr-defined]
+            return
+        guard.allowed.append(host)
+        if not request.is_navigation_request():
             await route.continue_()  # type: ignore[attr-defined]
             return
-        guard.violations.append(f"external browser request blocked: {host or '<none>'}")
-        await route.abort()  # type: ignore[attr-defined]
+        # Navigation redirects: fetch the response ourselves without following any redirect,
+        # so we can inspect its Location header before the browser ever acts on it. See the
+        # module docstring for why route() alone cannot catch this hop.
+        try:
+            response = await route.fetch(max_redirects=0)  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 - a failed manual fetch is fail-closed, not a pass-through
+            await route.abort()  # type: ignore[attr-defined]
+            return
+        location = response.headers.get("location")
+        if response.status in (301, 302, 303, 307, 308) and location:
+            target_host = urlsplit(urljoin(request.url, location)).hostname
+            if target_host not in LOOPBACK_HOSTS:
+                guard.violations.append(
+                    f"external browser request blocked: {target_host or '<none>'}"
+                )
+                await route.fulfill(status=403, body=b"blocked by egress guard")  # type: ignore[attr-defined]
+                return
+        await route.fulfill(response=response)  # type: ignore[attr-defined]
 
     await context.route("**/*", _route_handler)
-
-    # Belt-and-suspenders detector: some redirect hops fire a "request" event without ever
-    # re-entering the registered route() handler in every Playwright/Chromium combination.
-    # ``context.on("request", ...)`` is purely a detector here (it cannot abort anything) --
-    # ``route()`` above remains the actual blocking mechanism wherever it does fire.
-    context.on("request", lambda request: guard._record(request.url))
 
     def _guard_page(page: Page) -> None:
         page.on("worker", lambda worker: guard._record(worker.url))
         page.on("websocket", lambda ws: guard._record(ws.url))
+        page.on("download", lambda download: guard._record(_download_url(download)))
 
     context.on("page", _guard_page)
     for page in context.pages:
         _guard_page(page)
 
     return guard
+
+
+def _download_url(download: Download) -> str:
+    return download.url
 
 
 # --------------------------------------------------------------------------------------------

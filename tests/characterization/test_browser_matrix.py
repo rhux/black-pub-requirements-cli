@@ -237,6 +237,60 @@ async def test_egress_websocket_blocked(
     assert guard.violations, "a WebSocket connection to a non-loopback host was not blocked"
 
 
+@pytest.mark.matrix_case(case_id="BROWSER-EGRESS-007", context_id="browser", lane="browser")
+async def test_egress_download_blocked() -> None:
+    # A genuine end-to-end download aimed at a non-loopback host is unreachable through this
+    # harness by construction: the same route() host check that blocks any other non-loopback
+    # request (see BROWSER-EGRESS-001/002) runs and aborts before Chromium's download
+    # subsystem ever receives a response, so page.on("download") never has anything to
+    # observe for an external target -- confirmed empirically (direct navigation to a
+    # non-loopback download URL, and a loopback page whose download link redirects
+    # off-loopback, are both aborted at the route() layer before any "download" event fires).
+    # This is therefore a direct, unit-style proof of the dedicated page.on("download", ...)
+    # listener itself: a minimal fake BrowserContext/Page pair drives the REAL
+    # ``install_egress_guard`` code path (not a reimplementation of its logic) and a fake
+    # Download double exercises the real registered callback.
+    from tests.harnesses.browser import install_egress_guard
+
+    class _FakeContext:
+        def __init__(self) -> None:
+            self.pages: list[object] = []
+            self.page_handler: object = None
+
+        async def route(self, pattern: str, handler: object) -> None:
+            del pattern, handler  # not exercised by this unit-style test
+
+        def on(self, event: str, handler: object) -> None:
+            if event == "page":
+                self.page_handler = handler
+
+    class _FakePage:
+        def __init__(self) -> None:
+            self.handlers: dict[str, object] = {}
+
+        def on(self, event: str, handler: object) -> None:
+            self.handlers[event] = handler
+
+    class _FakeDownload:
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+    context = _FakeContext()
+    guard = await install_egress_guard(context)  # type: ignore[arg-type]
+    assert context.page_handler is not None
+    page = _FakePage()
+    context.page_handler(page)  # type: ignore[misc, operator]
+    assert "download" in page.handlers, "no download listener was registered on the page"
+
+    page.handlers["download"](_FakeDownload("http://203.0.113.1/malware.exe"))
+    assert guard.violations, "a download toward a non-loopback host was not recorded"
+    assert "203.0.113.1" in guard.violations[-1]
+
+    guard.violations.clear()
+    page.handlers["download"](_FakeDownload("http://127.0.0.1:9/file.bin"))
+    assert not guard.violations, "a loopback download was incorrectly flagged as a violation"
+
+
 def test_browser_registry_is_structurally_valid() -> None:
     from tests.matrix.axes import AXES
     from tests.matrix.cases.acquisition_cases import (

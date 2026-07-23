@@ -1556,8 +1556,11 @@ BROWSER_EGRESS_METADATA: tuple[CaseMetadata, ...] = (
         "redirect",
         "browser",
         "A loopback response that redirects to a non-loopback host is blocked by the guard's "
-        "response listener.",
-        "tests/harnesses/browser.py assert_loopback + response/redirect guard",
+        "route() handler: since Chromium never re-invokes route() for a navigation's "
+        "redirected hop, the handler fetches the response itself with max_redirects=0, "
+        "inspects the Location header before the browser ever sees it, and aborts in place if "
+        "that target is non-loopback.",
+        "tests/harnesses/browser.py install_egress_guard navigation-redirect route().fetch handling",
     ),
     _meta(
         "BROWSER-EGRESS-003",
@@ -1594,6 +1597,19 @@ BROWSER_EGRESS_METADATA: tuple[CaseMetadata, ...] = (
         "A WebSocket connection attempt toward a non-loopback host is blocked by the guard's "
         "WebSocket listener.",
         "tests/harnesses/browser.py assert_loopback + websocket guard",
+    ),
+    _meta(
+        "BROWSER-EGRESS-007",
+        "BROWSER-EGRESS",
+        "download",
+        "browser",
+        "A download triggered toward a non-loopback host is blocked before Chromium's download "
+        "subsystem ever sees a response -- the same route() host check that blocks any other "
+        "non-loopback request runs first, so page.on('download') never even fires for it; the "
+        "dedicated page.on('download', ...) listener is verified directly (a unit-style proof, "
+        "not a full real-Chromium download flow, since a genuinely reachable non-loopback "
+        "download event is unconstructable once route() already blocks the underlying request).",
+        "tests/harnesses/browser.py install_egress_guard _guard_page download listener",
     ),
 )
 

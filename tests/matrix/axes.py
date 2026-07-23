@@ -467,8 +467,10 @@ _ACQUISITION_AXES: tuple[AxisSpec, ...] = (
     AxisSpec(
         axis_id="BROWSER-EGRESS",
         domain=Domain.ACQUISITION,
-        members=frozenset({"navigation", "redirect", "frame", "popup", "worker-fetch", "websocket"}),
-        min_focused_cases=6,
+        members=frozenset(
+            {"navigation", "redirect", "frame", "popup", "worker-fetch", "websocket", "download"}
+        ),
+        min_focused_cases=7,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset(),
     ),
