@@ -101,11 +101,15 @@ def build_multi_qr_image(values: tuple[str, ...]) -> np.ndarray:
     tiles: list[np.ndarray] = []
     for value in values:
         matrix = _encode_qr(value)
+        # Upscale to a comfortable pixel size (as in build_pdf's embedded path) so cv2's
+        # QRCodeDetector can resolve each symbol's finder patterns cleanly.
         scale = max(1, 200 // matrix.shape[0])
         tiles.append(
             cv2.resize(matrix, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
         )
     height = max(tile.shape[0] for tile in tiles)
+    # A wide light-colored gap between tiles keeps the two QR symbols visually separated so the
+    # detector reports them as distinct candidates instead of merging their finder patterns.
     gap = np.full((height, 48), 255, dtype=np.uint8)
     padded: list[np.ndarray] = []
     for index, tile in enumerate(tiles):

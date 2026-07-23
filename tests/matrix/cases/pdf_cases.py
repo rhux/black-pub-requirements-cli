@@ -698,7 +698,7 @@ _CORRUPT_CASES: tuple[PdfCase, ...] = (
             "PDF-CORRUPT-001",
             "PDF-CORRUPT",
             "corrupt-open",
-            "extract",
+            "corrupt-open",
             "A file that is not a parseable PDF yields exactly one bounded page-0 open error.",
             "pdf_to_scouts.extract_pdf lines 394-397 open guard",
         ),

@@ -117,6 +117,27 @@ class LegacyPdfRunner:
             attendees, errors = legacy.extract_pdf(pdf, (144,), True, None)
         return self._observe_extraction(attendees, errors, root)
 
+    def _ctx_corrupt_open(self, case: PdfCase, root: Path) -> PdfObservation:
+        # A non-parseable PDF fails at the fitz.open() guard before any page or attendee
+        # loop runs, so the observation is error-only; the raised message embeds the absolute
+        # fixture path, which is normalized to "<pdf>" for a deterministic assertion.
+        import pdf_to_scouts as legacy
+
+        pdf = build_corrupt_pdf(root / f"{case.meta.case_id}.pdf")
+        attendees, errors = legacy.extract_pdf(pdf, (72,), True, None)
+        observed = self._observe_extraction(attendees, errors, root)
+        errs = tuple(
+            ExtractionErrorObservation(
+                e.source_pdf,
+                e.pdf_page,
+                e.attendee_name,
+                e.registrant_type,
+                e.error.replace(str(pdf), "<pdf>"),
+            )
+            for e in observed.errors
+        )
+        return PdfObservation(attendees=observed.attendees, errors=errs)
+
     def _ctx_debug(self, case: PdfCase, root: Path) -> PdfObservation:
         import pdf_to_scouts as legacy
 
@@ -213,7 +234,12 @@ class LegacyPdfRunner:
         pdf = build_pdf(root / f"{case.meta.case_id}.pdf", case.pages)
         out = root / "out.csv"
         self._run_main([str(pdf), "-o", str(out), *case.argv])
-        target = out if "--render-dpi" not in case.argv else out.with_name("out.errors.csv")
+        # The case's declared axis member says explicitly which CSV its expected header belongs
+        # to ("error-columns" vs "attendee-columns") -- key off that stated intent rather than an
+        # argv flag ("--render-dpi") that only happens to correlate with a failing extraction
+        # today. A future case combining --render-dpi with a successful extraction would still
+        # read the right file.
+        target = out.with_name("out.errors.csv") if case.meta.member == "error-columns" else out
         with target.open("r", encoding="utf-8-sig", newline="") as stream:
             header = next(csv.reader(stream))
         return PdfObservation(stdout=tuple(header))
@@ -271,22 +297,6 @@ class LegacyPdfRunner:
 
 
 def _observe(case: PdfCase, context_id: str, root: Path) -> PdfObservation:
-    if case.meta.case_id == "PDF-CORRUPT-001":
-        import pdf_to_scouts as legacy
-
-        pdf = build_corrupt_pdf(root / f"{case.meta.case_id}.pdf")
-        attendees, errors = legacy.extract_pdf(pdf, (72,), True, None)
-        errs = tuple(
-            ExtractionErrorObservation(
-                e.source_pdf,
-                e.pdf_page,
-                e.attendee_name,
-                e.registrant_type,
-                e.error.replace(str(pdf), "<pdf>"),
-            )
-            for e in errors
-        )
-        return PdfObservation(attendees=tuple(attendees), errors=errs)
     return LegacyPdfRunner(context_id).run(case, root=root)
 
 
