@@ -494,5 +494,268 @@ _ACQUISITION_AXES: tuple[AxisSpec, ...] = (
     ),
 )
 
+# Requirement-domain axes (Task 20): the requirement-inference seams in scout_schedule_cli
+# (requirement_path, choice_requirement_count, annotate_requirement_statuses,
+# build_missing_requirements, render_email_text, render_email_html).
+_REQUIREMENT_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="REQ-SHAPE",
+        domain=Domain.REQUIREMENT,
+        members=frozenset({f"shape-{i:02d}" for i in range(1, 27)}),
+        min_focused_cases=26,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-PATH", "REQ-B-ANNOTATE"}),
+    ),
+    AxisSpec(
+        axis_id="REQ-FLAG",
+        domain=Domain.REQUIREMENT,
+        members=frozenset(
+            {
+                "req-true-class-true",
+                "req-true-class-false",
+                "req-false-class-true",
+                "req-false-class-false",
+            }
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-ANNOTATE"}),
+    ),
+    AxisSpec(
+        axis_id="REQ-TYPE",
+        domain=Domain.REQUIREMENT,
+        members=frozenset({"type-1", "type-2", "type-3"}),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-ANNOTATE"}),
+    ),
+    AxisSpec(
+        axis_id="REQ-CLASS",
+        domain=Domain.REQUIREMENT,
+        members=frozenset({"incomplete-class", "complete-class"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="REQ-EMPTY",
+        domain=Domain.REQUIREMENT,
+        members=frozenset({"no-top-level-seen", "after-top-level-seen"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-PATH"}),
+    ),
+    AxisSpec(
+        axis_id="REQ-NOTE",
+        domain=Domain.REQUIREMENT,
+        members=frozenset({"after-numbered", "at-beginning"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-PATH", "REQ-B-ANNOTATE"}),
+    ),
+    AxisSpec(
+        axis_id="REQ-TREE",
+        domain=Domain.REQUIREMENT,
+        members=frozenset(
+            {"leaf", "parent", "grandparent", "missing-parent", "malformed-numbering", "label-only"}
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-ANNOTATE"}),
+    ),
+    AxisSpec(
+        axis_id="REQ-CHOICE",
+        domain=Domain.REQUIREMENT,
+        members=frozenset(
+            f"{verb}-{phrasing}-{relation}"
+            for verb in ("do", "complete", "choose", "select", "perform")
+            for phrasing in ("digit", "word")
+            for relation in ("below", "equal", "above")
+        ),
+        min_focused_cases=30,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-CHOICE", "REQ-B-ANNOTATE"}),
+    ),
+    AxisSpec(
+        axis_id="REQ-EXCLUDE",
+        domain=Domain.REQUIREMENT,
+        members=frozenset({"not-used", "type-3"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-MISSING"}),
+    ),
+    AxisSpec(
+        axis_id="REQ-NONMUTATE",
+        domain=Domain.REQUIREMENT,
+        members=frozenset({"valid-tree", "malformed-tree"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-ANNOTATE"}),
+    ),
+    AxisSpec(
+        axis_id="REQ-IDENTITY",
+        domain=Domain.REQUIREMENT,
+        members=frozenset(
+            {"same-name-different-id", "same-id-groups", "blank-id-fallback"}
+        ),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-ANNOTATE"}),
+    ),
+)
+
+# Artifact-domain axes (Task 20): output writers, HTML/email rendering safety, filename
+# generation, formula-injection surface, and publication-failure injection seams.
+_ARTIFACT_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="ART-SCHEMA",
+        domain=Domain.ARTIFACT,
+        members=frozenset(
+            {
+                "scouts-json",
+                "classes-csv",
+                "requirements-csv",
+                "errors-csv",
+                "summary-json",
+                "report-data",
+                "email-csv",
+                "email-text-html",
+            }
+        ),
+        min_focused_cases=8,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ART-B-WRITE-OUTPUTS", "ART-B-HTML-REPORT", "ART-B-EMAIL"}),
+    ),
+    AxisSpec(
+        axis_id="ART-HTML",
+        domain=Domain.ARTIFACT,
+        members=frozenset(
+            {
+                "xss-sentinel",
+                "script-close-tag",
+                "angle-amp",
+                "line-para-separators",
+                "non-ascii-unicode",
+            }
+        ),
+        min_focused_cases=5,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ART-B-JSON-FOR-HTML"}),
+    ),
+    AxisSpec(
+        axis_id="ART-EMAIL",
+        domain=Domain.ARTIFACT,
+        members=frozenset(
+            {"missing-requirements", "all-complete", "no-data", "same-name-disambiguation"}
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ART-B-EMAIL"}),
+    ),
+    AxisSpec(
+        axis_id="ART-NAME",
+        domain=Domain.ARTIFACT,
+        members=frozenset(
+            {
+                "path-traversal",
+                "absolute-path",
+                "unicode-name",
+                "case-collision",
+                "windows-reserved",
+                "empty-name",
+                "symlinked-root",
+                "duplicate-display-name",
+                "duplicate-html-filename",
+            }
+        ),
+        min_focused_cases=9,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ART-B-FILENAME"}),
+    ),
+    AxisSpec(
+        axis_id="ART-FORMULA",
+        domain=Domain.ARTIFACT,
+        members=frozenset(
+            {"eq-prefix", "plus-prefix", "minus-prefix", "at-prefix", "tab-prefix", "cr-prefix"}
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ART-B-WRITE-CSV"}),
+    ),
+    AxisSpec(
+        axis_id="ART-FAIL",
+        domain=Domain.ARTIFACT,
+        members=frozenset(
+            {
+                "before-render",
+                "during-temp-write",
+                "before-atomic-replace",
+                "after-atomic-replace",
+                "during-cleanup",
+                "partial-multi-file",
+            }
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"ART-B-ATOMIC-WRITE"}),
+    ),
+    AxisSpec(
+        axis_id="PRIV-SURFACE",
+        domain=Domain.ARTIFACT,
+        members=frozenset(
+            {
+                "input-private-allowed",
+                "input-private-forbidden",
+                "adapter-private-allowed",
+                "adapter-private-forbidden",
+                "operational-private-allowed",
+                "operational-private-forbidden",
+                "audience-shareable-allowed",
+                "audience-shareable-forbidden",
+                "local-ui-allowed",
+                "local-ui-forbidden",
+                "diagnostic-allowed",
+                "diagnostic-forbidden",
+            }
+        ),
+        min_focused_cases=12,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="PRIV-EGRESS",
+        domain=Domain.ARTIFACT,
+        members=frozenset(
+            {
+                "filename",
+                "json",
+                "csv",
+                "html",
+                "email",
+                "stdout",
+                "stderr",
+                "api-error",
+                "sse",
+                "diagnostics",
+            }
+        ),
+        min_focused_cases=10,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="PRIV-CONTAIN",
+        domain=Domain.ARTIFACT,
+        members=frozenset(
+            {"adapter-file-stays-in-root", "no-private-field-reaches-shareable"}
+        ),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+)
+
 # Domain axes are declared by later slices (Tasks 19-21) and appended here.
-AXES: tuple[AxisSpec, ...] = _INPUT_AXES + _PDF_AXES + _ACQUISITION_AXES
+AXES: tuple[AxisSpec, ...] = (
+    _INPUT_AXES + _PDF_AXES + _ACQUISITION_AXES + _REQUIREMENT_AXES + _ARTIFACT_AXES
+)

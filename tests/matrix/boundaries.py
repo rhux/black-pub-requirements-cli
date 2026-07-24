@@ -318,10 +318,147 @@ _ACQUISITION_BOUNDARIES: tuple[BoundarySpec, ...] = (
     ),
 )
 
+# Requirement-domain boundaries (Task 20): the requirement-inference seams in
+# scout_schedule_cli. Each ``required_case_ids`` names requirement-domain cases that drive
+# the seam.
+_REQUIREMENT_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="REQ-B-PATH",
+        qualified_name="scout_schedule_cli.requirement_path",
+        domain=Domain.REQUIREMENT,
+        required_case_ids=frozenset(
+            {"REQ-SHAPE-001", "REQ-EMPTY-001", "REQ-EMPTY-002", "REQ-NOTE-001", "REQ-NOTE-002"}
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="REQ-B-CHOICE",
+        qualified_name="scout_schedule_cli.choice_requirement_count",
+        domain=Domain.REQUIREMENT,
+        required_case_ids=frozenset({f"REQ-CHOICE-{i:03d}" for i in range(1, 31)}),
+    ),
+    BoundarySpec(
+        boundary_id="REQ-B-ANNOTATE",
+        qualified_name="scout_schedule_cli.annotate_requirement_statuses",
+        domain=Domain.REQUIREMENT,
+        required_case_ids=frozenset(
+            {
+                "REQ-FLAG-001",
+                "REQ-FLAG-005",
+                "REQ-TYPE-001",
+                "REQ-TREE-001",
+                "REQ-TREE-002",
+                "REQ-TREE-003",
+                "REQ-TREE-004",
+                "REQ-TREE-005",
+                "REQ-TREE-006",
+                "REQ-NONMUTATE-001",
+                "REQ-NONMUTATE-002",
+                "REQ-IDENTITY-001",
+                "REQ-IDENTITY-002",
+                "REQ-IDENTITY-003",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="REQ-B-MISSING",
+        qualified_name="scout_schedule_cli.build_missing_requirements",
+        domain=Domain.REQUIREMENT,
+        required_case_ids=frozenset({"REQ-EXCLUDE-001", "REQ-EXCLUDE-002"}),
+    ),
+    BoundarySpec(
+        boundary_id="REQ-B-EMAIL-TEXT",
+        qualified_name="scout_schedule_cli.render_email_text",
+        domain=Domain.REQUIREMENT,
+        required_case_ids=frozenset({"REQ-SHAPE-001"}),
+    ),
+    BoundarySpec(
+        boundary_id="REQ-B-EMAIL-HTML",
+        qualified_name="scout_schedule_cli.render_email_html",
+        domain=Domain.REQUIREMENT,
+        required_case_ids=frozenset({"REQ-SHAPE-001"}),
+    ),
+)
+
+# Artifact-domain boundaries (Task 20): the output-writing and publication seams in
+# scout_schedule_cli.
+_ARTIFACT_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="ART-B-WRITE-OUTPUTS",
+        qualified_name="scout_schedule_cli.write_outputs",
+        domain=Domain.ARTIFACT,
+        required_case_ids=frozenset(
+            {
+                "ART-SCHEMA-001",
+                "ART-SCHEMA-002",
+                "ART-SCHEMA-003",
+                "ART-SCHEMA-004",
+                "ART-SCHEMA-005",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="ART-B-HTML-REPORT",
+        qualified_name="scout_schedule_cli.write_html_report",
+        domain=Domain.ARTIFACT,
+        required_case_ids=frozenset({"ART-SCHEMA-006"}),
+    ),
+    BoundarySpec(
+        boundary_id="ART-B-EMAIL",
+        qualified_name="scout_schedule_cli.write_email_reports",
+        domain=Domain.ARTIFACT,
+        required_case_ids=frozenset(
+            {
+                "ART-SCHEMA-007",
+                "ART-SCHEMA-008",
+                "ART-EMAIL-001",
+                "ART-EMAIL-002",
+                "ART-EMAIL-003",
+                "ART-EMAIL-004",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="ART-B-JSON-FOR-HTML",
+        qualified_name="scout_schedule_cli.json_for_html",
+        domain=Domain.ARTIFACT,
+        required_case_ids=frozenset(
+            {
+                "ART-HTML-001",
+                "ART-HTML-002",
+                "ART-HTML-003",
+                "ART-HTML-004",
+                "ART-HTML-005",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="ART-B-FILENAME",
+        qualified_name="scout_schedule_cli.attendee_filename_stem",
+        domain=Domain.ARTIFACT,
+        required_case_ids=frozenset({f"ART-NAME-{i:03d}" for i in range(1, 10)}),
+    ),
+    BoundarySpec(
+        boundary_id="ART-B-WRITE-CSV",
+        qualified_name="scout_schedule_cli.write_csv",
+        domain=Domain.ARTIFACT,
+        required_case_ids=frozenset({f"ART-FORMULA-{i:03d}" for i in range(1, 7)}),
+    ),
+    BoundarySpec(
+        boundary_id="ART-B-ATOMIC-WRITE",
+        qualified_name="scout_schedule_cli.atomic_write_text",
+        domain=Domain.ARTIFACT,
+        required_case_ids=frozenset({f"ART-FAIL-{i:03d}" for i in range(1, 7)}),
+    ),
+)
+
 # Populated by later slices; Task 17 adds the input-domain load_* seams, Task 18 the PDF seams,
-# Task 19 the acquisition + network-policy seams.
+# Task 19 the acquisition + network-policy seams, Task 20 the requirement + artifact seams.
 BOUNDARIES: tuple[BoundarySpec, ...] = (
-    _INPUT_BOUNDARIES + _PDF_BOUNDARIES + _ACQUISITION_BOUNDARIES
+    _INPUT_BOUNDARIES
+    + _PDF_BOUNDARIES
+    + _ACQUISITION_BOUNDARIES
+    + _REQUIREMENT_BOUNDARIES
+    + _ARTIFACT_BOUNDARIES
 )
 EXCLUSIONS: tuple[BranchExclusion, ...] = ()
 COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = ()

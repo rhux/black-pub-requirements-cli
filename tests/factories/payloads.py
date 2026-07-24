@@ -4,27 +4,99 @@ from __future__ import annotations
 
 from typing import Any
 
-# All 18 real REQ_NBR_WEB_DISPLAY shapes observed in the corpus (values synthetic).
+# 26 concrete REQ_NBR_WEB_DISPLAY values, one per SHAPE in the Task 20 contract, in the exact
+# contract order. Each concrete string is chosen so that ``normalize_requirement_shape`` (below)
+# maps it back onto the contract's own shape notation -- verified by tracing
+# ``scout_schedule_cli.requirement_path``'s tokenizer (``re.findall(r"[A-Za-z]+|\d+", text)``)
+# by hand, not by calling the function. "N" = a run of digits, "a"/"A" = a lower/upper-case
+# letter (each letter of a word maps individually, so "Option" -> "Aaaaaa"), and all other
+# characters (#, ., (, ), [, ], and the empty string) are literal.
 REQUIREMENT_NUMBER_SHAPES = [
-    "#3b",
-    "#3(b)",
-    "6.a.1.",
-    "#5(c)(1)",
-    "#1",
-    "2.",
-    "4",
-    "#7a.",
-    "#8a(2)",
-    "3.b.",
-    "#2.Option.A.(1)",
-    "#5.Option.D.(3)(a)",
-    "#5.Option.A(1)",
-    "#5..Opt.A.(1)",
-    "#(c)",
-    "Note.",
-    "",
-    "#4..Aaa.A.(1)",
+    "#3a",  # 01 #Na
+    "#3(a)",  # 02 #N(a)
+    "#3.",  # 03 #N.
+    "3.a.",  # 04 N.a.
+    "#3a.",  # 05 #Na.
+    "3.",  # 06 N.
+    "#3",  # 07 #N
+    "#3.Option.A.(1)",  # 08 #N.Aaaaaa.A.(N)
+    "",  # 09 <empty>
+    "Note.",  # 10 Aaaa.
+    "3.a.1.",  # 11 N.a.N.
+    "#3(a)(1)",  # 12 #N(a)(N)
+    "#3.Option.A(1)",  # 13 #N.Aaaaaa.A(N)
+    "#(a)",  # 14 #(a)
+    "3",  # 15 N
+    "#3.Option.A.(1)(a)",  # 16 #N.Aaaaaa.A.(N)(a)
+    "#3..Opt.A.(1)",  # 17 #N..Aaa.A.(N)
+    "#3a(1)",  # 18 #Na(N)
+    "#3..Opt.A.(1)(a)(1)",  # 19 #N..Aaa.A.(N)(a)(N)
+    "Note.Plus.",  # 20 Aaaa.Aaaa.
+    "#3a[1]",  # 21 #Na[N]
+    "Note.3.",  # 22 Aaaa.N.
+    "#(1)",  # 23 #(N)
+    "#B.",  # 24 #A.
+    "#3..Opt.A.(1)(a)",  # 25 #N..Aaa.A.(N)(a)
+    "#3.OptionA.(1)",  # 26 #N.AaaaaaA.(N)
 ]
+
+# The 26 shapes above, in the same order, written in the contract's own notation. Kept as an
+# explicit literal (not derived from REQUIREMENT_NUMBER_SHAPES) so the smoke test can assert the
+# concrete values actually normalize to what the contract says they should.
+REQUIREMENT_NUMBER_SHAPE_NOTATION = [
+    "#Na",
+    "#N(a)",
+    "#N.",
+    "N.a.",
+    "#Na.",
+    "N.",
+    "#N",
+    "#N.Aaaaaa.A.(N)",
+    "",
+    "Aaaa.",
+    "N.a.N.",
+    "#N(a)(N)",
+    "#N.Aaaaaa.A(N)",
+    "#(a)",
+    "N",
+    "#N.Aaaaaa.A.(N)(a)",
+    "#N..Aaa.A.(N)",
+    "#Na(N)",
+    "#N..Aaa.A.(N)(a)(N)",
+    "Aaaa.Aaaa.",
+    "#Na[N]",
+    "Aaaa.N.",
+    "#(N)",
+    "#A.",
+    "#N..Aaa.A.(N)(a)",
+    "#N.AaaaaaA.(N)",
+]
+
+
+def normalize_requirement_shape(value: str) -> str:
+    """Map a concrete requirement-number-display string onto the contract's shape notation:
+    each digit run collapses to a single "N", each letter maps to "A" (upper) or "a" (lower)
+    individually (so a word's internal capitalization survives, e.g. "OptionA" -> "AaaaaaA"),
+    and every other character (punctuation, brackets, "#") passes through unchanged. This is a
+    plain string transform -- it does not import or call any legacy parsing code."""
+    out: list[str] = []
+    index = 0
+    length = len(value)
+    while index < length:
+        char = value[index]
+        if char.isdigit():
+            end = index
+            while end < length and value[end].isdigit():
+                end += 1
+            out.append("N")
+            index = end
+        elif char.isalpha():
+            out.append("A" if char.isupper() else "a")
+            index += 1
+        else:
+            out.append(char)
+            index += 1
+    return "".join(out)
 
 
 def requirement_row(**overrides: Any) -> dict[str, Any]:
