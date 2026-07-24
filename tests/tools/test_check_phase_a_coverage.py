@@ -84,6 +84,4 @@ def test_stale_exclusion_correctly_detected_and_fails():
 
     coverage_by_area = compute_area_coverage(coverage_data, (area,))
     problems = check_stale_exclusions((exclusion,), coverage_by_area)
-    assert problems == [
-        "stale exclusion EX-2: fixed.py:5 is no longer a missing statement"
-    ]
+    assert problems == ["stale exclusion EX-2: fixed.py:5 is no longer a missing statement"]
