@@ -955,6 +955,89 @@ _INTERFACE_AXES: tuple[AxisSpec, ...] = (
     ),
 )
 
+# Desktop-launcher and bootstrap axes (Task 21, final slice): run_app.py's free_port /
+# wait_until_ready / main dispatch, and bootstrap/paths.py / marker.py / source_sync.py. Reuses
+# Domain.PLATFORM (see tests/matrix/cases/desktop_cases.py and bootstrap_cases.py module
+# docstrings for the documented reasoning) rather than adding a new Domain member.
+_DESKTOP_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="DESK-PORT",
+        domain=Domain.PLATFORM,
+        members=frozenset({"free-port-closed-cleanly", "bind-conflict-surfaces"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"DESK-B-PORT"}),
+    ),
+    AxisSpec(
+        axis_id="DESK-READY",
+        domain=Domain.PLATFORM,
+        members=frozenset(
+            {"immediate-success", "retries-then-success", "timeout-gives-up"}
+        ),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"DESK-B-READY"}),
+    ),
+    AxisSpec(
+        axis_id="DESK-MODE",
+        domain=Domain.PLATFORM,
+        members=frozenset(
+            {
+                "browser-mode",
+                "native-mode",
+                "server-start-failure-propagates",
+                "keyboard-interrupt-during-browser-wait",
+            }
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"DESK-B-MODE"}),
+    ),
+)
+
+_BOOTSTRAP_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="BOOT-PATH",
+        domain=Domain.PLATFORM,
+        members=frozenset({"override", "default", "spaces-in-path", "unicode-in-path"}),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"BOOT-B-PATH"}),
+    ),
+    AxisSpec(
+        axis_id="BOOT-MARK",
+        domain=Domain.PLATFORM,
+        members=frozenset(
+            {
+                "missing",
+                "valid",
+                "corrupt-json",
+                "schema-version-mismatch",
+                "python-version-mismatch",
+                "requirements-hash-mismatch",
+            }
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"BOOT-B-MARKER"}),
+    ),
+    AxisSpec(
+        axis_id="BOOT-SYNC",
+        domain=Domain.PLATFORM,
+        members=frozenset(
+            {
+                "single-file",
+                "whole-directory",
+                "missing-source-raises",
+                "frozen-vs-unfrozen-source-root",
+            }
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"BOOT-B-SYNC"}),
+    ),
+)
+
 # Domain axes are declared by later slices (Tasks 19-21) and appended here.
 AXES: tuple[AxisSpec, ...] = (
     _INPUT_AXES
@@ -964,4 +1047,6 @@ AXES: tuple[AxisSpec, ...] = (
     + _ARTIFACT_AXES
     + _PLATFORM_AXES
     + _INTERFACE_AXES
+    + _DESKTOP_AXES
+    + _BOOTSTRAP_AXES
 )

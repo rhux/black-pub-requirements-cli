@@ -515,9 +515,54 @@ _INTERFACE_BOUNDARIES: tuple[BoundarySpec, ...] = (
     ),
 )
 
+# Desktop-launcher boundaries (Task 21, final slice): run_app.py's three seams.
+_DESKTOP_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="DESK-B-PORT",
+        qualified_name="run_app.free_port",
+        domain=Domain.PLATFORM,
+        required_case_ids=frozenset({"DESK-PORT-001", "DESK-PORT-002"}),
+    ),
+    BoundarySpec(
+        boundary_id="DESK-B-READY",
+        qualified_name="run_app.wait_until_ready",
+        domain=Domain.PLATFORM,
+        required_case_ids=frozenset({f"DESK-READY-{i:03d}" for i in range(1, 4)}),
+    ),
+    BoundarySpec(
+        boundary_id="DESK-B-MODE",
+        qualified_name="run_app.main",
+        domain=Domain.PLATFORM,
+        required_case_ids=frozenset({f"DESK-MODE-{i:03d}" for i in range(1, 5)}),
+    ),
+)
+
+# Bootstrap boundaries (Task 21, final slice): bootstrap/paths.py, marker.py, source_sync.py.
+_BOOTSTRAP_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="BOOT-B-PATH",
+        qualified_name="bootstrap.paths.resolve_root",
+        domain=Domain.PLATFORM,
+        required_case_ids=frozenset({f"BOOT-PATH-{i:03d}" for i in range(1, 5)}),
+    ),
+    BoundarySpec(
+        boundary_id="BOOT-B-MARKER",
+        qualified_name="bootstrap.marker.is_environment_valid",
+        domain=Domain.PLATFORM,
+        required_case_ids=frozenset({f"BOOT-MARK-{i:03d}" for i in range(1, 7)}),
+    ),
+    BoundarySpec(
+        boundary_id="BOOT-B-SYNC",
+        qualified_name="bootstrap.source_sync.sync_app_source",
+        domain=Domain.PLATFORM,
+        required_case_ids=frozenset({f"BOOT-SYNC-{i:03d}" for i in range(1, 5)}),
+    ),
+)
+
 # Populated by later slices; Task 17 adds the input-domain load_* seams, Task 18 the PDF seams,
 # Task 19 the acquisition + network-policy seams, Task 20 the requirement + artifact seams,
-# Task 21 the platform seam + the interface (ui.server) seams.
+# Task 21 the platform seam + the interface (ui.server) seams + the desktop-launcher and
+# bootstrap seams (final slice).
 BOUNDARIES: tuple[BoundarySpec, ...] = (
     _INPUT_BOUNDARIES
     + _PDF_BOUNDARIES
@@ -526,6 +571,8 @@ BOUNDARIES: tuple[BoundarySpec, ...] = (
     + _ARTIFACT_BOUNDARIES
     + _PLATFORM_BOUNDARIES
     + _INTERFACE_BOUNDARIES
+    + _DESKTOP_BOUNDARIES
+    + _BOOTSTRAP_BOUNDARIES
 )
 EXCLUSIONS: tuple[BranchExclusion, ...] = ()
 COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = ()
