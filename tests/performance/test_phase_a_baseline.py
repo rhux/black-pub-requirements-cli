@@ -60,7 +60,7 @@ def _build_full_script(dataset: SyntheticDataset) -> tuple[StrictScript, list[cl
         scouts.append(
             cli.ScoutInput(
                 name=attendee.name,
-                url=f"https://scoutingevent.com/mobile/x?t=SYN{attendee.index:06d}",
+                url=f"https://scoutingevent.com/mobile/x?t=TESTTOKEN_SYN{attendee.index:06d}",
             )
         )
         raw_rows = [
@@ -221,7 +221,7 @@ def test_perf_growth_001_bounded_node_visits(
 def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
     scout_a = cli.ScoutResult(
         name="Avery Archer",
-        qr_url="https://scoutingevent.com/mobile/x?t=A",
+        qr_url="https://scoutingevent.com/mobile/x?t=TESTTOKEN_A",
         attendee_id="90000001",
         classes=[
             cli.ClassRecord(
@@ -251,7 +251,7 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
     )
     scout_b = cli.ScoutResult(
         name="Bo Baker",
-        qr_url="https://scoutingevent.com/mobile/x?t=B",
+        qr_url="https://scoutingevent.com/mobile/x?t=TESTTOKEN_B",
         attendee_id="90000002",
         classes=[
             cli.ClassRecord(
@@ -275,7 +275,7 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
     )
     scout_c = cli.ScoutResult(
         name="Casey Carter",
-        qr_url="https://scoutingevent.com/mobile/x?t=C",
+        qr_url="https://scoutingevent.com/mobile/x?t=TESTTOKEN_C",
         attendee_id="90000003",
         classes=[],
         requirements=[],

@@ -220,9 +220,7 @@ _ACQUISITION_BOUNDARIES: tuple[BoundarySpec, ...] = (
         boundary_id="ACQ-B-FORM-VALUES",
         qualified_name="scout_schedule_cli.form_values",
         domain=Domain.ACQUISITION,
-        required_case_ids=frozenset(
-            {"ACQ-ID-001", "ACQ-ID-002", "ACQ-ID-003", "ACQ-ID-004"}
-        ),
+        required_case_ids=frozenset({"ACQ-ID-001", "ACQ-ID-002", "ACQ-ID-003", "ACQ-ID-004"}),
     ),
     BoundarySpec(
         boundary_id="ACQ-B-IS-SCHEDULE-RESPONSE",
@@ -236,9 +234,7 @@ _ACQUISITION_BOUNDARIES: tuple[BoundarySpec, ...] = (
         boundary_id="ACQ-B-NAVIGATE",
         qualified_name="scout_schedule_cli.navigate_and_trigger_schedule",
         domain=Domain.ACQUISITION,
-        required_case_ids=frozenset(
-            {"ACQ-RESP-001", "ACQ-SCHED-002", "ACQ-IDENTITY-001"}
-        ),
+        required_case_ids=frozenset({"ACQ-RESP-001", "ACQ-SCHED-002", "ACQ-IDENTITY-001"}),
     ),
     BoundarySpec(
         boundary_id="ACQ-B-POST-REQUIREMENT",
@@ -306,9 +302,7 @@ _ACQUISITION_BOUNDARIES: tuple[BoundarySpec, ...] = (
         boundary_id="ACQ-B-EGRESS",
         qualified_name="scoutmb.network_policy.assert_egress_allowed",
         domain=Domain.ACQUISITION,
-        required_case_ids=frozenset(
-            {"NET-POLICY-001", "NET-POLICY-002", "NET-POLICY-003"}
-        ),
+        required_case_ids=frozenset({"NET-POLICY-001", "NET-POLICY-002", "NET-POLICY-003"}),
     ),
     BoundarySpec(
         boundary_id="ACQ-B-ASYNC-MAIN",
@@ -459,8 +453,7 @@ _PLATFORM_BOUNDARIES: tuple[BoundarySpec, ...] = (
         qualified_name="scout_schedule_cli.safe_slug",
         domain=Domain.PLATFORM,
         required_case_ids=frozenset(
-            {f"PLAT-WIN-{i:03d}" for i in range(1, 9)}
-            | {f"PLAT-MAC-{i:03d}" for i in range(1, 6)}
+            {f"PLAT-WIN-{i:03d}" for i in range(1, 9)} | {f"PLAT-MAC-{i:03d}" for i in range(1, 6)}
         ),
     ),
 )
@@ -659,9 +652,9 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         line=1889,
         branch_to=None,
         rationale=(
-            "`raise SystemExit(main())` under `if __name__ == \"__main__\":` only runs when "
+            '`raise SystemExit(main())` under `if __name__ == "__main__":` only runs when '
             "the module is executed as a script; pytest always imports it as a module, so "
-            "__name__ is never \"__main__\" during the test suite."
+            '__name__ is never "__main__" during the test suite.'
         ),
         review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
     ),
@@ -672,7 +665,7 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         line=1888,
         branch_to=1889,
         rationale=(
-            "The `if __name__ == \"__main__\":` true-branch arc to its body is never taken "
+            'The `if __name__ == "__main__":` true-branch arc to its body is never taken '
             "for the same reason as EXC-MAIN-GUARD-SCHEDULE-STMT."
         ),
         review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
@@ -684,7 +677,7 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         line=600,
         branch_to=None,
         rationale=(
-            "`raise SystemExit(main())` under `if __name__ == \"__main__\":` only runs when "
+            '`raise SystemExit(main())` under `if __name__ == "__main__":` only runs when '
             "the module is executed as a script; pytest always imports it as a module."
         ),
         review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
@@ -696,7 +689,7 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         line=599,
         branch_to=600,
         rationale=(
-            "The `if __name__ == \"__main__\":` true-branch arc to its body is never taken "
+            'The `if __name__ == "__main__":` true-branch arc to its body is never taken '
             "for the same reason as EXC-MAIN-GUARD-PDF-STMT."
         ),
         review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
@@ -708,7 +701,7 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         line=89,
         branch_to=None,
         rationale=(
-            "`raise SystemExit(main())` under `if __name__ == \"__main__\":` only runs when "
+            '`raise SystemExit(main())` under `if __name__ == "__main__":` only runs when '
             "the module is executed as a script; pytest always imports it as a module."
         ),
         review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
@@ -720,7 +713,7 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         line=88,
         branch_to=89,
         rationale=(
-            "The `if __name__ == \"__main__\":` true-branch arc to its body is never taken "
+            'The `if __name__ == "__main__":` true-branch arc to its body is never taken '
             "for the same reason as EXC-MAIN-GUARD-DESKTOP-STMT."
         ),
         review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
@@ -758,7 +751,7 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         line=42,
         branch_to=None,
         rationale=(
-            "`os.environ.get(\"LOCALAPPDATA\")` inside the `sys.platform == \"win32\"` branch "
+            '`os.environ.get("LOCALAPPDATA")` inside the `sys.platform == "win32"` branch '
             "only runs on a real Windows host; this suite never monkeypatches sys.platform "
             "(tests/characterization/test_platform_matrix.py's documented policy)."
         ),
@@ -789,7 +782,7 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         line=47,
         branch_to=None,
         rationale=(
-            "The final `return Path.home() / \".local\" / \"share\" / ...` fallback only "
+            'The final `return Path.home() / ".local" / "share" / ...` fallback only '
             "executes when sys.platform is neither win32 nor darwin; this host is darwin, so "
             "the darwin branch returns first. Exercised for real on Linux CI."
         ),

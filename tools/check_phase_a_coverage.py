@@ -126,15 +126,17 @@ def check_unexplained_gaps(
         coverage = coverage_by_area.get(area.area_id)
         if coverage is None:
             continue
-        for key in sorted(coverage.missing_statements):
-            if key not in exclusion_statements:
+        for stmt_key in sorted(coverage.missing_statements):
+            if stmt_key not in exclusion_statements:
                 problems.append(
-                    f"unexplained missing statement: {key[0]}:{key[1]} (area={area.area_id})"
+                    f"unexplained missing statement: {stmt_key[0]}:{stmt_key[1]} "
+                    f"(area={area.area_id})"
                 )
-        for key in sorted(coverage.missing_branches):
-            if key not in exclusion_branches:
+        for branch_key in sorted(coverage.missing_branches):
+            if branch_key not in exclusion_branches:
                 problems.append(
-                    f"unexplained missing branch: {key[0]}:{key[1]}->{key[2]} (area={area.area_id})"
+                    f"unexplained missing branch: {branch_key[0]}:{branch_key[1]}->"
+                    f"{branch_key[2]} (area={area.area_id})"
                 )
     return sorted(problems)
 
@@ -279,7 +281,9 @@ def main(argv: list[str] | None = None) -> int:
     for problem in sorted(hard_problems):
         print(f"FAIL: {problem}")
     for problem in soft_problems:
-        marker = "FAIL" if args.require_complete else "NOTE (not enforced, --require-complete not set)"
+        marker = (
+            "FAIL" if args.require_complete else "NOTE (not enforced, --require-complete not set)"
+        )
         print(f"{marker}: {problem}")
 
     if hard_problems or (args.require_complete and soft_problems):
