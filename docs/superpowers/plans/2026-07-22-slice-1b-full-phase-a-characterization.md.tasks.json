@@ -12,7 +12,7 @@
     "value": "8ee816675967fb594fc49609a84115bea96f0f90554578c1d57dee4ed0bd634d",
     "mismatchBehavior": "Do not execute; regenerate this sidecar from the final Markdown plan."
   },
-  "lastUpdated": "2026-07-24T11:31:24Z",
+  "lastUpdated": "2026-07-24T20:20:54Z",
   "tasks": [
     {
       "id": 16,
@@ -266,7 +266,7 @@
     {
       "id": 22,
       "subject": "Task 22: Add variable/scale profiles, vertical flows, baselines, CI, and Gate 1b",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [
         17,
         18,
@@ -321,7 +321,7 @@
     {
       "id": 90,
       "subject": "Gate 1b \u2014 go/no-go",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [
         16,
         17,
