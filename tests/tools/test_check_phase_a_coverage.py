@@ -1,5 +1,7 @@
 from tests.matrix.boundaries import BranchExclusion, CoverageAreaSpec
 from tools.check_phase_a_coverage import (
+    AreaCoverage,
+    check_floors,
     check_missing_files,
     check_stale_exclusions,
     check_unexplained_gaps,
@@ -85,3 +87,43 @@ def test_stale_exclusion_correctly_detected_and_fails():
     coverage_by_area = compute_area_coverage(coverage_data, (area,))
     problems = check_stale_exclusions((exclusion,), coverage_by_area)
     assert problems == ["stale exclusion EX-2: fixed.py:5 is no longer a missing statement"]
+
+
+def test_floor_check_tolerates_baseline_rounding_precision_noise():
+    """REGRESSION: tests/baselines/phase_a.json stores floors rounded to 2 decimal places (e.g.
+    99.7), but the current run's raw coverage.py percentage is full precision (e.g.
+    99.69604863221885) -- fractionally below 99.7 even though it rounds to the exact same
+    displayed value. A strict `current < floor` comparison at mismatched precision made this a
+    false floor breach for a coverage state that is, in fact, identical to what produced the
+    baseline. check_floors must round the current value to the same 2-decimal precision as the
+    stored floor before comparing, so this is a PASS, not a breach."""
+    coverage_by_area = {
+        "pdf": AreaCoverage(
+            area_id="pdf",
+            statement_pct=99.69604863221885,  # rounds to 99.70, but is < 99.7 at full precision
+            branch_pct=98.53001,  # rounds to 98.53, but is < 98.53 at full precision
+            missing_statements=frozenset(),
+            missing_branches=frozenset(),
+        ),
+    }
+    floors = {"pdf": (99.7, 98.53)}  # the rounded-2-decimal floor as stored in the baseline file
+
+    assert check_floors(coverage_by_area, floors) == []
+
+
+def test_floor_check_still_catches_a_genuine_regression():
+    """A current value that rounds to a LOWER 2-decimal percentage than the floor must still be
+    reported as a real floor breach -- the rounding tolerance must not mask actual regressions."""
+    coverage_by_area = {
+        "pdf": AreaCoverage(
+            area_id="pdf",
+            statement_pct=99.694,  # rounds to 99.69, genuinely below a 99.70 floor
+            branch_pct=98.53,
+            missing_statements=frozenset(),
+            missing_branches=frozenset(),
+        ),
+    }
+    floors = {"pdf": (99.7, 98.53)}
+
+    problems = check_floors(coverage_by_area, floors)
+    assert problems == ["floor breach: pdf statement coverage 99.69% < floor 99.70%"]

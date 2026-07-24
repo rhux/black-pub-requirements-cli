@@ -192,24 +192,40 @@ def check_stale_exclusions(
     return sorted(problems)
 
 
+_FLOOR_COMPARISON_PRECISION = 2  # matches the 2-decimal rounding measure_baseline.py stores.
+
+
 def check_floors(
     coverage_by_area: dict[str, AreaCoverage],
     floors: dict[str, tuple[float, float]],
 ) -> list[str]:
+    """Compares each area's current coverage percent against its stored baseline floor.
+
+    The floor values loaded from ``tests/baselines/phase_a.json`` are stored rounded to 2
+    decimal places (see ``measure_baseline.py``'s ``round(..., 2)``). Comparing a full-precision
+    current value against that rounded floor with a strict ``<`` produces false breaches whenever
+    the true value is fractionally below the floor but rounds to the SAME displayed percentage
+    (e.g. ``99.69604863221885 < 99.7`` is True even though 99.7 is exactly what this same
+    coverage state would produce as its own baseline). Rounding the current value to the same
+    precision before comparing makes this an apples-to-apples check at the precision the baseline
+    actually represents, instead of a spurious precision mismatch.
+    """
     problems: list[str] = []
     for area_id, (min_statement, min_branch) in sorted(floors.items()):
         coverage = coverage_by_area.get(area_id)
         if coverage is None:
             problems.append(f"floor check: area {area_id} not present in coverage data")
             continue
-        if coverage.statement_pct < min_statement:
+        statement_pct = round(coverage.statement_pct, _FLOOR_COMPARISON_PRECISION)
+        branch_pct = round(coverage.branch_pct, _FLOOR_COMPARISON_PRECISION)
+        if statement_pct < min_statement:
             problems.append(
-                f"floor breach: {area_id} statement coverage {coverage.statement_pct:.2f}% "
+                f"floor breach: {area_id} statement coverage {statement_pct:.2f}% "
                 f"< floor {min_statement:.2f}%"
             )
-        if coverage.branch_pct < min_branch:
+        if branch_pct < min_branch:
             problems.append(
-                f"floor breach: {area_id} branch coverage {coverage.branch_pct:.2f}% "
+                f"floor breach: {area_id} branch coverage {branch_pct:.2f}% "
                 f"< floor {min_branch:.2f}%"
             )
     return sorted(problems)
