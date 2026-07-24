@@ -12,7 +12,7 @@
     "value": "8ee816675967fb594fc49609a84115bea96f0f90554578c1d57dee4ed0bd634d",
     "mismatchBehavior": "Do not execute; regenerate this sidecar from the final Markdown plan."
   },
-  "lastUpdated": "2026-07-23T22:11:01Z",
+  "lastUpdated": "2026-07-24T03:11:25Z",
   "tasks": [
     {
       "id": 16,
@@ -132,7 +132,7 @@
     {
       "id": 19,
       "subject": "Task 19: Complete acquisition, strict-fake, retry, and guarded-browser coverage",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [
         16,
         17
@@ -173,7 +173,7 @@
     {
       "id": 20,
       "subject": "Task 20: Complete requirement, artifact, publication-failure, and privacy coverage",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [
         16
       ],
