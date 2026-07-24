@@ -4,7 +4,7 @@
   "specPath": "docs/superpowers/specs/2026-07-21-scoutmb-refactor-design.md",
   "matrixSpecPath": "docs/superpowers/specs/2026-07-22-phase-a-characterization-matrix-design.md",
   "slice": "1b of 5",
-  "status": "ready-for-execution",
+  "status": "gate-1b-go",
   "dependsOn": "2026-07-22-slice-1a-in-place-correctness.md (Gate 1a complete)",
   "reviewStatus": "Writing-plans review complete: exact execution-key semantics, task-local versus Gate lane behavior, missing spec cases, typed interfaces, coverage/baseline checks, private-corpus safeguards, and sidecar parity are resolved.",
   "planDigest": {
@@ -12,7 +12,7 @@
     "value": "8ee816675967fb594fc49609a84115bea96f0f90554578c1d57dee4ed0bd634d",
     "mismatchBehavior": "Do not execute; regenerate this sidecar from the final Markdown plan."
   },
-  "lastUpdated": "2026-07-24T20:20:54Z",
+  "lastUpdated": "2026-07-24T21:09:45Z",
   "tasks": [
     {
       "id": 16,
@@ -321,7 +321,7 @@
     {
       "id": 90,
       "subject": "Gate 1b \u2014 go/no-go",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [
         16,
         17,
