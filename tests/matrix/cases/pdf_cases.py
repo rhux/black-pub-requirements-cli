@@ -413,18 +413,24 @@ _CASE_CASES: tuple[PdfCase, ...] = (
         _meta(
             "PDF-CASE-001",
             "PDF-CASE",
-            "normalize-miles",
+            "normalize-cody",
             "extract",
-            "The two-leading-caps artifact 'MIles' is normalized to 'Miles' while the printed "
+            "The two-leading-caps artifact 'COdy' is normalized to 'Cody' while the printed "
             "form is retained.",
             "pdf_to_scouts.normalize_obvious_case lines 203-209",
         ),
-        (_embedded("MIles Smith", "Youth"),),
+        (_embedded("COdy Fenwick", "Youth"),),
         (),
         PdfObservation(
             attendees=(
                 ExtractedAttendeeObservation(
-                    "Miles Smith", "MIles Smith", "Youth", URL_A, "PDF-CASE-001.pdf", 1, _EMBEDDED
+                    "Cody Fenwick",
+                    "COdy Fenwick",
+                    "Youth",
+                    URL_A,
+                    "PDF-CASE-001.pdf",
+                    1,
+                    _EMBEDDED,
                 ),
             ),
         ),
@@ -435,16 +441,16 @@ _CASE_CASES: tuple[PdfCase, ...] = (
             "PDF-CASE",
             "normalization-disabled",
             "filter",
-            "With --no-normalize-obvious-case the 'MIles' capitalization survives into the CSV.",
+            "With --no-normalize-obvious-case the 'COdy' capitalization survives into the CSV.",
             "pdf_to_scouts.main line 543 passes normalize_case",
         ),
-        (_embedded("MIles Smith", "Youth"),),
+        (_embedded("COdy Fenwick", "Youth"),),
         ("--no-normalize-obvious-case",),
         PdfObservation(
             attendees=(
                 ExtractedAttendeeObservation(
-                    "MIles Smith",
-                    "MIles Smith",
+                    "COdy Fenwick",
+                    "COdy Fenwick",
                     "Youth",
                     URL_A,
                     "PDF-CASE-002.pdf",
@@ -459,18 +465,18 @@ _CASE_CASES: tuple[PdfCase, ...] = (
         _meta(
             "PDF-CASE-003",
             "PDF-CASE",
-            "preserve-mcdonald",
+            "preserve-mcarthur",
             "extract",
-            "A valid internal-caps surname 'McDonald' is left unchanged by normalization.",
+            "A valid internal-caps surname 'MacArthur' is left unchanged by normalization.",
             "pdf_to_scouts.normalize_obvious_case docstring lines 198-201",
         ),
-        (_embedded("Ronald McDonald", "Youth"),),
+        (_embedded("Walter MacArthur", "Youth"),),
         (),
         PdfObservation(
             attendees=(
                 ExtractedAttendeeObservation(
-                    "Ronald McDonald",
-                    "Ronald McDonald",
+                    "Walter MacArthur",
+                    "Walter MacArthur",
                     "Youth",
                     URL_A,
                     "PDF-CASE-003.pdf",

@@ -339,7 +339,7 @@ _PDF_AXES: tuple[AxisSpec, ...] = (
         axis_id="PDF-CASE",
         domain=Domain.PDF,
         members=frozenset(
-            {"normalize-miles", "normalization-disabled", "preserve-mcdonald", "preserve-aj"}
+            {"normalize-cody", "normalization-disabled", "preserve-mcarthur", "preserve-aj"}
         ),
         min_focused_cases=4,
         interactions=_NO_INTERACTIONS,
