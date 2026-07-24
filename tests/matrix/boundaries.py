@@ -559,10 +559,64 @@ _BOOTSTRAP_BOUNDARIES: tuple[BoundarySpec, ...] = (
     ),
 )
 
+# Scale-profile boundaries (Task 22, Slice 1b Phase A): the synthetic-data generation seams in
+# tests/matrix/scale_profile.py and tests/factories/scale.py.
+_SCALE_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="SCALE-B-BUILD-DATASET",
+        qualified_name="tests.factories.scale.build_dataset",
+        domain=Domain.SCALE,
+        required_case_ids=frozenset(
+            {
+                "SCALE-000",
+                "SCALE-001",
+                "SCALE-002",
+                "SCALE-SMALL-001",
+                "SCALE-SMALL-002",
+                "SCALE-SMALL-003",
+                "SCALE-CANON-022",
+                "SCALE-LARGE-050",
+                "SCALE-PROP-001",
+                "SCALE-PROP-002",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="SCALE-B-PAIRING",
+        qualified_name="tests.matrix.scale_profile.pairing_order / require_supported",
+        domain=Domain.SCALE,
+        required_case_ids=frozenset({"SCALE-PAIR-001", "SCALE-PAIR-002"}),
+    ),
+)
+
+# Vertical-flow and performance-baseline boundaries (Task 22, Slice 1b Phase A): the real
+# 5-stage end-to-end pipeline and the request-count/growth-bound instrumentation seams.
+_FLOW_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="FLOW-B-END-TO-END",
+        qualified_name="pdf_to_scouts.extract_pdf -> scout_schedule_cli.process_scout -> "
+        "write_outputs -> ui.server (read routes)",
+        domain=Domain.FLOW,
+        required_case_ids=frozenset({"FLOW-SUCCESS-001", "FLOW-PARTIAL-001"}),
+    ),
+    BoundarySpec(
+        boundary_id="FLOW-B-REQUEST-COUNT",
+        qualified_name="scout_schedule_cli.process_scout (request sequence)",
+        domain=Domain.FLOW,
+        required_case_ids=frozenset({"PERF-REQ-001", "PERF-REQ-002", "PERF-REQ-003"}),
+    ),
+    BoundarySpec(
+        boundary_id="FLOW-B-GROWTH",
+        qualified_name="scout_schedule_cli.annotate_requirement_statuses / write_outputs",
+        domain=Domain.FLOW,
+        required_case_ids=frozenset({"PERF-GROWTH-001", "PERF-GROWTH-002"}),
+    ),
+)
+
 # Populated by later slices; Task 17 adds the input-domain load_* seams, Task 18 the PDF seams,
 # Task 19 the acquisition + network-policy seams, Task 20 the requirement + artifact seams,
 # Task 21 the platform seam + the interface (ui.server) seams + the desktop-launcher and
-# bootstrap seams (final slice).
+# bootstrap seams, Task 22 the scale-profile and vertical-flow/performance seams (final slice).
 BOUNDARIES: tuple[BoundarySpec, ...] = (
     _INPUT_BOUNDARIES
     + _PDF_BOUNDARIES
@@ -573,6 +627,8 @@ BOUNDARIES: tuple[BoundarySpec, ...] = (
     + _INTERFACE_BOUNDARIES
     + _DESKTOP_BOUNDARIES
     + _BOOTSTRAP_BOUNDARIES
+    + _SCALE_BOUNDARIES
+    + _FLOW_BOUNDARIES
 )
 EXCLUSIONS: tuple[BranchExclusion, ...] = ()
 COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = ()

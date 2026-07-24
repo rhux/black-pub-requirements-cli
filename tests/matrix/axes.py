@@ -1038,6 +1038,73 @@ _BOOTSTRAP_AXES: tuple[AxisSpec, ...] = (
     ),
 )
 
+# Scale-profile axes (Task 22, Slice 1b Phase A): the deterministic synthetic-data-profile and
+# pairing characterization in tests/scale/test_profiles.py, driving tests/matrix/scale_profile.py
+# and tests/factories/scale.py directly (never the legacy application).
+_SCALE_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="SCALE-PROFILE",
+        domain=Domain.SCALE,
+        members=frozenset(
+            {
+                "zero",
+                "one",
+                "shared-name-distinct-ids",
+                "small-grouped",
+                "small-reversed",
+                "small-interleaved",
+                "canonical-022",
+                "large-050",
+                "prop-001",
+                "prop-002",
+            }
+        ),
+        min_focused_cases=10,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"SCALE-B-BUILD-DATASET"}),
+    ),
+    AxisSpec(
+        axis_id="SCALE-PAIR",
+        domain=Domain.SCALE,
+        members=frozenset({"reorder-independent", "correlation-unsupported"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"SCALE-B-PAIRING"}),
+    ),
+)
+
+# Vertical-flow and performance-baseline axes (Task 22, Slice 1b Phase A): the real 5-stage
+# end-to-end wire-up in tests/vertical/test_legacy_flows.py, plus the request-count/growth-bound
+# characterization in tests/performance/test_phase_a_baseline.py. FLOW-BROWSER-001 is a
+# new-acceptance placeholder (see tests/matrix/cases/scale_cases.py's module docstring) owned by
+# the second part of Task 22 -- out of scope here.
+_FLOW_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="FLOW-VERTICAL",
+        domain=Domain.FLOW,
+        members=frozenset({"success", "partial-failure", "browser-e2e"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"FLOW-B-END-TO-END"}),
+    ),
+    AxisSpec(
+        axis_id="PERF-REQUEST",
+        domain=Domain.FLOW,
+        members=frozenset({"zero", "canonical", "large"}),
+        min_focused_cases=3,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"FLOW-B-REQUEST-COUNT"}),
+    ),
+    AxisSpec(
+        axis_id="PERF-GROWTH",
+        domain=Domain.FLOW,
+        members=frozenset({"growth-bound", "artifact-rows"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"FLOW-B-GROWTH"}),
+    ),
+)
+
 # Domain axes are declared by later slices (Tasks 19-21) and appended here.
 AXES: tuple[AxisSpec, ...] = (
     _INPUT_AXES
@@ -1049,4 +1116,6 @@ AXES: tuple[AxisSpec, ...] = (
     + _INTERFACE_AXES
     + _DESKTOP_AXES
     + _BOOTSTRAP_AXES
+    + _SCALE_AXES
+    + _FLOW_AXES
 )
