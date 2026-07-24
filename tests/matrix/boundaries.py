@@ -630,5 +630,230 @@ BOUNDARIES: tuple[BoundarySpec, ...] = (
     + _SCALE_BOUNDARIES
     + _FLOW_BOUNDARIES
 )
-EXCLUSIONS: tuple[BranchExclusion, ...] = ()
-COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = ()
+# Scoped coverage areas (Task 22, step 8): the 5 production surfaces Phase A characterizes.
+COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = (
+    CoverageAreaSpec("schedule", ("scout_schedule_cli.py",)),
+    CoverageAreaSpec("pdf", ("pdf_to_scouts.py",)),
+    CoverageAreaSpec("ui", ("ui/server.py",)),
+    CoverageAreaSpec("desktop", ("run_app.py",)),
+    CoverageAreaSpec(
+        "bootstrap",
+        ("bootstrap/paths.py", "bootstrap/marker.py", "bootstrap/source_sync.py"),
+    ),
+)
+
+# Reviewed, narrowly-scoped exclusions (Task 22, step 9). Every entry here was left uncovered
+# ONLY after a genuine attempt to close it with a real test (see
+# tests/characterization/test_phase_a_gap_closure.py, which closed every other gap real
+# coverage --branch turned up in these 5 files). Each entry is one exact line or one exact
+# branch arc -- never a range -- with an honest reason it cannot reasonably be exercised from
+# this test suite.
+EXCLUSIONS: tuple[BranchExclusion, ...] = (
+    # --- `if __name__ == "__main__": raise SystemExit(main())` entry-point guards. The `if`
+    # line itself is always executed (and covered) at import time; only the body -- reachable
+    # solely when the module is run as a script, never when pytest imports it -- is missing.
+    BranchExclusion(
+        exclusion_id="EXC-MAIN-GUARD-SCHEDULE-STMT",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=1889,
+        branch_to=None,
+        rationale=(
+            "`raise SystemExit(main())` under `if __name__ == \"__main__\":` only runs when "
+            "the module is executed as a script; pytest always imports it as a module, so "
+            "__name__ is never \"__main__\" during the test suite."
+        ),
+        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-MAIN-GUARD-SCHEDULE-BRANCH",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=1888,
+        branch_to=1889,
+        rationale=(
+            "The `if __name__ == \"__main__\":` true-branch arc to its body is never taken "
+            "for the same reason as EXC-MAIN-GUARD-SCHEDULE-STMT."
+        ),
+        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-MAIN-GUARD-PDF-STMT",
+        area_id="pdf",
+        file="pdf_to_scouts.py",
+        line=600,
+        branch_to=None,
+        rationale=(
+            "`raise SystemExit(main())` under `if __name__ == \"__main__\":` only runs when "
+            "the module is executed as a script; pytest always imports it as a module."
+        ),
+        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-MAIN-GUARD-PDF-BRANCH",
+        area_id="pdf",
+        file="pdf_to_scouts.py",
+        line=599,
+        branch_to=600,
+        rationale=(
+            "The `if __name__ == \"__main__\":` true-branch arc to its body is never taken "
+            "for the same reason as EXC-MAIN-GUARD-PDF-STMT."
+        ),
+        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-MAIN-GUARD-DESKTOP-STMT",
+        area_id="desktop",
+        file="run_app.py",
+        line=89,
+        branch_to=None,
+        rationale=(
+            "`raise SystemExit(main())` under `if __name__ == \"__main__\":` only runs when "
+            "the module is executed as a script; pytest always imports it as a module."
+        ),
+        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-MAIN-GUARD-DESKTOP-BRANCH",
+        area_id="desktop",
+        file="run_app.py",
+        line=88,
+        branch_to=89,
+        rationale=(
+            "The `if __name__ == \"__main__\":` true-branch arc to its body is never taken "
+            "for the same reason as EXC-MAIN-GUARD-DESKTOP-STMT."
+        ),
+        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
+    ),
+    # --- pdf_to_scouts.expand_pdf_inputs's Windows-glob fallback: the `for match in matches:`
+    # loop only returns to its own top (rather than falling into the if/elif bodies) for a glob
+    # match that is NEITHER a file NOR a directory -- e.g. a broken symlink, or a path deleted
+    # between glob.glob() and the is_file()/is_dir() checks. Constructing that portably (broken
+    # symlinks need elevated privileges to create on Windows, which this project also targets)
+    # would trade a real, meaningful test for a platform-fragile one; a genuine TOCTOU race is
+    # not something a deterministic unit test should simulate by deleting the path mid-call.
+    BranchExclusion(
+        exclusion_id="EXC-PDF-GLOB-NEITHER-FILE-NOR-DIR",
+        area_id="pdf",
+        file="pdf_to_scouts.py",
+        line=161,
+        branch_to=157,
+        rationale=(
+            "Only reached when a glob match is neither a file nor a directory (a broken "
+            "symlink or a TOCTOU race between glob() and the is_file()/is_dir() checks). "
+            "Constructing a broken symlink requires elevated privileges on Windows, which "
+            "this project also targets, and simulating the race would require deleting the "
+            "path mid-call rather than exercising real behavior."
+        ),
+        review_reference="Task 22 step 9 review: defensive branch, not portably testable across Windows+macOS.",
+    ),
+    # --- ui/server._platform_data_root's OS dispatch. The project's own test policy (see
+    # tests/characterization/test_platform_matrix.py's docstring) never monkeypatches
+    # sys.platform, so only the branch matching THIS host's real platform can execute in any
+    # one CI run; the other two are exercised for real on their own OS's CI job.
+    BranchExclusion(
+        exclusion_id="EXC-UI-PLATFORM-WIN32-STMT-BASE",
+        area_id="ui",
+        file="ui/server.py",
+        line=42,
+        branch_to=None,
+        rationale=(
+            "`os.environ.get(\"LOCALAPPDATA\")` inside the `sys.platform == \"win32\"` branch "
+            "only runs on a real Windows host; this suite never monkeypatches sys.platform "
+            "(tests/characterization/test_platform_matrix.py's documented policy)."
+        ),
+        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-UI-PLATFORM-WIN32-STMT-IF",
+        area_id="ui",
+        file="ui/server.py",
+        line=43,
+        branch_to=None,
+        rationale="Same win32-only branch as EXC-UI-PLATFORM-WIN32-STMT-BASE.",
+        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-UI-PLATFORM-WIN32-STMT-RETURN",
+        area_id="ui",
+        file="ui/server.py",
+        line=44,
+        branch_to=None,
+        rationale="Same win32-only branch as EXC-UI-PLATFORM-WIN32-STMT-BASE.",
+        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-UI-PLATFORM-LINUX-FALLBACK-STMT",
+        area_id="ui",
+        file="ui/server.py",
+        line=47,
+        branch_to=None,
+        rationale=(
+            "The final `return Path.home() / \".local\" / \"share\" / ...` fallback only "
+            "executes when sys.platform is neither win32 nor darwin; this host is darwin, so "
+            "the darwin branch returns first. Exercised for real on Linux CI."
+        ),
+        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-UI-PLATFORM-BRANCH-ENTER-WIN32",
+        area_id="ui",
+        file="ui/server.py",
+        line=41,
+        branch_to=42,
+        rationale="The win32-true arc of the platform dispatch; same reasoning as EXC-UI-PLATFORM-WIN32-STMT-BASE.",
+        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-UI-PLATFORM-BRANCH-LOCALAPPDATA-TRUE",
+        area_id="ui",
+        file="ui/server.py",
+        line=43,
+        branch_to=44,
+        rationale="The win32-true inner arc; same reasoning as EXC-UI-PLATFORM-WIN32-STMT-BASE.",
+        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-UI-PLATFORM-BRANCH-LOCALAPPDATA-FALSE",
+        area_id="ui",
+        file="ui/server.py",
+        line=43,
+        branch_to=47,
+        rationale=(
+            "The win32-but-no-LOCALAPPDATA arc falling through to the final fallback; only "
+            "reachable on a real Windows host with LOCALAPPDATA unset."
+        ),
+        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-UI-PLATFORM-BRANCH-DARWIN-FALSE",
+        area_id="ui",
+        file="ui/server.py",
+        line=45,
+        branch_to=47,
+        rationale=(
+            "The darwin-elif-false arc: on this host sys.platform IS darwin, so this arc "
+            "(reached only when it is neither win32 nor darwin) never taken here; exercised "
+            "for real on Linux CI."
+        ),
+        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
+    ),
+    # --- ui.server.open_emails_folder's success path. Already pinned, not just excluded: see
+    # UI-ROUTE-023 (tests/matrix/cases/interface_cases.py), an intentional_change case that
+    # asserts the REAL current behavior on this host is an unhandled 500 (os.startfile does not
+    # exist on non-Windows Python). :387's `return {"opened": True}` is therefore reachable only
+    # on real Windows; Slice 2 owns making this route dispatch on sys.platform.
+    BranchExclusion(
+        exclusion_id="EXC-UI-OPEN-EMAILS-WINDOWS-ONLY",
+        area_id="ui",
+        file="ui/server.py",
+        line=387,
+        branch_to=None,
+        rationale=(
+            "os.startfile does not exist on macOS/Linux, so this line is only reachable on "
+            "real Windows; UI-ROUTE-023 already pins the current (non-Windows) behavior as an "
+            "unhandled 500, an intentional-change owned by Slice 2 (cross-platform folder-open)."
+        ),
+        review_reference="Task 22 step 9 review: see UI-ROUTE-023 in tests/matrix/cases/interface_cases.py.",
+    ),
+)
