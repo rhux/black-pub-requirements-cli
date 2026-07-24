@@ -11,6 +11,7 @@ No test writes outside ``tmp_path`` and this module performs no real file or net
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -20,10 +21,132 @@ import pytest
 from tests.harnesses.legacy import load_legacy_ui
 from tests.matrix.cases.interface_cases import (
     INTERFACE_CASES,
+    SSE_CLEAN_CASES,
+    SSE_FRAME_CASES,
     InterfaceCase,
     InterfaceObservation,
+    SseCase,
+    SseCleanObservation,
+    SseFrameObservation,
 )
 from tests.matrix.pytest_support import execution_params
+
+_FIXED_RUN_ID = "2026-07-24_TEST"
+_SCOUTS_CSV_BODY = (
+    "Attendee Name,Registrant Type,QR Code Contents\r\n"
+    "Avery Archer,Youth,https://scoutingevent.com/mobile/x\r\n"
+)
+
+
+def _tasks_snapshot() -> set:
+    return set(asyncio.all_tasks())
+
+
+def _only_spawned_task(before: set) -> asyncio.Task:
+    spawned = set(asyncio.all_tasks()) - before
+    assert len(spawned) == 1, f"expected exactly one spawned worker task, got {spawned}"
+    return next(iter(spawned))
+
+
+def _fake_pdf_main_success(csv_body: str):
+    def fake(argv: list[str], *, progress_callback=None) -> int:
+        if progress_callback is not None:
+            progress_callback(1, 1, Path(argv[0]))
+        out_path = Path(argv[argv.index("-o") + 1])
+        out_path.write_text(csv_body, encoding="utf-8-sig")
+        return 0
+
+    return fake
+
+
+def _fake_pdf_main_error(message: str):
+    def fake(argv: list[str], *, progress_callback=None) -> int:
+        raise RuntimeError(message)
+
+    return fake
+
+
+def _fake_schedule_async_main(
+    progress_events: list[dict],
+    *,
+    summary_extra: dict | None = None,
+    raise_message: str | None = None,
+):
+    async def fake(args, *, progress_callback=None, resume_event=None) -> int:
+        for event in progress_events:
+            if progress_callback is not None:
+                await progress_callback(dict(event))
+        if raise_message is not None:
+            raise RuntimeError(raise_message)
+        args.output.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "scouts_processed": 0,
+            "scouts_with_errors": 0,
+            "generated_at_local": "2026-07-24 00:00",
+            "generated_at_iso": "2026-07-24T00:00:00",
+            "classes": 0,
+            "requirements": 0,
+            "html_report": None,
+            "email_report_dir": None,
+        }
+        summary.update(summary_extra or {})
+        (args.output / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        return 0
+
+    return fake
+
+
+def _split_frame_case(frame_case: SseCase) -> tuple[list[dict], dict, str | None]:
+    """Pulls a SSE-FRAME case's expected frames apart into: the progress_callback events
+    async_main itself would emit (everything except 'batch_done'/'error', which ui/server.py's
+    OWN worker constructs, never async_main), the summary.json content the worker needs to have
+    on disk to build its own 'batch_done' frame, and the exception message (if any) the fake
+    should raise after emitting its progress events."""
+    frames = frame_case.expected_by_context["sse-frame"].frames
+    progress_events = [dict(frame) for frame in frames if frame["type"] not in ("batch_done", "error")]
+    batch_done = next((frame for frame in frames if frame["type"] == "batch_done"), None)
+    error = next((frame for frame in frames if frame["type"] == "error"), None)
+    summary_extra = (
+        {
+            "scouts_processed": batch_done["scouts_processed"],
+            "scouts_with_errors": batch_done["scouts_with_errors"],
+            "html_report": None,
+        }
+        if batch_done is not None
+        else {}
+    )
+    return progress_events, summary_extra, (error["message"] if error is not None else None)
+
+
+async def _start_schedule_operation(
+    module, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, frame_case: SseCase
+) -> tuple[str, asyncio.Task]:
+    progress_events, summary_extra, raise_message = _split_frame_case(frame_case)
+    fake = _fake_schedule_async_main(
+        progress_events, summary_extra=summary_extra, raise_message=raise_message
+    )
+    monkeypatch.setattr(module.scout_schedule_cli, "async_main", fake)
+    monkeypatch.setattr(module, "new_run_id", lambda: _FIXED_RUN_ID)
+    module.SCOUTS_CSV.write_text(_SCOUTS_CSV_BODY, encoding="utf-8-sig")
+    before = _tasks_snapshot()
+    resp = await client.post("/api/schedule-download")
+    assert resp.status_code == 202
+    operation_id = resp.json()["operation_id"]
+    task = _only_spawned_task(before)
+    return operation_id, task
+
+
+async def _drain_via_route(module, operation_id: str) -> tuple[object, list[dict]]:
+    """Calls the REAL ``operation_events`` route function directly (it is an ordinary async
+    function; the ``@app.get`` decorator does not wrap its body) and iterates the REAL
+    ``StreamingResponse.body_iterator`` async generator to completion, parsing each real
+    ``data: <json>\\n\\n`` frame back into a dict -- never re-deriving the wire format."""
+    resp = await module.operation_events(operation_id)
+    events: list[dict] = []
+    async for raw_frame in resp.body_iterator:
+        payload = raw_frame.removeprefix("data: ").removesuffix("\n\n")
+        events.append(json.loads(payload))
+    return resp, events
 
 
 def _client(module) -> httpx.AsyncClient:
@@ -48,8 +171,9 @@ async def _observe(resp: httpx.Response, *, headers: tuple[tuple[str, str], ...]
 class LegacyInterfaceRunner:
     """Runner[InterfaceCase, object] over the real ``ui.server`` FastAPI app."""
 
-    def __init__(self, context_id: str) -> None:
+    def __init__(self, context_id: str, monkeypatch: pytest.MonkeyPatch) -> None:
         self.context_id = context_id
+        self.monkeypatch = monkeypatch
 
     async def run(self, case: InterfaceCase, *, root: Path) -> object:
         handler = getattr(self, f"_ctx_{self.context_id.replace('-', '_')}")
@@ -339,10 +463,170 @@ class LegacyInterfaceRunner:
         resp = await client.post("/api/runs/2026-07-23_1200/open-emails-folder")
         return await _observe(resp)
 
+    async def _route_UI_ROUTE_024(self, module, client) -> InterfaceObservation:
+        self.monkeypatch.setattr(module.pdf_to_scouts, "main", _fake_pdf_main_success(_SCOUTS_CSV_BODY))
+        before = _tasks_snapshot()
+        resp = await client.post(
+            "/api/pdf-extract", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")}
+        )
+        assert resp.status_code == 202
+        operation_id = resp.json()["operation_id"]
+        task = _only_spawned_task(before)
+        await asyncio.wait_for(task, timeout=5)
+        await _drain_via_route(module, operation_id)
+        return InterfaceObservation(
+            status=resp.status_code,
+            body={
+                "scouts_csv_written": module.SCOUTS_CSV.exists(),
+                "busy_after": module.busy["pdf-extract"],
+            },
+        )
+
+    async def _route_UI_ROUTE_025(self, module, client) -> InterfaceObservation:
+        self.monkeypatch.setattr(module.pdf_to_scouts, "main", _fake_pdf_main_error("boom-pdf"))
+        before = _tasks_snapshot()
+        resp = await client.post(
+            "/api/pdf-extract", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")}
+        )
+        assert resp.status_code == 202
+        operation_id = resp.json()["operation_id"]
+        task = _only_spawned_task(before)
+        await asyncio.wait_for(task, timeout=5)
+        _, events = await _drain_via_route(module, operation_id)
+        error_events = [event for event in events if event.get("type") == "error"]
+        return InterfaceObservation(
+            status=resp.status_code,
+            body={
+                "error_message": error_events[0]["message"] if error_events else None,
+                "busy_after": module.busy["pdf-extract"],
+            },
+        )
+
+    async def _route_UI_ROUTE_026(self, module, client) -> InterfaceObservation:
+        frame_case = next(case for case in SSE_FRAME_CASES if case.meta.case_id == "SSE-FRAME-002")
+        operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, frame_case)
+        await asyncio.wait_for(task, timeout=5)
+        _, events = await _drain_via_route(module, operation_id)
+        batch_done = next(event for event in events if event["type"] == "batch_done")
+        return InterfaceObservation(
+            status=202,
+            body={
+                "scouts_processed": batch_done["scouts_processed"],
+                "busy_after": module.busy["schedule-download"],
+                "current_download_after": dict(module.current_download),
+            },
+        )
+
+    async def _route_UI_ROUTE_027(self, module, client) -> InterfaceObservation:
+        frame_case = next(
+            case for case in SSE_FRAME_CASES if case.meta.case_id == "SSE-FRAME-005"
+        )
+        operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, frame_case)
+        await asyncio.wait_for(task, timeout=5)
+        _, events = await _drain_via_route(module, operation_id)
+        error_events = [event for event in events if event["type"] == "error"]
+        return InterfaceObservation(
+            status=202,
+            body={
+                "error_message": error_events[0]["message"] if error_events else None,
+                "busy_after": module.busy["schedule-download"],
+                "current_download_after": dict(module.current_download),
+            },
+        )
+
+    async def _route_UI_ROUTE_028(self, module, client) -> InterfaceObservation:
+        frame_case = next(case for case in SSE_FRAME_CASES if case.meta.case_id == "SSE-FRAME-002")
+        operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, frame_case)
+        await asyncio.wait_for(task, timeout=5)
+        resp, _events = await _drain_via_route(module, operation_id)
+        return InterfaceObservation(
+            status=resp.status_code,
+            body={
+                "media_type": resp.media_type,
+                "operation_removed": operation_id not in module.operations,
+            },
+        )
+
+    async def _route_UI_ROUTE_029(self, module, client) -> InterfaceObservation:
+        frame_case = next(case for case in SSE_FRAME_CASES if case.meta.case_id == "SSE-FRAME-004")
+        operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, frame_case)
+        resp = await module.operation_events(operation_id)
+        gen = resp.body_iterator
+        await gen.__anext__()  # consume exactly one real frame
+        await gen.aclose()  # simulate the client disconnecting mid-stream
+        removed_immediately = operation_id not in module.operations
+        await asyncio.wait_for(task, timeout=5)  # the detached worker still finishes on its own
+        return InterfaceObservation(
+            status=200, body={"operation_removed_after_close": removed_immediately}
+        )
+
+    async def _route_UI_ROUTE_030(self, module, client) -> InterfaceObservation:
+        opened: list[str] = []
+
+        def _record_open(url: str) -> bool:
+            opened.append(url)
+            return True
+
+        module.webbrowser.open = _record_open
+        self._write_summary(
+            module, "2026-07-23_1200", {"html_report": "../../elsewhere/evil.html"}
+        )
+        resp = await client.post("/api/runs/2026-07-23_1200/open-report")
+        assert opened, "webbrowser.open was never called"
+        return InterfaceObservation(
+            status=resp.status_code,
+            body={"url_contains_unsanitized_value": "../../elsewhere/evil.html" in opened[0]},
+        )
+
+    # -- sse-frame / sse-clean (bespoke per case_id, over the SseCase catalog) ------------------
+
+    async def _ctx_sse_frame(self, case: SseCase, root: Path) -> object:
+        async with load_legacy_ui(root / "data") as module, _client(module) as client:
+            operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, case)
+            await asyncio.wait_for(task, timeout=5)
+            _, events = await _drain_via_route(module, operation_id)
+            return SseFrameObservation(
+                frame_types=tuple(event["type"] for event in events),
+                frames=tuple(events),
+            )
+
+    async def _ctx_sse_clean(self, case: SseCase, root: Path) -> object:
+        member = case.meta.member
+        source_case_id = {
+            "success": "SSE-FRAME-002",
+            "worker-exception": "SSE-FRAME-005",
+            "terminal-attendee-failure": "SSE-FRAME-006",
+            "client-disconnect": "SSE-FRAME-004",
+        }[member]
+        frame_case = next(c for c in SSE_FRAME_CASES if c.meta.case_id == source_case_id)
+        async with load_legacy_ui(root / "data") as module, _client(module) as client:
+            operation_id, task = await _start_schedule_operation(
+                module, client, self.monkeypatch, frame_case
+            )
+            if member == "client-disconnect":
+                resp = await module.operation_events(operation_id)
+                gen = resp.body_iterator
+                await gen.__anext__()
+                await gen.aclose()
+                operation_removed = operation_id not in module.operations
+                await asyncio.wait_for(task, timeout=5)
+            else:
+                await asyncio.wait_for(task, timeout=5)
+                await _drain_via_route(module, operation_id)
+                operation_removed = operation_id not in module.operations
+            return SseCleanObservation(
+                operation_removed=operation_removed,
+                busy_reset=module.busy["schedule-download"] is False,
+                current_download_cleared=module.current_download == {},
+                task_done=task.done(),
+            )
+
 
 @pytest.mark.parametrize(("case", "context_id"), execution_params(INTERFACE_CASES))
-async def test_interface_execution(case: InterfaceCase, context_id: str, tmp_path: Path) -> None:
-    observed = await LegacyInterfaceRunner(context_id).run(case, root=tmp_path)
+async def test_interface_execution(
+    case: InterfaceCase, context_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed = await LegacyInterfaceRunner(context_id, monkeypatch).run(case, root=tmp_path)
     expected = case.expected_by_context[context_id]
     if isinstance(expected, InterfaceObservation) and expected.body is None:
         assert isinstance(observed, InterfaceObservation)
@@ -350,6 +634,17 @@ async def test_interface_execution(case: InterfaceCase, context_id: str, tmp_pat
         assert observed.headers == expected.headers
     else:
         assert observed == expected
+
+
+@pytest.mark.parametrize(
+    ("case", "context_id"), execution_params(SSE_FRAME_CASES + SSE_CLEAN_CASES)
+)
+async def test_sse_execution(
+    case: SseCase, context_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed = await LegacyInterfaceRunner(context_id, monkeypatch).run(case, root=tmp_path)
+    expected = case.expected_by_context[context_id]
+    assert observed == expected
 
 
 def test_interface_registry_is_structurally_valid() -> None:

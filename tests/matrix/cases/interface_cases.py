@@ -26,15 +26,23 @@ The 12 live routes (method, path)::
     POST /api/runs/{run_id}/open-emails-folder
 
 Scope note (honest, not silent): this catalog covers ``UI-IMPORT`` (2), ``UI-METHOD`` (12),
-``RUN-ID`` (4), ``RUN-LIST`` (4), and the 20 ``UI-ROUTE`` members whose observable contract does
-NOT require draining an ``asyncio.create_task``-scheduled background worker to completion
-(health / status / scouts / pause / resume / runs / open-report / generate-emails /
-open-emails-folder). The remaining 11 ``UI-ROUTE`` members (the PDF-extract and
-schedule-download "busy" / "accepted" / "worker-error" states, and the SSE "events" success/
-disconnect states) plus ``SSE-FRAME``, ``SSE-CLEAN``, and ``UI-ACTION`` are NOT implemented in
-this task delivery -- see the Task 21 report for the explicit BLOCKED/DONE_WITH_CONCERNS
-accounting. No axis in ``tests/matrix/axes.py`` claims a member this file does not back with a
-real, passing case.
+``RUN-ID`` (4), ``RUN-LIST`` (4), and ``UI-ROUTE`` (30 members): the original 23 members whose
+observable contract does not require draining an ``asyncio.create_task``-scheduled background
+worker to completion (health / status / scouts / pause / resume / runs / open-report /
+generate-emails / open-emails-folder), plus the 6 members that DO require actually draining a
+background worker (PDF-extract accepted/worker-error, schedule-download accepted/worker-error,
+events success/disconnect -- ``UI-ROUTE-024..029``), plus ``UI-ROUTE-030``, the one
+``INTENTIONAL_CHANGE`` member characterizing ``open_report``'s unvalidated use of a persisted
+``summary.json``'s ``html_report`` field. It also covers ``SSE-FRAME`` (6) and ``SSE-CLEAN`` (4),
+a new ``Domain.INTERFACE`` axis pair characterizing the real ``StreamingResponse.body_iterator``
+async generator ``ui.server.operation_events`` builds, and the lifecycle cleanup of
+``operations``/``busy``/``current_download`` plus the background ``asyncio`` task under success,
+worker-exception, terminal-attendee-failure, and client-disconnect. Every case below runs the
+REAL ``ui.server`` worker coroutines end to end (through a narrowly-scoped monkeypatch of
+``pdf_to_scouts.main``/``scout_schedule_cli.async_main`` -- the exact call boundary
+``ui/server.py``'s own workers invoke -- never a reimplementation of their contract), and reads
+the REAL SSE frames by iterating the real async generator FastAPI would drive, not by
+re-deriving the wire format from source text.
 """
 
 from __future__ import annotations
@@ -65,6 +73,38 @@ class InterfaceCase:
     method: str
     route: str
     expected_by_context: Mapping[str, InterfaceObservation | object]
+
+
+@dataclass(frozen=True, slots=True)
+class SseFrameObservation:
+    """The ordered, fully-parsed sequence of ``data: <json>\\n\\n`` frames a single real
+    ``event_stream()`` async generator run yields for one representative scenario -- the
+    dicts here are compared against ``json.loads`` of each real observed frame, never against
+    the raw wire text (so trailing whitespace/ordering-of-the-generator-not-the-JSON is what is
+    pinned, not incidental ``json.dumps`` key ordering, which is stable but not the point under
+    test)."""
+
+    frame_types: tuple[str, ...]
+    frames: tuple[Mapping[str, object], ...]
+    stream_ends: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class SseCleanObservation:
+    """Post-scenario lifecycle-cleanup state, asserted explicitly by the test itself (not left
+    to ``load_legacy_ui``'s own exit-time assertions alone) right after each SSE-CLEAN
+    scenario."""
+
+    operation_removed: bool
+    busy_reset: bool
+    current_download_cleared: bool
+    task_done: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SseCase:
+    meta: CaseMetadata
+    expected_by_context: Mapping[str, object]
 
 
 def _meta(
@@ -713,6 +753,537 @@ INTERFACE_CASES_ROUTE: tuple[InterfaceCase, ...] = (
         route="/api/runs/{run_id}/open-emails-folder",
         expected_by_context={"route": InterfaceObservation(status=500, body=None)},
     ),
+    InterfaceCase(
+        meta=_meta(
+            "UI-ROUTE-024",
+            "UI-ROUTE",
+            "pdf-accepted",
+            ("route",),
+            "POST /api/pdf-extract with real files, driven to completion (its "
+            "asyncio.create_task(worker()) awaited, pdf_to_scouts.main narrowly monkeypatched "
+            "so no real PyMuPDF/opencv decoding runs) writes scouts.csv, pushes a final "
+            "'batch_done' event onto the operation's queue followed by the None sentinel, and "
+            "resets busy['pdf-extract'] to False.",
+            _EVIDENCE_ROUTES,
+        ),
+        method="POST",
+        route="/api/pdf-extract",
+        expected_by_context={
+            "route": InterfaceObservation(status=202, body={"scouts_csv_written": True, "busy_after": False})
+        },
+    ),
+    InterfaceCase(
+        meta=_meta(
+            "UI-ROUTE-025",
+            "UI-ROUTE",
+            "pdf-worker-error",
+            ("route",),
+            "POST /api/pdf-extract whose worker's call to pdf_to_scouts.main raises: the "
+            "worker's own 'except Exception' (ui/server.py:208-209) catches it, pushes an "
+            "'error' event with the exception's str(), then the None sentinel, and STILL "
+            "resets busy['pdf-extract'] to False in its 'finally' -- the route itself already "
+            "returned 202 before the worker ran, so the HTTP response is unaffected by the "
+            "later in-worker failure.",
+            _EVIDENCE_ROUTES,
+        ),
+        method="POST",
+        route="/api/pdf-extract",
+        expected_by_context={
+            "route": InterfaceObservation(
+                status=202, body={"error_message": "boom-pdf", "busy_after": False}
+            )
+        },
+    ),
+    InterfaceCase(
+        meta=_meta(
+            "UI-ROUTE-026",
+            "UI-ROUTE",
+            "schedule-accepted",
+            ("route",),
+            "POST /api/schedule-download, driven to completion (scout_schedule_cli.async_main "
+            "narrowly monkeypatched so no real Chromium launches), pushes a final 'batch_done' "
+            "event carrying the real summary.json counts and resets both "
+            "busy['schedule-download'] and current_download to empty.",
+            _EVIDENCE_ROUTES,
+        ),
+        method="POST",
+        route="/api/schedule-download",
+        expected_by_context={
+            "route": InterfaceObservation(
+                status=202,
+                body={"scouts_processed": 1, "busy_after": False, "current_download_after": {}},
+            )
+        },
+    ),
+    InterfaceCase(
+        meta=_meta(
+            "UI-ROUTE-027",
+            "UI-ROUTE",
+            "schedule-worker-error",
+            ("route",),
+            "POST /api/schedule-download whose worker's call to scout_schedule_cli.async_main "
+            "raises: the worker's own 'except Exception' (ui/server.py:268-269) catches it, "
+            "pushes an 'error' event, then the None sentinel, and its 'finally' resets both "
+            "busy['schedule-download'] and current_download to empty regardless of the "
+            "failure.",
+            _EVIDENCE_ROUTES,
+        ),
+        method="POST",
+        route="/api/schedule-download",
+        expected_by_context={
+            "route": InterfaceObservation(
+                status=202,
+                body={
+                    "error_message": "boom-schedule-mid",
+                    "busy_after": False,
+                    "current_download_after": {},
+                },
+            )
+        },
+    ),
+    InterfaceCase(
+        meta=_meta(
+            "UI-ROUTE-028",
+            "UI-ROUTE",
+            "events-success",
+            ("route",),
+            "GET /api/operations/{operation_id}/events for a real operation that runs to "
+            "completion returns 200 text/event-stream and, once the real body_iterator is "
+            "fully drained, ends the stream (further iteration raises StopAsyncIteration) -- "
+            "the operation_id is also removed from ui.server.operations by the generator's own "
+            "'finally' (ui/server.py:310-311).",
+            _EVIDENCE_ROUTES,
+        ),
+        method="GET",
+        route="/api/operations/{operation_id}/events",
+        expected_by_context={
+            "route": InterfaceObservation(
+                status=200,
+                body={"media_type": "text/event-stream", "operation_removed": True},
+            )
+        },
+    ),
+    InterfaceCase(
+        meta=_meta(
+            "UI-ROUTE-029",
+            "UI-ROUTE",
+            "events-disconnect",
+            ("route",),
+            "Closing the GET /api/operations/{operation_id}/events body_iterator early (before "
+            "the None sentinel), simulating a client disconnect, still runs the generator's "
+            "'finally' clause (aclose() raises GeneratorExit at the current 'await queue.get()' "
+            "suspension point, which the try/finally still observes) -- the operation_id is "
+            "removed from ui.server.operations immediately, even though the underlying "
+            "background worker task (a separate asyncio.create_task, unrelated to this "
+            "generator) is untouched and keeps running to its own completion.",
+            _EVIDENCE_ROUTES,
+        ),
+        method="GET",
+        route="/api/operations/{operation_id}/events",
+        expected_by_context={
+            "route": InterfaceObservation(status=200, body={"operation_removed_after_close": True})
+        },
+    ),
+    InterfaceCase(
+        meta=_meta(
+            "UI-ROUTE-030",
+            "UI-ROUTE",
+            "open-report-unvalidated-report-name",
+            ("route",),
+            "POST /api/runs/{run_id}/open-report reads summary.json's 'html_report' field "
+            "(ui/server.py:349) and splices it, completely unvalidated, into the URL passed to "
+            "webbrowser.open (ui/server.py:352-353) -- a persisted JSON value containing "
+            "path-traversal segments (e.g. '../../elsewhere') flows through unchanged into the "
+            "opened URL with no check that it names a plain file inside this run's own "
+            "directory. This is intentional-change: Slice 2 owns validating that html_report "
+            "resolves to a real file directly under this run_id's own directory before it is "
+            "ever used to build a URL.",
+            _EVIDENCE_ROUTES,
+            classification=Classification.INTENTIONAL_CHANGE,
+            target_owner="Slice 2",
+            target_observation=(
+                "open_report rejects (or path-normalizes and re-validates) any html_report "
+                "value that is not a bare filename resolving inside RUNS_DIR/<run_id>, instead "
+                "of splicing the persisted string directly into an opened URL."
+            ),
+        ),
+        method="POST",
+        route="/api/runs/{run_id}/open-report",
+        expected_by_context={
+            "route": InterfaceObservation(
+                status=200, body={"url_contains_unsanitized_value": True}
+            )
+        },
+    ),
+)
+
+
+# ====================================================================================================
+# SSE-FRAME-001..006 -- the real ordered sequence of SSE frames ui.server.operation_events'
+# body_iterator yields for 6 representative schedule-download scenarios, driven through a
+# narrowly-scoped monkeypatch of scout_schedule_cli.async_main (the exact call boundary the real
+# worker uses) so every event/frame really passes through the real queue + real event_stream()
+# generator, never a hand-built wire-format string. RUN_ID below is a fixed, monkeypatched
+# stand-in for the real time-based new_run_id() (see the runner's SSE_FIXED_RUN_ID monkeypatch of new_run_id) -- deterministic
+# only because the clock input is controlled, not because any value here was derived by calling
+# the function under test.
+# ====================================================================================================
+SSE_FIXED_RUN_ID = "2026-07-24_TEST"
+_EVIDENCE_SSE_FRAME = (
+    "ui/server.py:235-273 the schedule-download worker's queue.put calls, and "
+    "scout_schedule_cli.py:1810-1853 async_main's own progress_callback calls"
+)
+
+SSE_FRAME_CASES: tuple[SseCase, ...] = (
+    SseCase(
+        meta=_meta(
+            "SSE-FRAME-001",
+            "SSE-FRAME",
+            "zero-scouts-immediate-done",
+            ("sse-frame",),
+            "With zero scouts loaded, async_main emits exactly one 'batch_start' (total=0) and "
+            "the loop body never runs -- the worker then reads the (real, on-disk) summary.json "
+            "it wrote and immediately pushes 'batch_done', so the complete real frame sequence "
+            "is just those two frames before the None sentinel ends the stream.",
+            _EVIDENCE_SSE_FRAME,
+        ),
+        expected_by_context={
+            "sse-frame": SseFrameObservation(
+                frame_types=("batch_start", "batch_done"),
+                frames=(
+                    {"type": "batch_start", "total": 0},
+                    {
+                        "type": "batch_done",
+                        "run_id": SSE_FIXED_RUN_ID,
+                        "scouts_processed": 0,
+                        "scouts_with_errors": 0,
+                        "report_url": None,
+                    },
+                ),
+            )
+        },
+    ),
+    SseCase(
+        meta=_meta(
+            "SSE-FRAME-002",
+            "SSE-FRAME",
+            "single-scout-success",
+            ("sse-frame",),
+            "One scout that completes successfully produces the real 'batch_start' -> "
+            "'scout_start' -> 'scout_done' -> 'batch_done' sequence, each frame's fields exactly "
+            "as async_main/the worker construct them.",
+            _EVIDENCE_SSE_FRAME,
+        ),
+        expected_by_context={
+            "sse-frame": SseFrameObservation(
+                frame_types=("batch_start", "scout_start", "scout_done", "batch_done"),
+                frames=(
+                    {"type": "batch_start", "total": 1},
+                    {"type": "scout_start", "index": 1, "total": 1, "name": "Avery Archer"},
+                    {
+                        "type": "scout_done",
+                        "index": 1,
+                        "total": 1,
+                        "name": "Avery Archer",
+                        "attendee_id": "90000001",
+                        "classes": 2,
+                        "requirements": 3,
+                        "errors": 0,
+                    },
+                    {
+                        "type": "batch_done",
+                        "run_id": SSE_FIXED_RUN_ID,
+                        "scouts_processed": 1,
+                        "scouts_with_errors": 0,
+                        "report_url": None,
+                    },
+                ),
+            )
+        },
+    ),
+    SseCase(
+        meta=_meta(
+            "SSE-FRAME-003",
+            "SSE-FRAME",
+            "pause-then-resume",
+            ("sse-frame",),
+            "A download paused before its one scout starts, then resumed: async_main's own "
+            "resume_event check (scout_schedule_cli.py:1821-1826) emits 'paused' then, once the "
+            "event is set again, 'resumed', BEFORE 'scout_start' -- both carrying the same "
+            "index/total the pending scout would have.",
+            _EVIDENCE_SSE_FRAME,
+        ),
+        expected_by_context={
+            "sse-frame": SseFrameObservation(
+                frame_types=("batch_start", "paused", "resumed", "scout_start", "scout_done", "batch_done"),
+                frames=(
+                    {"type": "batch_start", "total": 1},
+                    {"type": "paused", "index": 1, "total": 1},
+                    {"type": "resumed", "index": 1, "total": 1},
+                    {"type": "scout_start", "index": 1, "total": 1, "name": "Avery Archer"},
+                    {
+                        "type": "scout_done",
+                        "index": 1,
+                        "total": 1,
+                        "name": "Avery Archer",
+                        "attendee_id": "90000001",
+                        "classes": 2,
+                        "requirements": 3,
+                        "errors": 0,
+                    },
+                    {
+                        "type": "batch_done",
+                        "run_id": SSE_FIXED_RUN_ID,
+                        "scouts_processed": 1,
+                        "scouts_with_errors": 0,
+                        "report_url": None,
+                    },
+                ),
+            )
+        },
+    ),
+    SseCase(
+        meta=_meta(
+            "SSE-FRAME-004",
+            "SSE-FRAME",
+            "two-scouts-no-pause",
+            ("sse-frame",),
+            "Two scouts, both succeeding, with no pause: the 'scout_start'/'scout_done' pair "
+            "repeats once per scout, in order, between the single 'batch_start' and 'batch_done'.",
+            _EVIDENCE_SSE_FRAME,
+        ),
+        expected_by_context={
+            "sse-frame": SseFrameObservation(
+                frame_types=(
+                    "batch_start",
+                    "scout_start",
+                    "scout_done",
+                    "scout_start",
+                    "scout_done",
+                    "batch_done",
+                ),
+                frames=(
+                    {"type": "batch_start", "total": 2},
+                    {"type": "scout_start", "index": 1, "total": 2, "name": "Avery Archer"},
+                    {
+                        "type": "scout_done",
+                        "index": 1,
+                        "total": 2,
+                        "name": "Avery Archer",
+                        "attendee_id": "90000001",
+                        "classes": 2,
+                        "requirements": 3,
+                        "errors": 0,
+                    },
+                    {"type": "scout_start", "index": 2, "total": 2, "name": "Bo Baker"},
+                    {
+                        "type": "scout_done",
+                        "index": 2,
+                        "total": 2,
+                        "name": "Bo Baker",
+                        "attendee_id": "90000002",
+                        "classes": 1,
+                        "requirements": 1,
+                        "errors": 0,
+                    },
+                    {
+                        "type": "batch_done",
+                        "run_id": SSE_FIXED_RUN_ID,
+                        "scouts_processed": 2,
+                        "scouts_with_errors": 0,
+                        "report_url": None,
+                    },
+                ),
+            )
+        },
+    ),
+    SseCase(
+        meta=_meta(
+            "SSE-FRAME-005",
+            "SSE-FRAME",
+            "worker-exception-mid-batch",
+            ("sse-frame",),
+            "async_main raising partway through (after 'scout_start' but before that scout's "
+            "'scout_done') is caught by the worker's own 'except Exception' (ui/server.py:"
+            "268-269): the real frame sequence is 'batch_start', 'scout_start', then 'error' "
+            "-- no 'scout_done' and no 'batch_done' -- and the stream still ends cleanly right "
+            "after (the None sentinel is always pushed in the worker's 'finally').",
+            _EVIDENCE_SSE_FRAME,
+        ),
+        expected_by_context={
+            "sse-frame": SseFrameObservation(
+                frame_types=("batch_start", "scout_start", "error"),
+                frames=(
+                    {"type": "batch_start", "total": 1},
+                    {"type": "scout_start", "index": 1, "total": 1, "name": "Avery Archer"},
+                    {"type": "error", "message": "boom-schedule-mid"},
+                ),
+            )
+        },
+    ),
+    SseCase(
+        meta=_meta(
+            "SSE-FRAME-006",
+            "SSE-FRAME",
+            "two-scouts-one-non-fatal-error",
+            ("sse-frame",),
+            "Two scouts where the second's own result carries a non-fatal per-scout error "
+            "(process_scout recorded it, the batch itself still completes): 'scout_done''s own "
+            "'errors' field is 1 for that scout, and the batch still reaches a real "
+            "'batch_done' whose 'scouts_with_errors' reflects it -- there is no 'error'-typed "
+            "frame at all for this kind of failure, only the ordinary per-scout fields.",
+            _EVIDENCE_SSE_FRAME,
+        ),
+        expected_by_context={
+            "sse-frame": SseFrameObservation(
+                frame_types=(
+                    "batch_start",
+                    "scout_start",
+                    "scout_done",
+                    "scout_start",
+                    "scout_done",
+                    "batch_done",
+                ),
+                frames=(
+                    {"type": "batch_start", "total": 2},
+                    {"type": "scout_start", "index": 1, "total": 2, "name": "Avery Archer"},
+                    {
+                        "type": "scout_done",
+                        "index": 1,
+                        "total": 2,
+                        "name": "Avery Archer",
+                        "attendee_id": "90000001",
+                        "classes": 2,
+                        "requirements": 3,
+                        "errors": 0,
+                    },
+                    {"type": "scout_start", "index": 2, "total": 2, "name": "Bo Baker"},
+                    {
+                        "type": "scout_done",
+                        "index": 2,
+                        "total": 2,
+                        "name": "Bo Baker",
+                        "attendee_id": "90000002",
+                        "classes": 0,
+                        "requirements": 0,
+                        "errors": 1,
+                    },
+                    {
+                        "type": "batch_done",
+                        "run_id": SSE_FIXED_RUN_ID,
+                        "scouts_processed": 2,
+                        "scouts_with_errors": 1,
+                        "report_url": None,
+                    },
+                ),
+            )
+        },
+    ),
+)
+
+
+# ====================================================================================================
+# SSE-CLEAN-001..004 -- lifecycle cleanup of operations/busy/current_download plus the background
+# asyncio task, for success, worker-exception, terminal-attendee-failure, and client-disconnect.
+# Each scenario reuses the SAME real worker/queue/generator machinery as SSE-FRAME above.
+# ====================================================================================================
+_EVIDENCE_SSE_CLEAN = (
+    "ui/server.py:238-273 the schedule-download worker's try/except/finally, and "
+    "ui/server.py:303-311 operation_events' event_stream() try/finally"
+)
+
+SSE_CLEAN_CASES: tuple[SseCase, ...] = (
+    SseCase(
+        meta=_meta(
+            "SSE-CLEAN-001",
+            "SSE-CLEAN",
+            "success",
+            ("sse-clean",),
+            "After a schedule-download operation's real body_iterator is fully drained to its "
+            "'batch_done' + None sentinel, the operation_id is gone from ui.server.operations, "
+            "busy['schedule-download'] is back to False, current_download is back to {}, and "
+            "the background asyncio task the POST route created has actually finished (not "
+            "merely cancelled).",
+            _EVIDENCE_SSE_CLEAN,
+        ),
+        expected_by_context={
+            "sse-clean": SseCleanObservation(
+                operation_removed=True,
+                busy_reset=True,
+                current_download_cleared=True,
+                task_done=True,
+            )
+        },
+    ),
+    SseCase(
+        meta=_meta(
+            "SSE-CLEAN-002",
+            "SSE-CLEAN",
+            "worker-exception",
+            ("sse-clean",),
+            "After a schedule-download whose async_main raises mid-batch is fully drained (its "
+            "'error' frame followed by the None sentinel), the worker's 'finally' clause still "
+            "runs -- the operation, busy flag, and current_download are cleaned up identically "
+            "to the success case, and the background task still finished (it caught its own "
+            "exception internally; it was never left pending).",
+            _EVIDENCE_SSE_CLEAN,
+        ),
+        expected_by_context={
+            "sse-clean": SseCleanObservation(
+                operation_removed=True,
+                busy_reset=True,
+                current_download_cleared=True,
+                task_done=True,
+            )
+        },
+    ),
+    SseCase(
+        meta=_meta(
+            "SSE-CLEAN-003",
+            "SSE-CLEAN",
+            "terminal-attendee-failure",
+            ("sse-clean",),
+            "After a schedule-download where one scout's own result carries a non-fatal error "
+            "(the batch itself still reaches 'batch_done') is fully drained, cleanup is "
+            "identical to the success case -- a per-scout failure that does not raise out of "
+            "async_main is not distinguished from a fully clean run by any of "
+            "operations/busy/current_download/task state.",
+            _EVIDENCE_SSE_CLEAN,
+        ),
+        expected_by_context={
+            "sse-clean": SseCleanObservation(
+                operation_removed=True,
+                busy_reset=True,
+                current_download_cleared=True,
+                task_done=True,
+            )
+        },
+    ),
+    SseCase(
+        meta=_meta(
+            "SSE-CLEAN-004",
+            "SSE-CLEAN",
+            "client-disconnect",
+            ("sse-clean",),
+            "Closing the body_iterator early (aclose(), simulating a client disconnect) after "
+            "only one frame is consumed removes the operation_id from ui.server.operations "
+            "IMMEDIATELY (the generator's own 'finally' runs on GeneratorExit) -- but the "
+            "background worker task is a SEPARATE asyncio.create_task the disconnect does "
+            "nothing to: it keeps running unattended and only busy/current_download reset, and "
+            "the task itself finish, once IT independently completes afterward. Both facts are "
+            "asserted here: the operation is gone right away, and busy/current_download/task "
+            "state also end up clean once the detached worker finishes on its own.",
+            _EVIDENCE_SSE_CLEAN,
+        ),
+        expected_by_context={
+            "sse-clean": SseCleanObservation(
+                operation_removed=True,
+                busy_reset=True,
+                current_download_cleared=True,
+                task_done=True,
+            )
+        },
+    ),
 )
 
 
@@ -724,4 +1295,8 @@ INTERFACE_CASES: tuple[InterfaceCase, ...] = (
     + INTERFACE_CASES_ROUTE
 )
 
-ALL_INTERFACE_METADATA: tuple[CaseMetadata, ...] = tuple(case.meta for case in INTERFACE_CASES)
+ALL_INTERFACE_METADATA: tuple[CaseMetadata, ...] = (
+    tuple(case.meta for case in INTERFACE_CASES)
+    + tuple(case.meta for case in SSE_FRAME_CASES)
+    + tuple(case.meta for case in SSE_CLEAN_CASES)
+)

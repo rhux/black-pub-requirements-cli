@@ -480,8 +480,20 @@ _INTERFACE_BOUNDARIES: tuple[BoundarySpec, ...] = (
         domain=Domain.INTERFACE,
         required_case_ids=frozenset(
             {f"UI-METHOD-{i:03d}" for i in range(1, 13)}
-            | {f"UI-ROUTE-{i:03d}" for i in range(1, 24)}
+            | {f"UI-ROUTE-{i:03d}" for i in range(1, 31)}
         ),
+    ),
+    BoundarySpec(
+        boundary_id="SSE-B-FRAMES",
+        qualified_name="ui.server.operation_events.event_stream",
+        domain=Domain.INTERFACE,
+        required_case_ids=frozenset({f"SSE-FRAME-{i:03d}" for i in range(1, 7)}),
+    ),
+    BoundarySpec(
+        boundary_id="SSE-B-CLEANUP",
+        qualified_name="ui.server.operation_events / worker (lifecycle cleanup)",
+        domain=Domain.INTERFACE,
+        required_case_ids=frozenset({f"SSE-CLEAN-{i:03d}" for i in range(1, 5)}),
     ),
     BoundarySpec(
         boundary_id="UI-B-SAFE-RUN-ID",

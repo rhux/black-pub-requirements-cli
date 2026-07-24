@@ -797,12 +797,13 @@ _PLATFORM_AXES: tuple[AxisSpec, ...] = (
     ),
 )
 
-# Interface-domain axes (Task 21): ui/server.py's FastAPI app. UI-ROUTE's member set below is a
-# DELIBERATELY PARTIAL 23 of the full Task-21-planned 31: the 8 members requiring a background
-# asyncio.create_task worker to be driven to completion (PDF/schedule "accepted"/"worker-error",
-# events "success"/"disconnect") were not implemented in this delivery -- see the Task 21 report
-# for the explicit accounting. Every member actually declared here IS backed by a real, passing
-# case; nothing below overstates what tests/matrix/cases/interface_cases.py covers.
+# Interface-domain axes (Task 21): ui/server.py's FastAPI app. UI-ROUTE now covers all 30 members:
+# the original 23 whose contract doesn't require draining a background worker, the 6 that do
+# (PDF/schedule "accepted"/"worker-error", events "success"/"disconnect"), plus one
+# INTENTIONAL_CHANGE member (open_report's unvalidated persisted-JSON report_name). SSE-FRAME and
+# SSE-CLEAN characterize the real StreamingResponse.body_iterator's frame sequence and lifecycle
+# cleanup. Every member declared here IS backed by a real, passing case in
+# tests/matrix/cases/interface_cases.py.
 _INTERFACE_AXES: tuple[AxisSpec, ...] = (
     AxisSpec(
         axis_id="UI-IMPORT",
@@ -912,11 +913,45 @@ _INTERFACE_AXES: tuple[AxisSpec, ...] = (
                 "email-corrupt-json",
                 "open-folder-missing",
                 "open-folder-success",
+                "pdf-accepted",
+                "pdf-worker-error",
+                "schedule-accepted",
+                "schedule-worker-error",
+                "events-success",
+                "events-disconnect",
+                "open-report-unvalidated-report-name",
             }
         ),
-        min_focused_cases=23,
+        min_focused_cases=30,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"UI-B-ROUTES"}),
+    ),
+    AxisSpec(
+        axis_id="SSE-FRAME",
+        domain=Domain.INTERFACE,
+        members=frozenset(
+            {
+                "zero-scouts-immediate-done",
+                "single-scout-success",
+                "pause-then-resume",
+                "two-scouts-no-pause",
+                "worker-exception-mid-batch",
+                "two-scouts-one-non-fatal-error",
+            }
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"SSE-B-FRAMES"}),
+    ),
+    AxisSpec(
+        axis_id="SSE-CLEAN",
+        domain=Domain.INTERFACE,
+        members=frozenset(
+            {"success", "worker-exception", "terminal-attendee-failure", "client-disconnect"}
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"SSE-B-CLEANUP"}),
     ),
 )
 
