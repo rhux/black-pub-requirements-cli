@@ -287,26 +287,52 @@ async def test_success_terminal_dom(
         await page.goto(service.base_url + "/")
         await page.wait_for_selector("#scouts-panel:not([hidden])")
 
+        # This scenario's scout_done and batch_done SSE frames are emitted back-to-back with no
+        # synchronization gate between them (unlike STATIC-UI-002's pause/resume, which really
+        # does block on threading.Events), and batch_done's own refreshStatusAndRuns() call
+        # resets every row's badge right after scout_done set it -- so the "classes=3,
+        # requirements=10" success badge is a genuinely transient DOM state, not a resting one.
+        # A live poll (Playwright's page.wait_for_function, whose default polling is tied to
+        # requestAnimationFrame) can race that reset and simply never observe the transient
+        # value if both SSE frames get handled before the poll's next raf tick fires --
+        # reproduced reliably under a full `-m playwright` collection run, where the surrounding
+        # process's larger memory/scheduling footprint shifts that timing enough to lose the
+        # race on (essentially) every run, while a narrow/solo invocation happened to win it.
+        # A MutationObserver installed *before* the click instead records every value the cell
+        # ever held, so the assertion below is immune to that scheduling race: it only cares
+        # that the DOM genuinely passed through the expected state at some point, not that a
+        # live poll caught it in the act.
+        await page.evaluate(
+            "(sel) => { const el = document.querySelector(sel); "
+            "window.__statusCellHistory = [el.innerHTML]; "
+            "new MutationObserver(() => window.__statusCellHistory.push(el.innerHTML))"
+            ".observe(el, {childList: true, subtree: true, characterData: true}); }",
+            _status_cell_selector(0),
+        )
+
         await page.click("#download-btn")
         assert await page.is_disabled("#download-btn")
         assert await page.is_disabled("#reload-pdfs-btn")
         assert await page.is_visible("#pause-resume-btn")
 
-        # Progress/completion badge: driven solely by the scout_done SSE frame, so this is
-        # deterministic (no other writer touches this cell before the terminal reload below).
-        await _wait_for_text(page, _status_cell_selector(0), "classes=3, requirements=10")
-        badge_class = await page.get_attribute(f"{_status_cell_selector(0)} .badge", "class")
-        assert badge_class is not None
-        assert "success" in badge_class
-        progress_width = await page.eval_on_selector(
-            "#download-progress .progress-fill", "el => el.style.width"
-        )
-        assert progress_width == "100%"
-
         # Terminal marker: batch_done's fire-and-forget openReport() call is the very last DOM
         # mutation this run makes, so waiting for its toast text is the deterministic way to
         # know the whole scenario (batch_done -> refreshStatusAndRuns -> openReport) settled.
         await _wait_for_text(page, "#toast", "Opened in your browser.")
+
+        # Progress/completion badge: assert against the recorded history (see above), not live
+        # DOM -- by this point batch_done's reload has already put the row back to pending.
+        status_cell_history: list[str] = await page.evaluate(
+            "() => window.__statusCellHistory || []"
+        )
+        assert any(
+            "classes=3, requirements=10" in snapshot and "success" in snapshot
+            for snapshot in status_cell_history
+        ), status_cell_history
+        progress_width = await page.eval_on_selector(
+            "#download-progress .progress-fill", "el => el.style.width"
+        )
+        assert progress_width == "100%"
 
         assert not await page.is_disabled("#download-btn")
         assert not await page.is_disabled("#reload-pdfs-btn")
