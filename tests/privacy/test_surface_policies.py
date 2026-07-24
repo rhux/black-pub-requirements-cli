@@ -11,6 +11,8 @@ No test writes outside ``tmp_path`` and none performs real network I/O.
 
 from __future__ import annotations
 
+import csv
+import io
 from pathlib import Path
 
 import pytest
@@ -71,6 +73,58 @@ def test_priv_surface_forbidden_sentinels_declared(surface_id: str) -> None:
     # it must never emit.
     policy = _SURFACE_ROWS[surface_id]
     assert policy.forbidden_sentinels
+
+
+def test_priv_surface_input_private_scouts_csv_allows_only_its_three_fields(
+    tmp_path: Path,
+) -> None:
+    """PRIV-SURFACE input-private: pdf_to_scouts.py's real extraction (value_after_label) and
+    real writer (write_attendees_csv) together produce scouts.csv's downstream-facing contract
+    (CLAUDE.md: "Output CSV columns Attendee Name / Registrant Type / QR Code Contents are the
+    exact contract scout_schedule_cli.py expects") -- an absolute filesystem path appearing
+    elsewhere on the parsed PDF page, or carried on an audit-only field, never leaks into it."""
+    import pdf_to_scouts
+
+    lines = [
+        SENTINEL_ABSOLUTE_PATH,  # incidental PDF page text; must never be captured as a value
+        "Attendee Information",
+        "Avery Example",
+        "Registrant",
+        "Youth",
+    ]
+    attendee_name = pdf_to_scouts.value_after_label(lines, "Attendee Information")
+    registrant_type = pdf_to_scouts.value_after_label(lines, "Registrant")
+    assert attendee_name == "Avery Example"
+    assert registrant_type == "Youth"
+    assert SENTINEL_ABSOLUTE_PATH not in attendee_name
+    assert SENTINEL_ABSOLUTE_PATH not in registrant_type
+
+    attendee = pdf_to_scouts.ExtractedAttendee(
+        attendee_name=attendee_name,
+        name_as_printed=attendee_name,
+        registrant_type=registrant_type,
+        qr_data="https://scoutingevent.com/mobile/checkin?t=TESTTOKEN_X",
+        source_pdf=SENTINEL_ABSOLUTE_PATH,  # audit-only column, never part of the 3-field contract
+        pdf_page=1,
+        qr_decode_method="embedded",
+    )
+    csv_path = tmp_path / "scouts.csv"
+    pdf_to_scouts.write_attendees_csv(csv_path, [attendee])
+    text = csv_path.read_text(encoding="utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    rows = list(reader)
+    assert len(rows) == 1
+    row = rows[0]
+
+    policy = _SURFACE_ROWS["input-private"]
+    assert policy.allowed_fields == frozenset(
+        {"attendee_name", "qr_code_contents", "registrant_type"}
+    )
+    assert row["Attendee Name"] == "Avery Example"
+    assert row["Registrant Type"] == "Youth"
+    assert row["QR Code Contents"] == "https://scoutingevent.com/mobile/checkin?t=TESTTOKEN_X"
+    for field in (row["Attendee Name"], row["Registrant Type"], row["QR Code Contents"]):
+        assert SENTINEL_ABSOLUTE_PATH not in field
 
 
 def test_priv_surface_operational_private_forbids_upstream_id_and_session(tmp_path: Path) -> None:
@@ -306,9 +360,10 @@ def test_priv_egress_sse() -> None:
 
 
 def test_priv_egress_diagnostics(tmp_path: Path) -> None:
-    """tools/check_private_data.py's own scanner reports the offending FILE and a REASON only --
+    """tools/check_private_data.py's own REAL scanner (scan_patterns, the same function
+    tests/privacy/test_fixture_hygiene.py drives) reports the offending FILE and a REASON only --
     never the matched value itself -- so the diagnostic channel cannot leak what it found."""
-    from tools.check_private_data import LIVE_TOKEN
+    from tools.check_private_data import scan_patterns
 
     # Built dynamically so this file's own source never contains a literal live-looking token
     # (otherwise the private-data gate would flag its own source).
@@ -317,11 +372,25 @@ def test_priv_egress_diagnostics(tmp_path: Path) -> None:
     probe.write_text(
         f"https://scoutingevent.com/mobile/checkin?t={live_looking_token}", encoding="utf-8"
     )
-    matches = LIVE_TOKEN.findall(probe.read_text(encoding="utf-8"))
-    assert matches == [live_looking_token]
+    findings = scan_patterns([tmp_path])
+    assert findings == [(str(probe), "live-qr-token")]
     # The finding format itself (path, reason) never embeds the matched token text.
-    finding = (str(probe), "live-qr-token")
-    assert live_looking_token not in finding[1]
+    for path, reason in findings:
+        assert live_looking_token not in path
+        assert live_looking_token not in reason
+
+
+def test_priv_egress_diagnostics_excludes_testtoken_prefix(tmp_path: Path) -> None:
+    """The real scanner's TESTTOKEN exclusion (tools/check_private_data.py's
+    `if not token.startswith("TESTTOKEN")`) means a TESTTOKEN_-prefixed value -- the exact
+    convention this test suite's own fixtures use -- is never flagged as a live token."""
+    from tools.check_private_data import scan_patterns
+
+    probe = tmp_path / "probe.txt"
+    probe.write_text(
+        "https://scoutingevent.com/mobile/checkin?t=TESTTOKEN_synthetic123", encoding="utf-8"
+    )
+    assert scan_patterns([tmp_path]) == []
 
 
 # --------------------------------------------------------------------------------------------

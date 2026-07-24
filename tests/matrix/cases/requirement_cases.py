@@ -122,6 +122,18 @@ def _leaf_row_projection(
 # look like an ordinary numbered leaf (a digit top-level plus a lettered/numbered subpart) also
 # get ``html_consumer``/``email_consumer`` contexts; bare top-level numbers, the blank shape, and
 # "Note."-style label rows do not (they read as section headers or blanks, not actionable leaves).
+#
+# Shapes 14 (``"#(a)"``) and 24 (``"#B."``) are a documented EXCEPTION to that rule of thumb, not
+# an application of it: requirement_path produces a structurally IDENTICAL result for both (a
+# single non-digit token, no digit top-level, current_top_level stays None -- verified by tracing
+# scout_schedule_cli.py:701-702/709-710), so nothing in the current code actually distinguishes
+# them. 14 is included in ``_SHAPE_ALL4`` and 24 is not purely as a curatorial judgment call about
+# which numbering convention plausibly reads as a real actionable sub-item on an actual merit
+# badge worksheet: a parenthesized lowercase letter ("(a)") is the standard printed marker for a
+# sub-item, while a bare capitalized letter followed by a period ("B.") more commonly reads as a
+# section-header label (like "A. Materials", "B. Overview"). This distinction is NOT enforced by
+# any code under test here -- no test currently depends on it -- it only affects which shapes this
+# catalog happens to also exercise through html_consumer/email_consumer.
 # fmt: off
 _SHAPE_PATH: tuple[tuple[str, ...], ...] = (
     ("3", "a"), ("3", "a"), ("3",), ("3", "a"), ("3", "a"), ("3",), ("3",),
