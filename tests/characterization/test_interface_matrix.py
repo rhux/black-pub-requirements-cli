@@ -581,6 +581,13 @@ class LegacyInterfaceRunner:
     # -- sse-frame / sse-clean (bespoke per case_id, over the SseCase catalog) ------------------
 
     async def _ctx_sse_frame(self, case: SseCase, root: Path) -> object:
+        # Not a tautology: _split_frame_case feeds this same case's expected frame data into
+        # the FAKE async_main as scripted stimulus, and the assertion below compares against
+        # that same case's expected frames -- but in between, the scripted frames drive the
+        # real asyncio.Queue/generator/JSON-serialization pipeline end-to-end. A bug in frame
+        # ordering, field mapping (e.g. swapping scouts_processed/scouts_with_errors), or
+        # serialization would still cause a mismatch here, even though the frame *content*
+        # originates from this same case data.
         async with load_legacy_ui(root / "data") as module, _client(module) as client:
             operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, case)
             await asyncio.wait_for(task, timeout=5)

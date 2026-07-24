@@ -23,7 +23,7 @@ from tests.matrix.cases.bootstrap_cases import (
     BootstrapPathCase,
     BootstrapSyncCase,
 )
-from tests.matrix.pytest_support import execution_params
+from tests.matrix.pytest_support import assert_platform_domain_registry_valid, execution_params
 
 
 # ==================================================================================================
@@ -262,23 +262,8 @@ def test_boot_sync_execution(
 
 
 def test_bootstrap_registry_is_structurally_valid() -> None:
-    from tests.matrix.axes import AXES
-    from tests.matrix.boundaries import BOUNDARIES
-    from tests.matrix.cases.bootstrap_cases import ALL_BOOTSTRAP_METADATA
-    from tests.matrix.cases.desktop_cases import ALL_DESKTOP_METADATA
-    from tests.matrix.cases.platform_cases import ALL_PLATFORM_METADATA
-    from tests.matrix.model import Domain
-    from tests.matrix.policies import POLICIES
-    from tests.matrix.registry import validate_registry
-
-    platform_axes = [axis for axis in AXES if axis.domain is Domain.PLATFORM]
-    platform_boundaries = [b for b in BOUNDARIES if b.domain is Domain.PLATFORM]
-
-    errors = validate_registry(
-        ALL_PLATFORM_METADATA + ALL_DESKTOP_METADATA + ALL_BOOTSTRAP_METADATA,
-        platform_axes,
-        platform_boundaries,
-        [],
-        list(POLICIES),
-    )
-    assert errors == ()
+    # See tests/matrix/pytest_support.py's assert_platform_domain_registry_valid docstring:
+    # this shared body is byte-for-byte identical to the equivalent test in
+    # test_platform_matrix.py/test_desktop_matrix.py, kept as a thin per-file wrapper here so
+    # this catalog stays covered even if one of the other two files is ever deleted.
+    assert_platform_domain_registry_valid()

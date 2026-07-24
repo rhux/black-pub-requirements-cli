@@ -49,24 +49,33 @@ async def load_legacy_ui(data_root: Path) -> AsyncIterator[ModuleType]:
         module.current_download.clear()
         yield module
     finally:
-        if module is not None:
-            # Cancel and await any worker() tasks this test's requests scheduled via
-            # asyncio.create_task, so nothing leaks into a later test/event loop.
-            after_tasks = {task for task in asyncio.all_tasks() if not task.done()}
-            spawned = after_tasks - before_tasks
-            for task in spawned:
-                task.cancel()
-            for task in spawned:
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await task
+        try:
+            if module is not None:
+                # Cancel and await any worker() tasks this test's requests scheduled via
+                # asyncio.create_task, so nothing leaks into a later test/event loop.
+                after_tasks = {task for task in asyncio.all_tasks() if not task.done()}
+                spawned = after_tasks - before_tasks
+                for task in spawned:
+                    task.cancel()
+                for task in spawned:
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await task
 
-            assert module.operations == {}, "operations leaked across load_legacy_ui"
-            assert module.current_download == {}, "current_download leaked across load_legacy_ui"
-            assert module.busy == {"pdf-extract": False, "schedule-download": False}, (
-                "busy flags leaked across load_legacy_ui"
-            )
-        sys.modules.pop("ui.server", None)
-        if old is None:
-            os.environ.pop(DATA_DIR_ENV, None)
-        else:
-            os.environ[DATA_DIR_ENV] = old
+                assert module.operations == {}, "operations leaked across load_legacy_ui"
+                assert module.current_download == {}, (
+                    "current_download leaked across load_legacy_ui"
+                )
+                assert module.busy == {"pdf-extract": False, "schedule-download": False}, (
+                    "busy flags leaked across load_legacy_ui"
+                )
+        finally:
+            # This cleanup MUST run even if the leak-detection asserts above fired -- an
+            # AssertionError here means a real leak was caught (exactly what this harness
+            # exists to detect), and letting it skip the module-cache eviction / env-var
+            # restore would leak stale module/env state into every later test in the session,
+            # on top of the original failure.
+            sys.modules.pop("ui.server", None)
+            if old is None:
+                os.environ.pop(DATA_DIR_ENV, None)
+            else:
+                os.environ[DATA_DIR_ENV] = old

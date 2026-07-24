@@ -22,7 +22,7 @@ from tests.matrix.cases.platform_cases import (
     PLATFORM_CASES_WIN,
     PlatformCase,
 )
-from tests.matrix.pytest_support import execution_params
+from tests.matrix.pytest_support import assert_platform_domain_registry_valid, execution_params
 
 
 class LegacyPlatformRunner:
@@ -65,24 +65,7 @@ def test_platform_registry_is_structurally_valid() -> None:
     # DESK-*/BOOT-* cases (tests/matrix/cases/desktop_cases.py, bootstrap_cases.py -- see their
     # module docstrings for the documented domain-reuse reasoning), so this domain-scoped
     # registry check must pull all three catalogs in together, exactly as
-    # test_interface_matrix.py does for its own multi-catalog INTERFACE/PDF domain check.
-    from tests.matrix.axes import AXES
-    from tests.matrix.boundaries import BOUNDARIES
-    from tests.matrix.cases.bootstrap_cases import ALL_BOOTSTRAP_METADATA
-    from tests.matrix.cases.desktop_cases import ALL_DESKTOP_METADATA
-    from tests.matrix.cases.platform_cases import ALL_PLATFORM_METADATA
-    from tests.matrix.model import Domain
-    from tests.matrix.policies import POLICIES
-    from tests.matrix.registry import validate_registry
-
-    plat_axes = [axis for axis in AXES if axis.domain is Domain.PLATFORM]
-    plat_boundaries = [b for b in BOUNDARIES if b.domain is Domain.PLATFORM]
-
-    errors = validate_registry(
-        ALL_PLATFORM_METADATA + ALL_DESKTOP_METADATA + ALL_BOOTSTRAP_METADATA,
-        plat_axes,
-        plat_boundaries,
-        [],
-        list(POLICIES),
-    )
-    assert errors == ()
+    # test_interface_matrix.py does for its own multi-catalog INTERFACE/PDF domain check. The
+    # shared validation body lives in tests/matrix/pytest_support.py since it is byte-for-byte
+    # identical to the equivalent test in test_desktop_matrix.py/test_bootstrap_matrix.py.
+    assert_platform_domain_registry_valid()
