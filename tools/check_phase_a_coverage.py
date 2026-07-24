@@ -101,6 +101,26 @@ def compute_area_coverage(coverage_data: dict, areas: tuple) -> dict[str, AreaCo
     return results
 
 
+def check_missing_files(areas: tuple, coverage_data: dict) -> list[str]:
+    """Every file listed in a CoverageAreaSpec.files must appear as a key in the coverage
+    JSON's ``files`` dict. This project's coverage config uses ``include =`` (not ``source =``)
+    in pyproject.toml, so a file that's never imported/executed by any test simply never
+    appears in the JSON at all -- not as 0% covered, just absent (a well-known coverage.py
+    behavior). Silently skipping such files in ``compute_area_coverage`` would report the area
+    as perfectly (100%) covered instead of catching the regression, so this must fail loudly
+    instead. ALWAYS enforced, like ``check_stale_exclusions``."""
+    problems: list[str] = []
+    files = coverage_data.get("files", {})
+    for area in areas:
+        for file_name in sorted(area.files):
+            if file_name not in files:
+                problems.append(
+                    f"file never appears in coverage report: {file_name} (area={area.area_id}) "
+                    "-- it was likely never imported/executed by any test"
+                )
+    return sorted(problems)
+
+
 def _area_for_file(areas: tuple, file_name: str) -> str | None:
     for area in areas:
         if file_name in area.files:
@@ -264,9 +284,13 @@ def main(argv: list[str] | None = None) -> int:
             f"branches={coverage.branch_pct:.2f}%"
         )
 
+    # ALWAYS enforced: a file listed in an area that never shows up in the coverage report at
+    # all (never imported/executed by any test) must fail loudly, not silently report 100%.
+    hard_problems = check_missing_files(areas, coverage_data)
+
     # ALWAYS enforced: a stale exclusion (its gap already closed) is a failure regardless of
     # --require-complete, so exclusions never silently accumulate as coverage improves.
-    hard_problems = check_stale_exclusions(exclusions, coverage_by_area)
+    hard_problems += check_stale_exclusions(exclusions, coverage_by_area)
 
     if args.baseline is not None:
         floors = _floors_from_baseline(args.baseline)
