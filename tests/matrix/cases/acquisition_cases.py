@@ -322,7 +322,9 @@ _ID_CASES: tuple[AcquisitionCase, ...] = (
         NAME_A,
         URL_A,
         (_sched("", "foo=bar"),),
-        AcquisitionObservation(result=(("form", (("foo", "bar"),)), ("is_schedule_response", False))),
+        AcquisitionObservation(
+            result=(("form", (("foo", "bar"),)), ("is_schedule_response", False))
+        ),
     ),
     AcquisitionCase(
         _meta(
@@ -971,8 +973,7 @@ _DELAY_CASES: tuple[AcquisitionCase, ...] = (
             "ACQ-DELAY",
             "zero-delay",
             "process",
-            "request_delay_ms=0 skips the inter-class wait entirely (the guard is > 0, not "
-            ">= 0).",
+            "request_delay_ms=0 skips the inter-class wait entirely (the guard is > 0, not >= 0).",
             "scout_schedule_cli.process_scout line 624",
         ),
         NAME_A,
@@ -1106,8 +1107,7 @@ _CLEAN_CASES: tuple[AcquisitionCase, ...] = (
             "ACQ-CLEAN",
             "success",
             "process",
-            "On a clean success the browser context is closed and the whole script is "
-            "consumed.",
+            "On a clean success the browser context is closed and the whole script is consumed.",
             "scout_schedule_cli.process_scout lines 629-630 finally: await context.close()",
         ),
         NAME_A,
@@ -1682,8 +1682,7 @@ NET_WIRE_METADATA: tuple[CaseMetadata, ...] = (
         "issues its fetch() calls directly from in-page Playwright code, never through a "
         "gateway that could consult assert_egress_allowed.",
         contexts=(),
-        evidence_reference="scout_schedule_cli.post_requirement lines 454-486 (no gateway "
-        "seam)",
+        evidence_reference="scout_schedule_cli.post_requirement lines 454-486 (no gateway seam)",
         target_owner="Slice 2",
         target_observation="Slice 2 will extract an HTTP gateway that calls "
         "assert_egress_allowed(host) before issuing any request.",

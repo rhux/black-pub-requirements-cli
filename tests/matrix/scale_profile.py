@@ -54,9 +54,7 @@ def pairing_order(profile_version: int, seed: str, axis_id: str, row_count: int)
     ``row_count`` rows: ``sorted(range(row_count), key=sha256(f"{version}:{seed}:{axis}:{i}"))``.
     Never copies a private row or string -- operates purely on integer row indices."""
     indices = list(range(row_count))
-    indices.sort(
-        key=lambda i: sha256(f"{profile_version}:{seed}:{axis_id}:{i}".encode()).digest()
-    )
+    indices.sort(key=lambda i: sha256(f"{profile_version}:{seed}:{axis_id}:{i}".encode()).digest())
     return tuple(indices)
 
 

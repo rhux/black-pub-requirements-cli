@@ -126,9 +126,7 @@ class LegacyRequirementRunner:
 
 
 @pytest.mark.parametrize(("case", "context_id"), execution_params(REQUIREMENT_CASES))
-def test_requirement_execution(
-    case: RequirementCase, context_id: str, tmp_path: Path
-) -> None:
+def test_requirement_execution(case: RequirementCase, context_id: str, tmp_path: Path) -> None:
     before = deepcopy(case.rows)
     observed = LegacyRequirementRunner(context_id).run(case, root=tmp_path)
     assert observed == case.expected_by_context[context_id]

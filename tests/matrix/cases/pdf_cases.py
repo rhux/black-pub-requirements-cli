@@ -298,14 +298,10 @@ _ID_CASES: tuple[PdfCase, ...] = (
         (),
         PdfObservation(
             attendees=(
-                ExtractedAttendeeObservation(
-                    NAME_A, NAME_A, "Youth", "", "PDF-ID-004.pdf", 1, ""
-                ),
+                ExtractedAttendeeObservation(NAME_A, NAME_A, "Youth", "", "PDF-ID-004.pdf", 1, ""),
             ),
             errors=(
-                ExtractionErrorObservation(
-                    "PDF-ID-004.pdf", 1, NAME_A, "Youth", "Missing QR code"
-                ),
+                ExtractionErrorObservation("PDF-ID-004.pdf", 1, NAME_A, "Youth", "Missing QR code"),
             ),
         ),
     ),
@@ -322,9 +318,7 @@ _ID_CASES: tuple[PdfCase, ...] = (
         (),
         PdfObservation(
             attendees=(
-                ExtractedAttendeeObservation(
-                    "", "", "", URL_A, "PDF-ID-005.pdf", 1, _EMBEDDED
-                ),
+                ExtractedAttendeeObservation("", "", "", URL_A, "PDF-ID-005.pdf", 1, _EMBEDDED),
             ),
             errors=(
                 ExtractionErrorObservation(
@@ -614,14 +608,10 @@ _QR_CASES: tuple[PdfCase, ...] = (
         (),
         PdfObservation(
             attendees=(
-                ExtractedAttendeeObservation(
-                    NAME_A, NAME_A, "Youth", "", "PDF-QR-006.pdf", 1, ""
-                ),
+                ExtractedAttendeeObservation(NAME_A, NAME_A, "Youth", "", "PDF-QR-006.pdf", 1, ""),
             ),
             errors=(
-                ExtractionErrorObservation(
-                    "PDF-QR-006.pdf", 1, NAME_A, "Youth", "Missing QR code"
-                ),
+                ExtractionErrorObservation("PDF-QR-006.pdf", 1, NAME_A, "Youth", "Missing QR code"),
             ),
         ),
     ),
@@ -675,12 +665,8 @@ _PAGE_CASES: tuple[PdfCase, ...] = (
         (),
         PdfObservation(
             attendees=(
-                ExtractedAttendeeObservation(
-                    NAME_B, NAME_B, "Youth", URL_B, "a.pdf", 1, _EMBEDDED
-                ),
-                ExtractedAttendeeObservation(
-                    NAME_A, NAME_A, "Youth", URL_A, "b.pdf", 1, _EMBEDDED
-                ),
+                ExtractedAttendeeObservation(NAME_B, NAME_B, "Youth", URL_B, "a.pdf", 1, _EMBEDDED),
+                ExtractedAttendeeObservation(NAME_A, NAME_A, "Youth", URL_A, "b.pdf", 1, _EMBEDDED),
             ),
             relative_files=("a.pdf", "b.pdf", "out.csv"),
         ),

@@ -84,18 +84,14 @@ class LegacyInputRunner:
             message = str(exc).replace(str(path), "<input>")
             return InputObservation(exception_type=type(exc).__name__, message=message)
 
-        records = tuple(
-            (scout.name, scout.url, scout.registrant_type) for scout in result
-        )
+        records = tuple((scout.name, scout.url, scout.registrant_type) for scout in result)
         return InputObservation(records=records)
 
     def _run_import(self, value: InputSpec) -> InputObservation:
         blocked = _IMPORT_PROFILE_BLOCKS[value.profile]
         probe = run_import_probe(value.profile, _LEGACY_MODULE_PATH, blocked)
         imported = ",".join(probe.imported_modules)
-        message = (
-            f"profile={probe.profile} returncode={probe.returncode} imported={imported}"
-        )
+        message = f"profile={probe.profile} returncode={probe.returncode} imported={imported}"
         return InputObservation(exception_type=probe.exception_type, message=message)
 
 

@@ -167,7 +167,10 @@ def _requirement_row(**overrides: object) -> dict[str, object]:
 ARTIFACT_CASES_SCHEMA: tuple[ArtifactCase, ...] = (
     ArtifactCase(
         meta=_meta(
-            "ART-SCHEMA-001", "ART-SCHEMA", "scouts-json", "schema",
+            "ART-SCHEMA-001",
+            "ART-SCHEMA",
+            "scouts-json",
+            "schema",
             "scouts.json is a JSON array of {name, qr_url, attendee_id, classes, requirements, "
             "errors} nested dicts -- one entry per ScoutResult, written with indent=2 via "
             "atomic_write_text(..., encoding='utf-8').",
@@ -189,7 +192,10 @@ ARTIFACT_CASES_SCHEMA: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-SCHEMA-002", "ART-SCHEMA", "classes-csv", "schema",
+            "ART-SCHEMA-002",
+            "ART-SCHEMA",
+            "classes-csv",
+            "schema",
             "classes.csv's header is exactly ClassRecord.__dataclass_fields__ in declaration "
             "order, one data row per ClassRecord, written via write_csv (utf-8-sig, CRLF from "
             "csv.DictWriter's default \\r\\n line terminator).",
@@ -200,7 +206,10 @@ ARTIFACT_CASES_SCHEMA: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-SCHEMA-003", "ART-SCHEMA", "requirements-csv", "schema",
+            "ART-SCHEMA-003",
+            "ART-SCHEMA",
+            "requirements-csv",
+            "schema",
             "requirements.csv's header is exactly RequirementRecord.__dataclass_fields__ in "
             "declaration order, one data row per RequirementRecord.",
             "scout_schedule_cli.py:99-112 RequirementRecord; :663-669 write_csv",
@@ -210,7 +219,10 @@ ARTIFACT_CASES_SCHEMA: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-SCHEMA-004", "ART-SCHEMA", "errors-csv", "schema",
+            "ART-SCHEMA-004",
+            "ART-SCHEMA",
+            "errors-csv",
+            "schema",
             "errors.csv's header is exactly ['scout_name', 'attendee_id', 'error'], one row per "
             "ScoutResult.errors entry.",
             "scout_schedule_cli.py:1762-1768 error_rows/error_writer",
@@ -225,7 +237,10 @@ ARTIFACT_CASES_SCHEMA: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-SCHEMA-005", "ART-SCHEMA", "summary-json", "schema",
+            "ART-SCHEMA-005",
+            "ART-SCHEMA",
+            "summary-json",
+            "schema",
             "summary.json has the exact key set {scouts_processed, scouts_with_errors, classes, "
             "requirements, generated_at_local, generated_at_iso, html_report, "
             "email_report_dir}.",
@@ -236,18 +251,30 @@ ARTIFACT_CASES_SCHEMA: tuple[ArtifactCase, ...] = (
             "schema": (
                 frozenset(
                     {
-                        "scouts_processed", "scouts_with_errors", "classes", "requirements",
-                        "generated_at_local", "generated_at_iso", "html_report",
+                        "scouts_processed",
+                        "scouts_with_errors",
+                        "classes",
+                        "requirements",
+                        "generated_at_local",
+                        "generated_at_iso",
+                        "html_report",
                         "email_report_dir",
                     }
                 ),
-                1, 1, 1, "report.html", None,
+                1,
+                1,
+                1,
+                "report.html",
+                None,
             )
         },
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-SCHEMA-006", "ART-SCHEMA", "report-data", "schema",
+            "ART-SCHEMA-006",
+            "ART-SCHEMA",
+            "report-data",
+            "schema",
             "The JSON embedded in the HTML report (inside <script id='report-data'>) has the "
             "exact key set {generated_at_local, generated_at_iso, run_id, scouts, classes, "
             "requirements, errors} and no residual __REPORT_DATA__ placeholder.",
@@ -259,17 +286,26 @@ ARTIFACT_CASES_SCHEMA: tuple[ArtifactCase, ...] = (
                 True,
                 frozenset(
                     {
-                        "generated_at_local", "generated_at_iso", "run_id", "scouts", "classes",
-                        "requirements", "errors",
+                        "generated_at_local",
+                        "generated_at_iso",
+                        "run_id",
+                        "scouts",
+                        "classes",
+                        "requirements",
+                        "errors",
                     }
                 ),
-                1, 1,
+                1,
+                1,
             )
         },
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-SCHEMA-007", "ART-SCHEMA", "email-csv", "schema",
+            "ART-SCHEMA-007",
+            "ART-SCHEMA",
+            "email-csv",
+            "schema",
             "emails/missing_requirements.csv's header is exactly ['scout_name', 'attendee_id', "
             "'status', 'merit_badge_count', 'missing_requirement_count', 'subject', "
             "'body_text', 'body_html'], one row per scout regardless of status.",
@@ -279,16 +315,26 @@ ARTIFACT_CASES_SCHEMA: tuple[ArtifactCase, ...] = (
         expected_by_context={
             "schema": (
                 (
-                    "scout_name", "attendee_id", "status", "merit_badge_count",
-                    "missing_requirement_count", "subject", "body_text", "body_html",
+                    "scout_name",
+                    "attendee_id",
+                    "status",
+                    "merit_badge_count",
+                    "missing_requirement_count",
+                    "subject",
+                    "body_text",
+                    "body_html",
                 ),
-                1, "missing_requirements",
+                1,
+                "missing_requirements",
             )
         },
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-SCHEMA-008", "ART-SCHEMA", "email-text-html", "schema",
+            "ART-SCHEMA-008",
+            "ART-SCHEMA",
+            "email-text-html",
+            "schema",
             "For a scout with missing requirements, write_email_reports writes BOTH "
             "emails/<slug>.txt (utf-8, no BOM) and emails/<slug>.html (utf-8, no BOM) using the "
             "same attendee_filename_stem as the raw/ audit files.",
@@ -315,66 +361,69 @@ ARTIFACT_CASES_SCHEMA: tuple[ArtifactCase, ...] = (
 ARTIFACT_CASES_HTML: tuple[ArtifactCase, ...] = (
     ArtifactCase(
         meta=_meta(
-            "ART-HTML-001", "ART-HTML", "xss-sentinel", "html",
+            "ART-HTML-001",
+            "ART-HTML",
+            "xss-sentinel",
+            "html",
             "A description containing '<img src=x onerror=alert(1)>' embedded exactly once: "
             "the '<'/'>' characters must be escaped to \\u003c/\\u003e in the embedded text so "
-            "the payload cannot break out of the <script type=\"application/json\"> block, "
+            'the payload cannot break out of the <script type="application/json"> block, '
             "while json.loads still recovers the original literal string.",
             _EVIDENCE_JSON_FOR_HTML,
         ),
-        input_rows=(
-            _requirement_row(description="<img src=x onerror=alert(1)>"),
-        ),
-        expected_by_context={
-            "html": (True, True, True, None, None, None, None, None, None, True)
-        },
+        input_rows=(_requirement_row(description="<img src=x onerror=alert(1)>"),),
+        expected_by_context={"html": (True, True, True, None, None, None, None, None, None, True)},
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-HTML-002", "ART-HTML", "script-close-tag", "html",
+            "ART-HTML-002",
+            "ART-HTML",
+            "script-close-tag",
+            "html",
             "A description containing the literal string '</script>': the embedded text must "
             "never contain that literal 4-character sequence 'so the HTML page's real "
-            "<script id=\"report-data\"> block cannot be closed early by embedded data.",
+            '<script id="report-data"> block cannot be closed early by embedded data.',
             _EVIDENCE_JSON_FOR_HTML,
         ),
         input_rows=(
             _requirement_row(description="close it here: </script><script>evil()</script>"),
         ),
-        expected_by_context={
-            "html": (True, True, True, None, None, None, None, None, None, True)
-        },
+        expected_by_context={"html": (True, True, True, None, None, None, None, None, None, True)},
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-HTML-003", "ART-HTML", "angle-amp", "html",
+            "ART-HTML-003",
+            "ART-HTML",
+            "angle-amp",
+            "html",
             "A description containing '<', '>', and '&' together: all three must be escaped in "
             "the embedded text and recovered exactly by json.loads.",
             _EVIDENCE_JSON_FOR_HTML,
         ),
         input_rows=(_requirement_row(description="A & B <C> D"),),
-        expected_by_context={
-            "html": (True, True, True, True, None, None, None, None, None, True)
-        },
+        expected_by_context={"html": (True, True, True, True, None, None, None, None, None, True)},
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-HTML-004", "ART-HTML", "line-para-separators", "html",
+            "ART-HTML-004",
+            "ART-HTML",
+            "line-para-separators",
+            "html",
             "A description containing U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR): "
             "both are valid inside a JSON string but invalid inside a raw JavaScript string "
             "literal, so json_for_html escapes them to \\u2028/\\u2029; json.loads still "
             "recovers the original raw characters.",
             _EVIDENCE_JSON_FOR_HTML,
         ),
-        input_rows=(
-            _requirement_row(description="line one line two paragraph two"),
-        ),
-        expected_by_context={
-            "html": (True, None, None, None, True, True, True, True, None, True)
-        },
+        input_rows=(_requirement_row(description="line one line two paragraph two"),),
+        expected_by_context={"html": (True, None, None, None, True, True, True, True, None, True)},
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-HTML-005", "ART-HTML", "non-ascii-unicode", "html",
+            "ART-HTML-005",
+            "ART-HTML",
+            "non-ascii-unicode",
+            "html",
             "A description containing non-ASCII Unicode (accented Latin, CJK, and an emoji): "
             "json_for_html calls json.dumps(..., ensure_ascii=False), so these characters "
             "appear LITERALLY (not as \\uXXXX escapes) in the embedded text, and still "
@@ -382,9 +431,7 @@ ARTIFACT_CASES_HTML: tuple[ArtifactCase, ...] = (
             _EVIDENCE_JSON_FOR_HTML,
         ),
         input_rows=(_requirement_row(description="Café 徽章 \U0001f9ed"),),
-        expected_by_context={
-            "html": (True, None, None, None, None, None, None, None, True, True)
-        },
+        expected_by_context={"html": (True, None, None, None, None, None, None, None, True, True)},
     ),
 )
 
@@ -402,7 +449,10 @@ ARTIFACT_CASES_HTML: tuple[ArtifactCase, ...] = (
 ARTIFACT_CASES_EMAIL: tuple[ArtifactCase, ...] = (
     ArtifactCase(
         meta=_meta(
-            "ART-EMAIL-001", "ART-EMAIL", "missing-requirements", "email",
+            "ART-EMAIL-001",
+            "ART-EMAIL",
+            "missing-requirements",
+            "email",
             "A scout with one incomplete actionable leaf gets status 'missing_requirements' and "
             "BOTH a .txt and .html file are written under emails/.",
             _EVIDENCE_EMAIL,
@@ -412,7 +462,10 @@ ARTIFACT_CASES_EMAIL: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-EMAIL-002", "ART-EMAIL", "all-complete", "email",
+            "ART-EMAIL-002",
+            "ART-EMAIL",
+            "all-complete",
+            "email",
             "A scout whose only requirement is completed gets status 'all_complete' and NO "
             ".txt/.html files are written (missing_count == 0 skips the write at "
             "scout_schedule_cli.py:1020-1024).",
@@ -423,7 +476,10 @@ ARTIFACT_CASES_EMAIL: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-EMAIL-003", "ART-EMAIL", "no-data", "email",
+            "ART-EMAIL-003",
+            "ART-EMAIL",
+            "no-data",
+            "email",
             "A scout with no requirements at all but a recorded error gets status "
             "'no_data_scraped' (the 'elif not scout.get(\"requirements\") and "
             "scout.get(\"errors\")' branch), not 'all_complete'.",
@@ -434,7 +490,10 @@ ARTIFACT_CASES_EMAIL: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-EMAIL-004", "ART-EMAIL", "same-name-disambiguation", "email",
+            "ART-EMAIL-004",
+            "ART-EMAIL",
+            "same-name-disambiguation",
+            "email",
             "Two DIFFERENT attendees (different attendee_id) sharing the exact same display "
             "name, both with missing requirements: attendee_filename_stem's per-run UUID makes "
             "their two .txt/.html filenames distinct even though the name-slug portion is "
@@ -470,7 +529,10 @@ ARTIFACT_CASES_EMAIL: tuple[ArtifactCase, ...] = (
 ARTIFACT_CASES_NAME: tuple[ArtifactCase, ...] = (
     ArtifactCase(
         meta=_meta(
-            "ART-NAME-001", "ART-NAME", "path-traversal", "filename",
+            "ART-NAME-001",
+            "ART-NAME",
+            "path-traversal",
+            "filename",
             "safe_slug('../../etc/passwd') collapses every run of non [A-Za-z0-9] characters "
             "(including '.' and '/') to a single '-', so the traversal sequence cannot survive "
             "into the filename: the result is 'etc-passwd', not a path.",
@@ -481,7 +543,10 @@ ARTIFACT_CASES_NAME: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-NAME-002", "ART-NAME", "absolute-path", "filename",
+            "ART-NAME-002",
+            "ART-NAME",
+            "absolute-path",
+            "filename",
             "safe_slug('/etc/shadow') collapses the leading '/' the same way, producing "
             "'etc-shadow' -- never an absolute path.",
             _EVIDENCE_FILENAME,
@@ -491,7 +556,10 @@ ARTIFACT_CASES_NAME: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-NAME-003", "ART-NAME", "unicode-name", "filename",
+            "ART-NAME-003",
+            "ART-NAME",
+            "unicode-name",
+            "filename",
             "safe_slug's character class [^A-Za-z0-9] is ASCII-only, so a name made entirely of "
             "non-ASCII letters (e.g. Japanese) has EVERY character replaced by '-', collapses "
             "to '', and falls back to the literal 'unknown-scout' -- a real, surprising "
@@ -503,7 +571,10 @@ ARTIFACT_CASES_NAME: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-NAME-004", "ART-NAME", "case-collision", "filename",
+            "ART-NAME-004",
+            "ART-NAME",
+            "case-collision",
+            "filename",
             "safe_slug lowercases, so 'Avery Archer' and 'AVERY ARCHER' produce the identical "
             "slug 'avery-archer'; this is a PURE simulated string-contract case (no real "
             "filesystem collision is exercised) -- two DIFFERENT attendee_ids still resolve to "
@@ -519,7 +590,10 @@ ARTIFACT_CASES_NAME: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-NAME-005", "ART-NAME", "windows-reserved", "filename",
+            "ART-NAME-005",
+            "ART-NAME",
+            "windows-reserved",
+            "filename",
             "safe_slug('CON') has no Windows-reserved-device-name defense at all: the slug is "
             "the literal 'con', which a real Windows filesystem would refuse as a bare "
             "filename component. This is a PURE simulated string-contract case over the "
@@ -531,7 +605,10 @@ ARTIFACT_CASES_NAME: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-NAME-006", "ART-NAME", "empty-name", "filename",
+            "ART-NAME-006",
+            "ART-NAME",
+            "empty-name",
+            "filename",
             "safe_slug('') collapses to '' and falls back to the literal 'unknown-scout', "
             "identical to the all-non-ASCII case.",
             _EVIDENCE_FILENAME,
@@ -541,7 +618,10 @@ ARTIFACT_CASES_NAME: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-NAME-007", "ART-NAME", "symlinked-root", "filename",
+            "ART-NAME-007",
+            "ART-NAME",
+            "symlinked-root",
+            "filename",
             "Legacy write_outputs/atomic_write_text call Path.mkdir/Path.open directly with no "
             "realpath resolution or containment check: when the CLI's --output directory is "
             "itself a symlink to another directory, the file is published through the symlink "
@@ -558,7 +638,10 @@ ARTIFACT_CASES_NAME: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-NAME-008", "ART-NAME", "duplicate-display-name", "filename",
+            "ART-NAME-008",
+            "ART-NAME",
+            "duplicate-display-name",
+            "filename",
             "Two DIFFERENT attendees with the EXACT SAME display name and casing: "
             "attendee_filename_stem still yields two different filenames because the per-run "
             "UUID (keyed on attendee_id, not name) differs.",
@@ -572,7 +655,10 @@ ARTIFACT_CASES_NAME: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-NAME-009", "ART-NAME", "duplicate-html-filename", "filename",
+            "ART-NAME-009",
+            "ART-NAME",
+            "duplicate-html-filename",
+            "filename",
             "write_outputs resolves --html-name to Path(html_name).name (its basename only), so "
             "a path-like or repeated html_name always collapses to the same safe basename "
             "inside output_dir; writing the report twice with the same requested name simply "
@@ -607,7 +693,10 @@ _FORMULA_PREFIXES: tuple[tuple[str, str], ...] = (
 ARTIFACT_CASES_FORMULA: tuple[ArtifactCase, ...] = tuple(
     ArtifactCase(
         meta=_meta(
-            f"ART-FORMULA-{i:03d}", "ART-FORMULA", member, "formula",
+            f"ART-FORMULA-{i:03d}",
+            "ART-FORMULA",
+            member,
+            "formula",
             f"A scout_name field starting with {value[:1]!r} (spreadsheet-formula-injection "
             "prefix): write_csv writes it through csv.DictWriter with no escaping, quoting-only "
             "defense, or leading-apostrophe defusing -- the raw prefix survives into the "
@@ -640,7 +729,10 @@ ARTIFACT_CASES_FORMULA: tuple[ArtifactCase, ...] = tuple(
 ARTIFACT_CASES_FAIL: tuple[ArtifactCase, ...] = (
     ArtifactCase(
         meta=_meta(
-            "ART-FAIL-001", "ART-FAIL", "before-render", "atomic_fail",
+            "ART-FAIL-001",
+            "ART-FAIL",
+            "before-render",
+            "atomic_fail",
             "Path.open on the temp file raises before any bytes are written at all: the prior "
             "destination file (if any) is left completely untouched, and no .tmp file is ever "
             "created (there is nothing for the finally block's unlink(missing_ok=True) to do).",
@@ -651,7 +743,10 @@ ARTIFACT_CASES_FAIL: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-FAIL-002", "ART-FAIL", "during-temp-write", "atomic_fail",
+            "ART-FAIL-002",
+            "ART-FAIL",
+            "during-temp-write",
+            "atomic_fail",
             "os.fsync raises after the temp file's content was fully written but before "
             "os.replace: the prior destination file is untouched, and the finally block "
             "removes the now-orphaned .tmp file, leaving no leftover.",
@@ -662,7 +757,10 @@ ARTIFACT_CASES_FAIL: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-FAIL-003", "ART-FAIL", "before-atomic-replace", "atomic_fail",
+            "ART-FAIL-003",
+            "ART-FAIL",
+            "before-atomic-replace",
+            "atomic_fail",
             "os.replace itself raises: the destination file keeps its PRIOR content exactly "
             "(the replace never happened), and the finally block still removes the .tmp file "
             "(os.replace failing left the .tmp file present at its original path, so unlink "
@@ -674,7 +772,10 @@ ARTIFACT_CASES_FAIL: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-FAIL-004", "ART-FAIL", "after-atomic-replace", "atomic_fail",
+            "ART-FAIL-004",
+            "ART-FAIL",
+            "after-atomic-replace",
+            "atomic_fail",
             "Within one write_outputs run, the FIRST atomic_write_text call (scouts.json) "
             "succeeds and is durably published; injecting a failure on the SECOND call "
             "(classes.csv) leaves the first file's successful content intact -- a successful "
@@ -686,7 +787,10 @@ ARTIFACT_CASES_FAIL: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-FAIL-005", "ART-FAIL", "during-cleanup", "atomic_fail",
+            "ART-FAIL-005",
+            "ART-FAIL",
+            "during-cleanup",
+            "atomic_fail",
             "Path.unlink raises INSIDE the finally block AFTER os.replace already succeeded: "
             "the destination file's new content is durably correct (the publish itself "
             "succeeded), yet the exception from the failed cleanup still propagates to the "
@@ -698,7 +802,10 @@ ARTIFACT_CASES_FAIL: tuple[ArtifactCase, ...] = (
     ),
     ArtifactCase(
         meta=_meta(
-            "ART-FAIL-006", "ART-FAIL", "partial-multi-file", "atomic_fail",
+            "ART-FAIL-006",
+            "ART-FAIL",
+            "partial-multi-file",
+            "atomic_fail",
             "write_outputs calls atomic_write_text for scouts.json, classes.csv, "
             "requirements.csv, errors.csv, the HTML report, then summary.json, in that fixed "
             "order; injecting a failure on os.replace for the THIRD call (requirements.csv) "
@@ -708,9 +815,7 @@ ARTIFACT_CASES_FAIL: tuple[ArtifactCase, ...] = (
             _EVIDENCE_WRITE_OUTPUTS,
         ),
         input_rows=(_class_row(), _requirement_row()),
-        expected_by_context={
-            "atomic_fail": (True, True, False, False, False, False)
-        },
+        expected_by_context={"atomic_fail": (True, True, False, False, False, False)},
     ),
 )
 
@@ -733,15 +838,23 @@ ARTIFACT_CASES: tuple[ArtifactCase, ...] = (
 # registry self-check can confirm every PRIV-SURFACE/PRIV-EGRESS/PRIV-CONTAIN axis member is
 # covered by a declared, evidenced case.
 # ==============================================================================================
-_EVIDENCE_POLICY = "tests/matrix/policies.py SurfacePolicy rows; tests/privacy/test_surface_policies.py"
+_EVIDENCE_POLICY = (
+    "tests/matrix/policies.py SurfacePolicy rows; tests/privacy/test_surface_policies.py"
+)
 
 _PRIV_SURFACE_MEMBERS = (
-    "input-private-allowed", "input-private-forbidden",
-    "adapter-private-allowed", "adapter-private-forbidden",
-    "operational-private-allowed", "operational-private-forbidden",
-    "audience-shareable-allowed", "audience-shareable-forbidden",
-    "local-ui-allowed", "local-ui-forbidden",
-    "diagnostic-allowed", "diagnostic-forbidden",
+    "input-private-allowed",
+    "input-private-forbidden",
+    "adapter-private-allowed",
+    "adapter-private-forbidden",
+    "operational-private-allowed",
+    "operational-private-forbidden",
+    "audience-shareable-allowed",
+    "audience-shareable-forbidden",
+    "local-ui-allowed",
+    "local-ui-forbidden",
+    "diagnostic-allowed",
+    "diagnostic-forbidden",
 )
 
 PRIV_SURFACE_METADATA: tuple[CaseMetadata, ...] = tuple(
@@ -757,7 +870,15 @@ PRIV_SURFACE_METADATA: tuple[CaseMetadata, ...] = tuple(
 )
 
 _PRIV_EGRESS_MEMBERS = (
-    "filename", "json", "csv", "html", "email", "stdout", "stderr", "api-error", "sse",
+    "filename",
+    "json",
+    "csv",
+    "html",
+    "email",
+    "stdout",
+    "stderr",
+    "api-error",
+    "sse",
     "diagnostics",
 )
 

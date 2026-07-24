@@ -71,9 +71,7 @@ def build_pdf(path: Path, pages: tuple[PdfPageSpec, ...]) -> Path:
                 ok, encoded = cv2.imencode(".png", enlarged)
                 if not ok:
                     raise RuntimeError("synthetic QR encoding failed")
-                page.insert_image(
-                    fitz.Rect(400, 54, 560, 214), stream=encoded.tobytes()
-                )
+                page.insert_image(fitz.Rect(400, 54, 560, 214), stream=encoded.tobytes())
             else:  # "vector": paint modules directly so no image xref exists on the page.
                 side = 150.0
                 module = side / matrix.shape[0]
@@ -104,9 +102,7 @@ def build_multi_qr_image(values: tuple[str, ...]) -> np.ndarray:
         # Upscale to a comfortable pixel size (as in build_pdf's embedded path) so cv2's
         # QRCodeDetector can resolve each symbol's finder patterns cleanly.
         scale = max(1, 200 // matrix.shape[0])
-        tiles.append(
-            cv2.resize(matrix, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
-        )
+        tiles.append(cv2.resize(matrix, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST))
     height = max(tile.shape[0] for tile in tiles)
     # A wide light-colored gap between tiles keeps the two QR symbols visually separated so the
     # detector reports them as distinct candidates instead of merging their finder patterns.
@@ -119,9 +115,7 @@ def build_multi_qr_image(values: tuple[str, ...]) -> np.ndarray:
             padded.append(gap)
         padded.append(canvas)
     stitched = np.hstack(padded)
-    return cv2.copyMakeBorder(
-        stitched, 48, 48, 48, 48, cv2.BORDER_CONSTANT, value=255
-    )
+    return cv2.copyMakeBorder(stitched, 48, 48, 48, 48, cv2.BORDER_CONSTANT, value=255)
 
 
 def build_corrupt_pdf(path: Path) -> Path:

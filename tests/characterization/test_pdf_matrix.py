@@ -291,9 +291,7 @@ class LegacyPdfRunner:
         # First run leaves out.errors.csv behind; the second clean run must remove it.
         self._run_main([str(warn), "-o", str(out), "--render-dpi", "72"])
         code, _, _ = self._run_main([str(good), "-o", str(out)])
-        return PdfObservation(
-            return_code=code, relative_files=_rel_files(root, {warn, good})
-        )
+        return PdfObservation(return_code=code, relative_files=_rel_files(root, {warn, good}))
 
 
 def _observe(case: PdfCase, context_id: str, root: Path) -> PdfObservation:

@@ -103,7 +103,9 @@ def _split_frame_case(frame_case: SseCase) -> tuple[list[dict], dict, str | None
     on disk to build its own 'batch_done' frame, and the exception message (if any) the fake
     should raise after emitting its progress events."""
     frames = frame_case.expected_by_context["sse-frame"].frames
-    progress_events = [dict(frame) for frame in frames if frame["type"] not in ("batch_done", "error")]
+    progress_events = [
+        dict(frame) for frame in frames if frame["type"] not in ("batch_done", "error")
+    ]
     batch_done = next((frame for frame in frames if frame["type"] == "batch_done"), None)
     error = next((frame for frame in frames if frame["type"] == "error"), None)
     summary_extra = (
@@ -158,7 +160,9 @@ def _client(module) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=transport, base_url="http://testserver")
 
 
-async def _observe(resp: httpx.Response, *, headers: tuple[tuple[str, str], ...] = ()) -> InterfaceObservation:
+async def _observe(
+    resp: httpx.Response, *, headers: tuple[tuple[str, str], ...] = ()
+) -> InterfaceObservation:
     body: object
     try:
         body = resp.json()
@@ -291,7 +295,10 @@ class LegacyInterfaceRunner:
         body = resp.json()
         return InterfaceObservation(
             status=resp.status_code,
-            body={"scouts_csv_exists": body["scouts_csv_exists"], "scouts_count": body["scouts_count"]},
+            body={
+                "scouts_csv_exists": body["scouts_csv_exists"],
+                "scouts_count": body["scouts_count"],
+            },
         )
 
     async def _route_UI_ROUTE_004(self, module, client) -> InterfaceObservation:
@@ -464,7 +471,9 @@ class LegacyInterfaceRunner:
         return await _observe(resp)
 
     async def _route_UI_ROUTE_024(self, module, client) -> InterfaceObservation:
-        self.monkeypatch.setattr(module.pdf_to_scouts, "main", _fake_pdf_main_success(_SCOUTS_CSV_BODY))
+        self.monkeypatch.setattr(
+            module.pdf_to_scouts, "main", _fake_pdf_main_success(_SCOUTS_CSV_BODY)
+        )
         before = _tasks_snapshot()
         resp = await client.post(
             "/api/pdf-extract", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")}
@@ -504,7 +513,9 @@ class LegacyInterfaceRunner:
 
     async def _route_UI_ROUTE_026(self, module, client) -> InterfaceObservation:
         frame_case = next(case for case in SSE_FRAME_CASES if case.meta.case_id == "SSE-FRAME-002")
-        operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, frame_case)
+        operation_id, task = await _start_schedule_operation(
+            module, client, self.monkeypatch, frame_case
+        )
         await asyncio.wait_for(task, timeout=5)
         _, events = await _drain_via_route(module, operation_id)
         batch_done = next(event for event in events if event["type"] == "batch_done")
@@ -518,10 +529,10 @@ class LegacyInterfaceRunner:
         )
 
     async def _route_UI_ROUTE_027(self, module, client) -> InterfaceObservation:
-        frame_case = next(
-            case for case in SSE_FRAME_CASES if case.meta.case_id == "SSE-FRAME-005"
+        frame_case = next(case for case in SSE_FRAME_CASES if case.meta.case_id == "SSE-FRAME-005")
+        operation_id, task = await _start_schedule_operation(
+            module, client, self.monkeypatch, frame_case
         )
-        operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, frame_case)
         await asyncio.wait_for(task, timeout=5)
         _, events = await _drain_via_route(module, operation_id)
         error_events = [event for event in events if event["type"] == "error"]
@@ -536,7 +547,9 @@ class LegacyInterfaceRunner:
 
     async def _route_UI_ROUTE_028(self, module, client) -> InterfaceObservation:
         frame_case = next(case for case in SSE_FRAME_CASES if case.meta.case_id == "SSE-FRAME-002")
-        operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, frame_case)
+        operation_id, task = await _start_schedule_operation(
+            module, client, self.monkeypatch, frame_case
+        )
         await asyncio.wait_for(task, timeout=5)
         resp, _events = await _drain_via_route(module, operation_id)
         return InterfaceObservation(
@@ -549,7 +562,9 @@ class LegacyInterfaceRunner:
 
     async def _route_UI_ROUTE_029(self, module, client) -> InterfaceObservation:
         frame_case = next(case for case in SSE_FRAME_CASES if case.meta.case_id == "SSE-FRAME-004")
-        operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, frame_case)
+        operation_id, task = await _start_schedule_operation(
+            module, client, self.monkeypatch, frame_case
+        )
         resp = await module.operation_events(operation_id)
         gen = resp.body_iterator
         await gen.__anext__()  # consume exactly one real frame
@@ -568,9 +583,7 @@ class LegacyInterfaceRunner:
             return True
 
         module.webbrowser.open = _record_open
-        self._write_summary(
-            module, "2026-07-23_1200", {"html_report": "../../elsewhere/evil.html"}
-        )
+        self._write_summary(module, "2026-07-23_1200", {"html_report": "../../elsewhere/evil.html"})
         resp = await client.post("/api/runs/2026-07-23_1200/open-report")
         assert opened, "webbrowser.open was never called"
         return InterfaceObservation(
@@ -589,7 +602,9 @@ class LegacyInterfaceRunner:
         # serialization would still cause a mismatch here, even though the frame *content*
         # originates from this same case data.
         async with load_legacy_ui(root / "data") as module, _client(module) as client:
-            operation_id, task = await _start_schedule_operation(module, client, self.monkeypatch, case)
+            operation_id, task = await _start_schedule_operation(
+                module, client, self.monkeypatch, case
+            )
             await asyncio.wait_for(task, timeout=5)
             _, events = await _drain_via_route(module, operation_id)
             return SseFrameObservation(

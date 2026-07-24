@@ -121,7 +121,9 @@ def _read_attendee_csv(csv_path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(stream))
 
 
-def _run_cli(monkeypatch: pytest.MonkeyPatch, argv: list[str], browser: StrictFakeBrowser) -> tuple[int, str]:
+def _run_cli(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], browser: StrictFakeBrowser
+) -> tuple[int, str]:
     monkeypatch.setattr(cli, "async_playwright", lambda: _FakePlaywrightCM(browser))
     monkeypatch.setattr(sys, "argv", ["scout_schedule_cli.py", *argv])
     stderr = io.StringIO()
@@ -196,7 +198,9 @@ def test_flow_success_001_five_stage_end_to_end(
         script_pairs.append(
             (
                 ExpectedRequest("schedule", attendee_id),
-                ScriptedResponse(value={"status": {"status": 1}, "data": [_schedule_row(class_id)]}),
+                ScriptedResponse(
+                    value={"status": {"status": 1}, "data": [_schedule_row(class_id)]}
+                ),
             )
         )
         script_pairs.append(
@@ -212,11 +216,15 @@ def test_flow_success_001_five_stage_end_to_end(
     exit_code, stderr = _run_cli(
         monkeypatch,
         [
-            "--input", str(csv_path),
-            "--output", str(output_dir),
+            "--input",
+            str(csv_path),
+            "--output",
+            str(output_dir),
             "--no-html",
-            "--request-delay-ms", "0",
-            "--scout-delay-ms", "0",
+            "--request-delay-ms",
+            "0",
+            "--scout-delay-ms",
+            "0",
         ],
         browser,
     )
@@ -310,11 +318,15 @@ def test_flow_partial_001_one_terminal_failure(
     exit_code, stderr = _run_cli(
         monkeypatch,
         [
-            "--input", str(csv_path),
-            "--output", str(output_dir),
+            "--input",
+            str(csv_path),
+            "--output",
+            str(output_dir),
             "--no-html",
-            "--request-delay-ms", "0",
-            "--scout-delay-ms", "0",
+            "--request-delay-ms",
+            "0",
+            "--scout-delay-ms",
+            "0",
         ],
         browser,
     )

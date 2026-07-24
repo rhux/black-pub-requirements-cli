@@ -35,9 +35,7 @@ from tests.matrix.cases.acquisition_cases import (
 from tests.matrix.pytest_support import execution_params
 
 _UUID_HEX_RE = re.compile(r"(?<=-)[0-9a-f]{32}(?=[-.])")
-_UUIDV4_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
+_UUIDV4_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
 
 def _args(**overrides: object) -> argparse.Namespace:
@@ -173,9 +171,7 @@ class LegacyAcquisitionRunner:
             clock = FakeClock()
             browser = StrictFakeBrowser(script, clock)
             scout = legacy.ScoutInput(name=case.scout_name, url=case.qr_url)
-            asyncio.run(
-                legacy.process_scout(browser, scout, _args(), raw_dir, run_identity)
-            )
+            asyncio.run(legacy.process_scout(browser, scout, _args(), raw_dir, run_identity))
             script.assert_consumed()
         files = sorted(p.name for p in raw_dir.glob("*-schedule.json"))
         assert len(files) == 2, files
@@ -220,9 +216,7 @@ def test_acquisition_case(case: AcquisitionCase, context_id: str, tmp_path: Path
         # consumption (already enforced by assert_consumed() inside the runner) IS the ordered
         # request list. Deriving it here keeps the catalog free of hand-duplicated call lists
         # that would drift out of sync with the script.
-        expected = dataclasses.replace(
-            expected, calls=tuple(req for req, _ in case.script)
-        )
+        expected = dataclasses.replace(expected, calls=tuple(req for req, _ in case.script))
     assert observed == expected
 
 

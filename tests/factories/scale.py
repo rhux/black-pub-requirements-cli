@@ -43,12 +43,32 @@ RAW_CLASS_COMPLETION_MARGINAL: dict[str, int] = {"0": 41, "1": 62}
 DEDUPED_CLASS_COMPLETION_MARGINAL: dict[str, int] = {"0": 36, "1": 62}
 HAS_REQUIREMENTS_MARGINAL: dict[str, int] = {"1": 103}
 SHAPE_MARGINAL: dict[str, int] = {
-    "": 31, "#(N)": 30, "#(a)": 72, "#A.": 12, "#N": 229, "#N(a)": 697,
-    "#N(a)(N)": 104, "#N.": 545, "#N..Aaa.A.(N)": 50, "#N..Aaa.A.(N)(a)": 10,
-    "#N..Aaa.A.(N)(a)(N)": 40, "#N.Aaaaaa.A(N)": 74, "#N.Aaaaaa.A.(N)": 140,
-    "#N.Aaaaaa.A.(N)(a)": 56, "#N.AaaaaaA.(N)": 4, "#Na": 1064, "#Na(N)": 44,
-    "#Na.": 469, "#Na[N]": 32, "Aaaa.": 125, "Aaaa.Aaaa.": 35, "Aaaa.N.": 30,
-    "N": 65, "N.": 255, "N.a.": 520, "N.a.N.": 125,
+    "": 31,
+    "#(N)": 30,
+    "#(a)": 72,
+    "#A.": 12,
+    "#N": 229,
+    "#N(a)": 697,
+    "#N(a)(N)": 104,
+    "#N.": 545,
+    "#N..Aaa.A.(N)": 50,
+    "#N..Aaa.A.(N)(a)": 10,
+    "#N..Aaa.A.(N)(a)(N)": 40,
+    "#N.Aaaaaa.A(N)": 74,
+    "#N.Aaaaaa.A.(N)": 140,
+    "#N.Aaaaaa.A.(N)(a)": 56,
+    "#N.AaaaaaA.(N)": 4,
+    "#Na": 1064,
+    "#Na(N)": 44,
+    "#Na.": 469,
+    "#Na[N]": 32,
+    "Aaaa.": 125,
+    "Aaaa.Aaaa.": 35,
+    "Aaaa.N.": 30,
+    "N": 65,
+    "N.": 255,
+    "N.a.": 520,
+    "N.a.N.": 125,
 }
 
 _SHAPE_TO_CONCRETE: dict[str, str] = dict(
@@ -93,7 +113,9 @@ def profile(
         profile_version=profile_version,
         seed=seed,
         attendee_count=attendee_count,
-        raw_class_count=raw_class_count if raw_class_count is not None else deduplicated_class_count,
+        raw_class_count=raw_class_count
+        if raw_class_count is not None
+        else deduplicated_class_count,
         deduplicated_class_count=deduplicated_class_count,
         requirement_count=(
             requirement_count if requirement_count is not None else deduplicated_class_count
@@ -145,7 +167,9 @@ class SyntheticDataset:
     @property
     def requirement_rows(self) -> tuple[SyntheticRequirementRow, ...]:
         return tuple(
-            row for class_id in self.deduped_class_ids for row in self.requirements_by_class[class_id]
+            row
+            for class_id in self.deduped_class_ids
+            for row in self.requirements_by_class[class_id]
         )
 
     def raw_completion_marginal(self) -> dict[str, int]:
@@ -288,7 +312,10 @@ def build_dataset(
     completion_marginal = (
         DEDUPED_CLASS_COMPLETION_MARGINAL
         if scale_profile.profile_id == "SCALE-CANON-022"
-        else {"0": len(all_deduped_class_ids) // 2, "1": len(all_deduped_class_ids) - len(all_deduped_class_ids) // 2}
+        else {
+            "0": len(all_deduped_class_ids) // 2,
+            "1": len(all_deduped_class_ids) - len(all_deduped_class_ids) // 2,
+        }
     )
     completion_values = _assign_marginal(
         scale_profile,
@@ -373,7 +400,9 @@ def build_dataset(
         attendees.append(
             SyntheticAttendee(
                 index=index,
-                output_id=str(synthetic_uuid4(scale_profile.profile_version, scale_profile.seed, index)),
+                output_id=str(
+                    synthetic_uuid4(scale_profile.profile_version, scale_profile.seed, index)
+                ),
                 upstream_id=f"9{scale_profile.profile_version:03d}{index:06d}",
                 name=name_overrides.get(index, f"Synthetic Scout {index:04d}"),
                 deduped_class_ids=deduped_ids,

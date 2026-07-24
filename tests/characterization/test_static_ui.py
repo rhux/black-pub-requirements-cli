@@ -225,9 +225,11 @@ def _install_console_capture(page: Page) -> list[str]:
     messages: list[str] = []
     page.on(
         "console",
-        lambda message: messages.append(message.text)
-        if isinstance(message, ConsoleMessage) and message.type == "error"
-        else None,
+        lambda message: (
+            messages.append(message.text)
+            if isinstance(message, ConsoleMessage) and message.type == "error"
+            else None
+        ),
     )
     page.on("pageerror", lambda exc: messages.append(str(exc)))
     return messages

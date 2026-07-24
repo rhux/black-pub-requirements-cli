@@ -85,9 +85,7 @@ def fingerprint_tree(
             raise UnsafeCorpusEntry("non-regular entry rejected")
         with _redact_read_failures():  # never leak exc text
             data = read_bytes(path)
-        entries.append(
-            CorpusEntry(rel, "file", len(data), hashlib.sha256(data).hexdigest())
-        )
+        entries.append(CorpusEntry(rel, "file", len(data), hashlib.sha256(data).hexdigest()))
     return CorpusFingerprint(tuple(entries))
 
 

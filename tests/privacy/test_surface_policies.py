@@ -53,10 +53,19 @@ def test_sentinels_are_absent_from_committed_case_and_factory_source() -> None:
 # PRIV-SURFACE-001..012 -- one allowed-field case and one forbidden-sentinel case for each of
 # the six SurfaceClass policy rows declared in tests/matrix/policies.py.
 # --------------------------------------------------------------------------------------------
-_SURFACE_ROWS = {policy.surface_id: policy for policy in POLICIES if policy.surface_id in {
-    "input-private", "adapter-private", "operational-private",
-    "audience-shareable", "local-ui", "diagnostic",
-}}
+_SURFACE_ROWS = {
+    policy.surface_id: policy
+    for policy in POLICIES
+    if policy.surface_id
+    in {
+        "input-private",
+        "adapter-private",
+        "operational-private",
+        "audience-shareable",
+        "local-ui",
+        "diagnostic",
+    }
+}
 
 # Matches _PRIV_SURFACE_MEMBERS's enumeration order in tests/matrix/cases/artifact_cases.py
 # exactly: PRIV-SURFACE-{i:03d} for i=1..12, alternating <surface>-allowed/<surface>-forbidden.
@@ -188,9 +197,7 @@ def test_priv_surface_adapter_private_allows_upstream_id_by_design(tmp_path: Pat
     """PRIV-SURFACE adapter-private allowed: raw/ audit JSON is intentionally allowed to carry
     the upstream attendee_id -- that is the entire point of "adapter private"."""
     payload = {"attendeeID": SENTINEL_UPSTREAM_ID, "status": {"status": 1}, "data": []}
-    (tmp_path / "raw-schedule.json").write_text(
-        __import__("json").dumps(payload), encoding="utf-8"
-    )
+    (tmp_path / "raw-schedule.json").write_text(__import__("json").dumps(payload), encoding="utf-8")
     text = (tmp_path / "raw-schedule.json").read_text(encoding="utf-8")
     assert SENTINEL_UPSTREAM_ID in text  # allowed, by design, on this surface
 
@@ -231,8 +238,11 @@ def test_priv_surface_audience_shareable_email_never_carries_upstream_identity(
     text = legacy.render_email_text("Avery Example", badge_groups)
     html_body = legacy.render_email_html("Avery Example", badge_groups)
     for sentinel in (
-        SENTINEL_UPSTREAM_ID, SENTINEL_QR_TOKEN, SENTINEL_SESSION_ID,
-        SENTINEL_PAYLOAD_FRAGMENT, SENTINEL_ABSOLUTE_PATH,
+        SENTINEL_UPSTREAM_ID,
+        SENTINEL_QR_TOKEN,
+        SENTINEL_SESSION_ID,
+        SENTINEL_PAYLOAD_FRAGMENT,
+        SENTINEL_ABSOLUTE_PATH,
     ):
         assert sentinel not in text
         assert sentinel not in html_body
@@ -246,8 +256,11 @@ def test_priv_surface_audience_shareable_allows_scout_name_and_requirement_field
     badge_groups = {
         "Chess": [
             {
-                "requirement_number": "#1a", "description": "Show your work.",
-                "is_prereq": False, "is_leaf": True, "depth": 0,
+                "requirement_number": "#1a",
+                "description": "Show your work.",
+                "is_prereq": False,
+                "is_leaf": True,
+                "depth": 0,
             }
         ]
     }
@@ -280,11 +293,19 @@ def test_priv_surface_local_ui_and_diagnostic_forbid_qr_token_and_session() -> N
 # --------------------------------------------------------------------------------------------
 def _requirement_row(**overrides: object) -> dict[str, object]:
     row: dict[str, object] = {
-        "scout_name": "Avery Example", "attendee_id": "90000001", "class_number": "26MB1",
-        "class_p4_id": "2000001", "merit_badge_name": "Chess", "requirement_id": "r1",
-        "requirement_type_id": "1", "requirement_number": "#1a", "description": "Show work.",
-        "completed_requirement": False, "completed_class": False,
-        "requirement_on_event": True, "present_days": "MoTuWeTh",
+        "scout_name": "Avery Example",
+        "attendee_id": "90000001",
+        "class_number": "26MB1",
+        "class_p4_id": "2000001",
+        "merit_badge_name": "Chess",
+        "requirement_id": "r1",
+        "requirement_type_id": "1",
+        "requirement_number": "#1a",
+        "description": "Show work.",
+        "completed_requirement": False,
+        "completed_class": False,
+        "requirement_on_event": True,
+        "present_days": "MoTuWeTh",
     }
     row.update(overrides)
     return row
@@ -306,8 +327,12 @@ def test_priv_egress_json(tmp_path: Path) -> None:
     import scout_schedule_cli as legacy
 
     result = legacy.ScoutResult(
-        name="Avery Example", qr_url="https://scoutingevent.com/mobile/checkin?t=TESTTOKEN_X",
-        attendee_id="90000001", classes=[], requirements=[], errors=[],
+        name="Avery Example",
+        qr_url="https://scoutingevent.com/mobile/checkin?t=TESTTOKEN_X",
+        attendee_id="90000001",
+        classes=[],
+        requirements=[],
+        errors=[],
     )
     legacy.write_outputs(tmp_path, [result], generate_html=False)
     text = (tmp_path / "scouts.json").read_text(encoding="utf-8")
@@ -333,8 +358,12 @@ def test_priv_egress_html(tmp_path: Path) -> None:
     import scout_schedule_cli as legacy
 
     result = legacy.ScoutResult(
-        name="Avery Example", qr_url="https://scoutingevent.com/mobile/checkin?t=TESTTOKEN_X",
-        attendee_id="90000001", classes=[], requirements=[], errors=[],
+        name="Avery Example",
+        qr_url="https://scoutingevent.com/mobile/checkin?t=TESTTOKEN_X",
+        attendee_id="90000001",
+        classes=[],
+        requirements=[],
+        errors=[],
     )
     legacy.write_outputs(tmp_path, [result], generate_html=True)
     text = (tmp_path / "report.html").read_text(encoding="utf-8")
@@ -348,8 +377,11 @@ def test_priv_egress_email(tmp_path: Path) -> None:
 
     nested = [
         {
-            "name": "Avery Example", "attendee_id": "90000001", "classes": [],
-            "requirements": [_requirement_row()], "errors": [],
+            "name": "Avery Example",
+            "attendee_id": "90000001",
+            "classes": [],
+            "requirements": [_requirement_row()],
+            "errors": [],
         }
     ]
     legacy.write_email_reports(tmp_path, nested)
@@ -385,7 +417,11 @@ def test_priv_egress_api_error(tmp_path: Path) -> None:
     import scout_schedule_cli as legacy
 
     error_writer_input = [
-        {"scout_name": "Avery Example", "attendee_id": "90000001", "error": "requirement API returned failure: {'status': 0}"}
+        {
+            "scout_name": "Avery Example",
+            "attendee_id": "90000001",
+            "error": "requirement API returned failure: {'status': 0}",
+        }
     ]
     import csv
     import io

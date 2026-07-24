@@ -97,7 +97,9 @@ def test_desktop_ready_execution(
     monkeypatch.setattr(run_app.urllib.request, "urlopen", fake_urlopen)
 
     if case.expect_ready:
-        run_app.wait_until_ready("http://127.0.0.1:0/api/health", timeout_seconds=case.timeout_seconds)
+        run_app.wait_until_ready(
+            "http://127.0.0.1:0/api/health", timeout_seconds=case.timeout_seconds
+        )
     else:
         with pytest.raises(RuntimeError):
             run_app.wait_until_ready(

@@ -202,6 +202,7 @@ _METHOD_TABLE: tuple[tuple[str, str, str, str], ...] = (
     ("UI-METHOD-012", "/api/runs/RUN-ID/open-emails-folder", "POST", "GET"),
 )
 
+
 def _method_case(case_id: str, route: str, allowed: str, wrong: str) -> InterfaceCase:
     # ui/server.py:391 mounts StaticFiles at "/" LAST, catching every GET/HEAD request whose
     # path did not already match an earlier route. For a POST-only route tested with GET
@@ -238,8 +239,7 @@ def _method_case(case_id: str, route: str, allowed: str, wrong: str) -> Interfac
 
 
 INTERFACE_CASES_METHOD: tuple[InterfaceCase, ...] = tuple(
-    _method_case(case_id, route, allowed, wrong)
-    for case_id, route, allowed, wrong in _METHOD_TABLE
+    _method_case(case_id, route, allowed, wrong) for case_id, route, allowed, wrong in _METHOD_TABLE
 )
 
 
@@ -393,9 +393,7 @@ INTERFACE_CASES_ROUTE: tuple[InterfaceCase, ...] = (
         ),
         method="GET",
         route="/api/health",
-        expected_by_context={
-            "route": InterfaceObservation(status=200, body={"status": "ok"})
-        },
+        expected_by_context={"route": InterfaceObservation(status=200, body={"status": "ok"})},
     ),
     InterfaceCase(
         meta=_meta(
@@ -559,9 +557,7 @@ INTERFACE_CASES_ROUTE: tuple[InterfaceCase, ...] = (
         ),
         method="POST",
         route="/api/schedule-download/pause",
-        expected_by_context={
-            "route": InterfaceObservation(status=200, body={"paused": True})
-        },
+        expected_by_context={"route": InterfaceObservation(status=200, body={"paused": True})},
     ),
     InterfaceCase(
         meta=_meta(
@@ -588,9 +584,7 @@ INTERFACE_CASES_ROUTE: tuple[InterfaceCase, ...] = (
         ),
         method="POST",
         route="/api/schedule-download/resume",
-        expected_by_context={
-            "route": InterfaceObservation(status=200, body={"paused": False})
-        },
+        expected_by_context={"route": InterfaceObservation(status=200, body={"paused": False})},
     ),
     InterfaceCase(
         meta=_meta(
@@ -625,8 +619,7 @@ INTERFACE_CASES_ROUTE: tuple[InterfaceCase, ...] = (
             "UI-ROUTE",
             "open-report-missing",
             ("route",),
-            "POST /api/runs/{run_id}/open-report for a run_id with no summary.json returns "
-            "404.",
+            "POST /api/runs/{run_id}/open-report for a run_id with no summary.json returns 404.",
             _EVIDENCE_ROUTES,
         ),
         method="POST",
@@ -668,8 +661,7 @@ INTERFACE_CASES_ROUTE: tuple[InterfaceCase, ...] = (
             "UI-ROUTE",
             "email-missing",
             ("route",),
-            "POST /api/runs/{run_id}/generate-emails for a run_id with no scouts.json returns "
-            "404.",
+            "POST /api/runs/{run_id}/generate-emails for a run_id with no scouts.json returns 404.",
             _EVIDENCE_ROUTES,
         ),
         method="POST",
@@ -769,7 +761,9 @@ INTERFACE_CASES_ROUTE: tuple[InterfaceCase, ...] = (
         method="POST",
         route="/api/pdf-extract",
         expected_by_context={
-            "route": InterfaceObservation(status=202, body={"scouts_csv_written": True, "busy_after": False})
+            "route": InterfaceObservation(
+                status=202, body={"scouts_csv_written": True, "busy_after": False}
+            )
         },
     ),
     InterfaceCase(
@@ -910,9 +904,7 @@ INTERFACE_CASES_ROUTE: tuple[InterfaceCase, ...] = (
         method="POST",
         route="/api/runs/{run_id}/open-report",
         expected_by_context={
-            "route": InterfaceObservation(
-                status=200, body={"url_contains_unsanitized_value": True}
-            )
+            "route": InterfaceObservation(status=200, body={"url_contains_unsanitized_value": True})
         },
     ),
 )
@@ -1015,7 +1007,14 @@ SSE_FRAME_CASES: tuple[SseCase, ...] = (
         ),
         expected_by_context={
             "sse-frame": SseFrameObservation(
-                frame_types=("batch_start", "paused", "resumed", "scout_start", "scout_done", "batch_done"),
+                frame_types=(
+                    "batch_start",
+                    "paused",
+                    "resumed",
+                    "scout_start",
+                    "scout_done",
+                    "batch_done",
+                ),
                 frames=(
                     {"type": "batch_start", "total": 1},
                     {"type": "paused", "index": 1, "total": 1},

@@ -70,9 +70,7 @@ class ImportProbeResult:
     imported_modules: tuple[str, ...]
 
 
-def run_import_probe(
-    profile: str, module_path: Path, blocked: Iterable[str]
-) -> ImportProbeResult:
+def run_import_probe(profile: str, module_path: Path, blocked: Iterable[str]) -> ImportProbeResult:
     """Import the legacy module in an isolated child with ``blocked`` roots unavailable.
 
     Uses ``sys.executable -I`` (ignores user site-packages and environment) so the child's

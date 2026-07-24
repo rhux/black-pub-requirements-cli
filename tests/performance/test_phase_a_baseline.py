@@ -31,7 +31,9 @@ pytestmark = pytest.mark.vertical
 # ---------------------------------------------------------------------------------------------
 
 
-def _schedule_row_for(class_id: str, dataset: SyntheticDataset, completion: str) -> dict[str, object]:
+def _schedule_row_for(
+    class_id: str, dataset: SyntheticDataset, completion: str
+) -> dict[str, object]:
     return {
         "classP4ID": class_id,
         "CLASS_NAME": f"MoTuWeTh - Chess - {class_id} (Pavilion)",
@@ -135,9 +137,7 @@ def _expected_request_count(dataset: SyntheticDataset) -> int:
         ),
     ],
 )
-def test_perf_req_request_count_formula(
-    case_id: str, make_profile, tmp_path: Path
-) -> None:
+def test_perf_req_request_count_formula(case_id: str, make_profile, tmp_path: Path) -> None:
     dataset = build_dataset(make_profile())
     actual = asyncio.run(_run_request_count_case(dataset, tmp_path / "raw"))
     expected = _expected_request_count(dataset)
@@ -176,7 +176,8 @@ def _synthetic_requirement_rows(row_count: int, class_rows: int) -> list[dict[st
         # mark -- the case is declared once (member "growth-bound"), and marking every
         # parametrized instance would make matrix_gate see it as executed more than once.
         pytest.param(
-            22, 5,
+            22,
+            5,
             marks=pytest.mark.matrix_case(
                 case_id="PERF-GROWTH-001", context_id="run", lane="default"
             ),
@@ -225,25 +226,50 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
         attendee_id="90000001",
         classes=[
             cli.ClassRecord(
-                scout_name="Avery Archer", attendee_id="90000001", class_number="26MB1",
-                class_p4_id="2000001", class_name="Chess", days="MoTuWeTh", period_name="A",
-                start_time="9:00 AM", start_time_24h="09:00:00", location="Pavilion",
-                has_requirements=True, class_completed=False, raw_class_name="Chess",
+                scout_name="Avery Archer",
+                attendee_id="90000001",
+                class_number="26MB1",
+                class_p4_id="2000001",
+                class_name="Chess",
+                days="MoTuWeTh",
+                period_name="A",
+                start_time="9:00 AM",
+                start_time_24h="09:00:00",
+                location="Pavilion",
+                has_requirements=True,
+                class_completed=False,
+                raw_class_name="Chess",
             )
         ],
         requirements=[
             cli.RequirementRecord(
-                scout_name="Avery Archer", attendee_id="90000001", class_number="26MB1",
-                class_p4_id="2000001", merit_badge_name="Chess", requirement_id="r1",
-                requirement_type_id="1", requirement_number="1", description="Do a thing.",
-                completed_requirement=False, completed_class=False, requirement_on_event=True,
+                scout_name="Avery Archer",
+                attendee_id="90000001",
+                class_number="26MB1",
+                class_p4_id="2000001",
+                merit_badge_name="Chess",
+                requirement_id="r1",
+                requirement_type_id="1",
+                requirement_number="1",
+                description="Do a thing.",
+                completed_requirement=False,
+                completed_class=False,
+                requirement_on_event=True,
                 present_days="MoTuWeTh",
             ),
             cli.RequirementRecord(
-                scout_name="Avery Archer", attendee_id="90000001", class_number="26MB1",
-                class_p4_id="2000001", merit_badge_name="Chess", requirement_id="r2",
-                requirement_type_id="1", requirement_number="2", description="Do another.",
-                completed_requirement=True, completed_class=False, requirement_on_event=True,
+                scout_name="Avery Archer",
+                attendee_id="90000001",
+                class_number="26MB1",
+                class_p4_id="2000001",
+                merit_badge_name="Chess",
+                requirement_id="r2",
+                requirement_type_id="1",
+                requirement_number="2",
+                description="Do another.",
+                completed_requirement=True,
+                completed_class=False,
+                requirement_on_event=True,
                 present_days="MoTuWeTh",
             ),
         ],
@@ -255,19 +281,35 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
         attendee_id="90000002",
         classes=[
             cli.ClassRecord(
-                scout_name="Bo Baker", attendee_id="90000002", class_number="26MB2",
-                class_p4_id="2000002", class_name="Fire Safety", days="MoTuWeTh",
-                period_name="B", start_time="10:00 AM", start_time_24h="10:00:00",
-                location="Pavilion", has_requirements=True, class_completed=True,
+                scout_name="Bo Baker",
+                attendee_id="90000002",
+                class_number="26MB2",
+                class_p4_id="2000002",
+                class_name="Fire Safety",
+                days="MoTuWeTh",
+                period_name="B",
+                start_time="10:00 AM",
+                start_time_24h="10:00:00",
+                location="Pavilion",
+                has_requirements=True,
+                class_completed=True,
                 raw_class_name="Fire Safety",
             )
         ],
         requirements=[
             cli.RequirementRecord(
-                scout_name="Bo Baker", attendee_id="90000002", class_number="26MB2",
-                class_p4_id="2000002", merit_badge_name="Fire Safety", requirement_id="r1",
-                requirement_type_id="1", requirement_number="1", description="Done.",
-                completed_requirement=True, completed_class=True, requirement_on_event=True,
+                scout_name="Bo Baker",
+                attendee_id="90000002",
+                class_number="26MB2",
+                class_p4_id="2000002",
+                merit_badge_name="Fire Safety",
+                requirement_id="r1",
+                requirement_type_id="1",
+                requirement_number="1",
+                description="Done.",
+                completed_requirement=True,
+                completed_class=True,
+                requirement_on_event=True,
                 present_days="MoTuWeTh",
             )
         ],
@@ -289,9 +331,7 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
     errors = sum(len(r.errors) for r in results)
 
     output_dir = tmp_path / "run-perf-growth-002"
-    cli.write_outputs(
-        output_dir, results, generate_html=False, generate_email_report=True
-    )
+    cli.write_outputs(output_dir, results, generate_html=False, generate_email_report=True)
 
     scouts_json = json.loads((output_dir / "scouts.json").read_text(encoding="utf-8"))
     assert len(scouts_json) == attendees
@@ -312,7 +352,9 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
     assert len(classes_rows) == classes == 2
     assert len(requirements_rows) == requirements == 3
     assert len(errors_rows) == errors == 1
-    total_data_rows = len(scouts_json) + len(classes_rows) + len(requirements_rows) + len(errors_rows)
+    total_data_rows = (
+        len(scouts_json) + len(classes_rows) + len(requirements_rows) + len(errors_rows)
+    )
     assert total_data_rows == attendees + classes + requirements + errors == 9
 
     # Fixed schema files (generate_html=False -> no report.html).

@@ -21,12 +21,7 @@ _FORBIDDEN_METADATA_TERMS = (
 
 
 def execution_keys(cases: Iterable[CaseMetadata], lane: Lane) -> frozenset[ExecutionKey]:
-    return frozenset(
-        key
-        for case in cases
-        if case.lane is lane
-        for key in case.execution_keys()
-    )
+    return frozenset(key for case in cases if case.lane is lane for key in case.execution_keys())
 
 
 def _validate_ids(cases: Sequence[CaseMetadata]) -> list[str]:

@@ -53,9 +53,7 @@ class FormResponseStub:
 class StrictScript:
     """The strict call-order/parameter contract shared by every acquisition fake."""
 
-    def __init__(
-        self, script: tuple[tuple[ExpectedRequest, ScriptedResponse], ...]
-    ) -> None:
+    def __init__(self, script: tuple[tuple[ExpectedRequest, ScriptedResponse], ...]) -> None:
         self._pending: deque[tuple[ExpectedRequest, ScriptedResponse]] = deque(script)
         self.calls: list[ExpectedRequest] = []
 

@@ -49,7 +49,9 @@ def _args(**o):
     )
 
 
-def _browser(script: tuple[tuple[ExpectedRequest, ScriptedResponse], ...] = ()) -> StrictFakeBrowser:
+def _browser(
+    script: tuple[tuple[ExpectedRequest, ScriptedResponse], ...] = (),
+) -> StrictFakeBrowser:
     return StrictFakeBrowser(StrictScript(script), FakeClock())
 
 

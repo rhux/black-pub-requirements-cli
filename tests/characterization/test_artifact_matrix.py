@@ -28,7 +28,9 @@ def _build_result(rows: tuple, root: Path):
     import scout_schedule_cli as legacy
 
     classes = [
-        legacy.ClassRecord(**{k: v for k, v in row.items() if k in legacy.ClassRecord.__dataclass_fields__})
+        legacy.ClassRecord(
+            **{k: v for k, v in row.items() if k in legacy.ClassRecord.__dataclass_fields__}
+        )
         for row in rows
         if "class_name" in row
     ]
@@ -118,7 +120,8 @@ class LegacyArtifactRunner:
         if member == "email-csv":
             nested = [
                 {
-                    "name": result.name, "attendee_id": result.attendee_id,
+                    "name": result.name,
+                    "attendee_id": result.attendee_id,
                     "classes": [asdict(c) for c in result.classes],
                     "requirements": [asdict(r) for r in result.requirements],
                     "errors": result.errors,
@@ -133,7 +136,8 @@ class LegacyArtifactRunner:
         if member == "email-text-html":
             nested = [
                 {
-                    "name": result.name, "attendee_id": result.attendee_id,
+                    "name": result.name,
+                    "attendee_id": result.attendee_id,
                     "classes": [asdict(c) for c in result.classes],
                     "requirements": [asdict(r) for r in result.requirements],
                     "errors": result.errors,
@@ -143,8 +147,8 @@ class LegacyArtifactRunner:
             emails_dir = root / "emails"
             txt_files = list(emails_dir.glob("*.txt"))
             html_files = list(emails_dir.glob("*.html"))
-            txt_starts_with_greeting = txt_files[0].read_bytes().decode("utf-8").startswith(
-                "Hi Avery Example,"
+            txt_starts_with_greeting = (
+                txt_files[0].read_bytes().decode("utf-8").startswith("Hi Avery Example,")
             )
             html_has_doctype = "<!doctype html>" in html_files[0].read_bytes().decode("utf-8")
             return (len(txt_files), len(html_files), txt_starts_with_greeting, html_has_doctype)
@@ -178,8 +182,15 @@ class LegacyArtifactRunner:
         round_trip_matches = decoded["requirements"][0]["description"] == description
 
         return (
-            script_tag_absent, escaped_lt, escaped_gt, escaped_amp, escaped_u2028, escaped_u2029,
-            literal_u2028_absent, literal_u2029_absent, non_ascii_literal_present,
+            script_tag_absent,
+            escaped_lt,
+            escaped_gt,
+            escaped_amp,
+            escaped_u2028,
+            escaped_u2029,
+            literal_u2028_absent,
+            literal_u2029_absent,
+            non_ascii_literal_present,
             round_trip_matches,
         )
 
@@ -193,8 +204,11 @@ class LegacyArtifactRunner:
             result = _build_result(case.input_rows, root)
             nested = [
                 {
-                    "name": result.name, "attendee_id": result.attendee_id, "classes": [],
-                    "requirements": [asdict(r) for r in result.requirements], "errors": [],
+                    "name": result.name,
+                    "attendee_id": result.attendee_id,
+                    "classes": [],
+                    "requirements": [asdict(r) for r in result.requirements],
+                    "errors": [],
                 }
             ]
             legacy.write_email_reports(root, nested)
@@ -204,8 +218,11 @@ class LegacyArtifactRunner:
             result = _build_result(case.input_rows, root)
             nested = [
                 {
-                    "name": result.name, "attendee_id": result.attendee_id, "classes": [],
-                    "requirements": [asdict(r) for r in result.requirements], "errors": [],
+                    "name": result.name,
+                    "attendee_id": result.attendee_id,
+                    "classes": [],
+                    "requirements": [asdict(r) for r in result.requirements],
+                    "errors": [],
                 }
             ]
             legacy.write_email_reports(root, nested)
@@ -219,8 +236,11 @@ class LegacyArtifactRunner:
         if member == "no-data":
             nested = [
                 {
-                    "name": "Avery Example", "attendee_id": "90000001", "classes": [],
-                    "requirements": [], "errors": ["something failed"],
+                    "name": "Avery Example",
+                    "attendee_id": "90000001",
+                    "classes": [],
+                    "requirements": [],
+                    "errors": ["something failed"],
                 }
             ]
             legacy.write_email_reports(root, nested)
@@ -231,8 +251,11 @@ class LegacyArtifactRunner:
         if member == "same-name-disambiguation":
             nested = [
                 {
-                    "name": "Avery Example", "attendee_id": row["attendee_id"], "classes": [],
-                    "requirements": [dict(row, requirement_number="#1a")], "errors": [],
+                    "name": "Avery Example",
+                    "attendee_id": row["attendee_id"],
+                    "classes": [],
+                    "requirements": [dict(row, requirement_number="#1a")],
+                    "errors": [],
                 }
                 for row in case.input_rows
             ]
@@ -286,10 +309,14 @@ class LegacyArtifactRunner:
             return stem_a != stem_b
         if member == "duplicate-html-filename":
             result_1 = _build_result((), root)
-            legacy.write_outputs(root, [result_1], generate_html=True, html_name="sub/dir/report.html")
+            legacy.write_outputs(
+                root, [result_1], generate_html=True, html_name="sub/dir/report.html"
+            )
             first_text = (root / "report.html").read_text(encoding="utf-8")
             result_2 = _build_result((_class_row_for_test(),), root)
-            legacy.write_outputs(root, [result_2], generate_html=True, html_name="../escape/report.html")
+            legacy.write_outputs(
+                root, [result_2], generate_html=True, html_name="../escape/report.html"
+            )
             second_text = (root / "report.html").read_text(encoding="utf-8")
             return (
                 (root / "sub").exists(),
@@ -305,15 +332,21 @@ class LegacyArtifactRunner:
 
         value = str(case.input_rows[0]["scout_name"])
         row = legacy.ClassRecord(
-            scout_name=value, attendee_id="90000001", class_number="26MB1",
-            class_p4_id="2000001", class_name="Chess", days="MoTuWeTh",
-            period_name="A Block", start_time="09:00 AM", start_time_24h="09:00:00",
-            location="Pavilion", has_requirements=True, class_completed=False,
+            scout_name=value,
+            attendee_id="90000001",
+            class_number="26MB1",
+            class_p4_id="2000001",
+            class_name="Chess",
+            days="MoTuWeTh",
+            period_name="A Block",
+            start_time="09:00 AM",
+            start_time_24h="09:00:00",
+            location="Pavilion",
+            has_requirements=True,
+            class_completed=False,
             raw_class_name="Chess",
         )
-        legacy.write_csv(
-            root / "classes.csv", [row], list(legacy.ClassRecord.__dataclass_fields__)
-        )
+        legacy.write_csv(root / "classes.csv", [row], list(legacy.ClassRecord.__dataclass_fields__))
         raw_bytes = (root / "classes.csv").read_bytes()
         text = raw_bytes.decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(text))
@@ -399,21 +432,37 @@ class LegacyArtifactRunner:
 
 def _class_row_for_test() -> dict:
     return {
-        "scout_name": "Avery Example", "attendee_id": "90000001", "class_number": "26MB1",
-        "class_p4_id": "2000001", "class_name": "Chess", "days": "MoTuWeTh",
-        "period_name": "A Block", "start_time": "09:00 AM", "start_time_24h": "09:00:00",
-        "location": "Pavilion", "has_requirements": True, "class_completed": False,
+        "scout_name": "Avery Example",
+        "attendee_id": "90000001",
+        "class_number": "26MB1",
+        "class_p4_id": "2000001",
+        "class_name": "Chess",
+        "days": "MoTuWeTh",
+        "period_name": "A Block",
+        "start_time": "09:00 AM",
+        "start_time_24h": "09:00:00",
+        "location": "Pavilion",
+        "has_requirements": True,
+        "class_completed": False,
         "raw_class_name": "Chess",
     }
 
 
 def _requirement_row_for_test() -> dict:
     return {
-        "scout_name": "Avery Example", "attendee_id": "90000001", "class_number": "26MB1",
-        "class_p4_id": "2000001", "merit_badge_name": "Chess", "requirement_id": "r1",
-        "requirement_type_id": "1", "requirement_number": "#1a", "description": "Show work.",
-        "completed_requirement": False, "completed_class": False,
-        "requirement_on_event": True, "present_days": "MoTuWeTh",
+        "scout_name": "Avery Example",
+        "attendee_id": "90000001",
+        "class_number": "26MB1",
+        "class_p4_id": "2000001",
+        "merit_badge_name": "Chess",
+        "requirement_id": "r1",
+        "requirement_type_id": "1",
+        "requirement_number": "#1a",
+        "description": "Show work.",
+        "completed_requirement": False,
+        "completed_class": False,
+        "requirement_on_event": True,
+        "present_days": "MoTuWeTh",
     }
 
 
@@ -434,7 +483,5 @@ def test_artifact_registry_is_structurally_valid() -> None:
     art_axes = [axis for axis in AXES if axis.domain is Domain.ARTIFACT]
     art_boundaries = [b for b in BOUNDARIES if b.domain is Domain.ARTIFACT]
 
-    errors = validate_registry(
-        ALL_ARTIFACT_METADATA, art_axes, art_boundaries, [], list(POLICIES)
-    )
+    errors = validate_registry(ALL_ARTIFACT_METADATA, art_axes, art_boundaries, [], list(POLICIES))
     assert errors == ()

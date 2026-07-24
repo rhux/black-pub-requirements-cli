@@ -92,9 +92,7 @@ def test_scale_dup_break_raises_clear_error_when_an_attendee_has_no_classes() ->
 def _ordered_attendee_ids(seed: str, count: int, ordering: str) -> tuple[str, ...]:
     """Applies the case's declared "ordering" to the deterministically-built dataset's attendee
     upstream ids -- grouped (natural), reversed, or interleaved (odds-then-evens)."""
-    p = profile(
-        "SCALE-SMALL", attendee_count=count, deduplicated_class_count=count * 2, seed=seed
-    )
+    p = profile("SCALE-SMALL", attendee_count=count, deduplicated_class_count=count * 2, seed=seed)
     dataset = build_dataset(p)
     ids = [a.upstream_id for a in dataset.attendees]
     if ordering == "grouped":
@@ -110,19 +108,22 @@ def _ordered_attendee_ids(seed: str, count: int, ordering: str) -> tuple[str, ..
     ("count", "ordering"),
     [
         pytest.param(
-            3, "grouped",
+            3,
+            "grouped",
             marks=pytest.mark.matrix_case(
                 case_id="SCALE-SMALL-001", context_id="run", lane="default"
             ),
         ),
         pytest.param(
-            7, "reversed",
+            7,
+            "reversed",
             marks=pytest.mark.matrix_case(
                 case_id="SCALE-SMALL-002", context_id="run", lane="default"
             ),
         ),
         pytest.param(
-            11, "interleaved",
+            11,
+            "interleaved",
             marks=pytest.mark.matrix_case(
                 case_id="SCALE-SMALL-003", context_id="run", lane="default"
             ),
@@ -165,7 +166,9 @@ def test_scale_canon_022_topology() -> None:
     assert per_attendee_counts == Counter({5: 10, 4: 12})
 
     # 103 raw = 98 deduplicated + 5 duplicates, one per attendee among the first five.
-    duplicated_attendees = [a for a in dataset.attendees if len(a.raw_class_ids) > len(a.deduped_class_ids)]
+    duplicated_attendees = [
+        a for a in dataset.attendees if len(a.raw_class_ids) > len(a.deduped_class_ids)
+    ]
     assert len(duplicated_attendees) == 5
     assert {a.index for a in duplicated_attendees} == {0, 1, 2, 3, 4}
 
@@ -345,7 +348,5 @@ def test_scale_registry_is_structurally_valid() -> None:
     scale_axes = [axis for axis in AXES if axis.domain is Domain.SCALE]
     scale_boundaries = [b for b in BOUNDARIES if b.domain is Domain.SCALE]
 
-    errors = validate_registry(
-        ALL_SCALE_METADATA, scale_axes, scale_boundaries, [], list(POLICIES)
-    )
+    errors = validate_registry(ALL_SCALE_METADATA, scale_axes, scale_boundaries, [], list(POLICIES))
     assert errors == ()

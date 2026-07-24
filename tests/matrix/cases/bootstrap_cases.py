@@ -49,7 +49,9 @@ def _meta(case_id: str, axis_id: str, member: str, rationale: str, evidence: str
 @dataclass(frozen=True, slots=True)
 class BootstrapPathCase:
     meta: CaseMetadata
-    override_leaf: str | None  # subdir name under tmp_path used as SCOUTMB_BOOTSTRAP_ROOT; None => omit the override entirely
+    override_leaf: (
+        str | None
+    )  # subdir name under tmp_path used as SCOUTMB_BOOTSTRAP_ROOT; None => omit the override entirely
     localappdata_leaf: str  # subdir name under tmp_path used as LOCALAPPDATA (consulted only when override_leaf is None)
 
 
@@ -57,10 +59,14 @@ class BootstrapPathCase:
 class BootstrapMarkerCase:
     meta: CaseMetadata
     write_marker: bool  # False => no marker file at all ("missing marker")
-    corrupt_marker_text: str | None  # if set, this literal text is written instead of a JSON payload
+    corrupt_marker_text: (
+        str | None
+    )  # if set, this literal text is written instead of a JSON payload
     schema_version_override: int | None  # None => embed the real current schema version
     python_version_override: str | None  # None => embed the real current Python version
-    requirements_hash_override: str | None  # None => embed the real sha256 of the requirements bytes
+    requirements_hash_override: (
+        str | None
+    )  # None => embed the real sha256 of the requirements bytes
     smoke_test_result: bool  # the patched bootstrap.marker.smoke_test return value
     expected_valid: bool
 
@@ -68,7 +74,9 @@ class BootstrapMarkerCase:
 @dataclass(frozen=True, slots=True)
 class BootstrapSyncCase:
     meta: CaseMetadata
-    scenario: str  # "single-file" | "whole-directory" | "missing-source-raises" | "frozen-vs-unfrozen"
+    scenario: (
+        str  # "single-file" | "whole-directory" | "missing-source-raises" | "frozen-vs-unfrozen"
+    )
 
 
 # ==================================================================================================
@@ -207,7 +215,7 @@ BOOTSTRAP_MARKER_CASES: tuple[BootstrapMarkerCase, ...] = (
             "schema-version-mismatch",
             "The marker parses as valid JSON with every other field correct, but its "
             "schema_version does not equal the current MARKER_SCHEMA_VERSION: "
-            "is_environment_valid's second check (`marker.get(\"schema_version\") != "
+            'is_environment_valid\'s second check (`marker.get("schema_version") != '
             "MARKER_SCHEMA_VERSION`) fires and returns False before python_version or the "
             "requirements hash are ever compared.",
             _EVIDENCE_MARKER,
@@ -272,7 +280,7 @@ BOOTSTRAP_SYNC_CASES: tuple[BootstrapSyncCase, ...] = (
             "BOOT-SYNC-001",
             "BOOT-SYNC",
             "single-file",
-            "One _FILES entry (\"requirements.txt\") copied via shutil.copy2 lands at "
+            'One _FILES entry ("requirements.txt") copied via shutil.copy2 lands at '
             "paths.app_dir/requirements.txt with byte-for-byte identical content to the "
             "synthetic source file this test itself wrote -- compared as real filesystem state "
             "after running the real sync_app_source, never derived from sync_app_source's own "
@@ -286,7 +294,7 @@ BOOTSTRAP_SYNC_CASES: tuple[BootstrapSyncCase, ...] = (
             "BOOT-SYNC-002",
             "BOOT-SYNC",
             "whole-directory",
-            "The one _DIRS entry (\"ui/static\") copied via shutil.copytree(dirs_exist_ok=True) "
+            'The one _DIRS entry ("ui/static") copied via shutil.copytree(dirs_exist_ok=True) '
             "recursively lands every file of a synthetic nested tree (including a subdirectory) "
             "at the matching relative path under paths.app_dir/ui/static, each with identical "
             "bytes to what this test wrote into the synthetic source tree.",
@@ -316,7 +324,7 @@ BOOTSTRAP_SYNC_CASES: tuple[BootstrapSyncCase, ...] = (
             "BOOT-SYNC",
             "frozen-vs-unfrozen-source-root",
             "_source_root reads sys.frozen: when true it resolves to "
-            "Path(sys._MEIPASS)/\"app_src\" (PyInstaller's bundled temp extraction dir); when "
+            'Path(sys._MEIPASS)/"app_src" (PyInstaller\'s bundled temp extraction dir); when '
             "false (or absent) it resolves to Path(__file__).resolve().parent.parent (the real "
             "repo root two levels up from bootstrap/source_sync.py). This case drives "
             "sync_app_source once with sys.frozen patched True against a synthetic ..._MEIPASS/"

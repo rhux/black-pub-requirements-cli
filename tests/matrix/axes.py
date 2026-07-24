@@ -171,9 +171,7 @@ _PDF_AXES: tuple[AxisSpec, ...] = (
     AxisSpec(
         axis_id="PDF-DISC",
         domain=Domain.PDF,
-        members=frozenset(
-            {"file", "directory", "glob", "recursive", "overlapping", "missing"}
-        ),
+        members=frozenset({"file", "directory", "glob", "recursive", "overlapping", "missing"}),
         min_focused_cases=6,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"PDF-B-EXPAND"}),
@@ -485,9 +483,7 @@ _ACQUISITION_AXES: tuple[AxisSpec, ...] = (
     AxisSpec(
         axis_id="NET-WIRE",
         domain=Domain.ACQUISITION,
-        members=frozenset(
-            {"http-gateway-consults-policy", "playwright-gateway-consults-policy"}
-        ),
+        members=frozenset({"http-gateway-consults-policy", "playwright-gateway-consults-policy"}),
         min_focused_cases=2,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset(),
@@ -595,9 +591,7 @@ _REQUIREMENT_AXES: tuple[AxisSpec, ...] = (
     AxisSpec(
         axis_id="REQ-IDENTITY",
         domain=Domain.REQUIREMENT,
-        members=frozenset(
-            {"same-name-different-id", "same-id-groups", "blank-id-fallback"}
-        ),
+        members=frozenset({"same-name-different-id", "same-id-groups", "blank-id-fallback"}),
         min_focused_cases=3,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"REQ-B-ANNOTATE"}),
@@ -746,9 +740,7 @@ _ARTIFACT_AXES: tuple[AxisSpec, ...] = (
     AxisSpec(
         axis_id="PRIV-CONTAIN",
         domain=Domain.ARTIFACT,
-        members=frozenset(
-            {"adapter-file-stays-in-root", "no-private-field-reaches-shareable"}
-        ),
+        members=frozenset({"adapter-file-stays-in-root", "no-private-field-reaches-shareable"}),
         min_focused_cases=2,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset(),
@@ -971,9 +963,7 @@ _DESKTOP_AXES: tuple[AxisSpec, ...] = (
     AxisSpec(
         axis_id="DESK-READY",
         domain=Domain.PLATFORM,
-        members=frozenset(
-            {"immediate-success", "retries-then-success", "timeout-gives-up"}
-        ),
+        members=frozenset({"immediate-success", "retries-then-success", "timeout-gives-up"}),
         min_focused_cases=3,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"DESK-B-READY"}),

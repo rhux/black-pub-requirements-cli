@@ -193,11 +193,16 @@ REQUIREMENT_CASES_SHAPE: tuple[RequirementCase, ...] = tuple(
 # child's inferred status (which itself depends only on completed_requirement).
 # ==============================================================================================
 _FLAG_PAIRS: tuple[tuple[bool, bool], ...] = (
-    (True, True), (True, False), (False, True), (False, False)
+    (True, True),
+    (True, False),
+    (False, True),
+    (False, False),
 )
 _FLAG_MEMBERS = (
-    "req-true-class-true", "req-true-class-false",
-    "req-false-class-true", "req-false-class-false",
+    "req-true-class-true",
+    "req-true-class-false",
+    "req-false-class-true",
+    "req-false-class-false",
 )
 
 REQUIREMENT_CASES_FLAG_LEAF: tuple[RequirementCase, ...] = tuple(
@@ -217,7 +222,9 @@ REQUIREMENT_CASES_FLAG_LEAF: tuple[RequirementCase, ...] = tuple(
             "tree_consumer": (_leaf_row_projection("#5", ("5",), None, req_flag),)
         },
     )
-    for i, (member, (req_flag, class_flag)) in enumerate(zip(_FLAG_MEMBERS, _FLAG_PAIRS, strict=True), start=1)
+    for i, (member, (req_flag, class_flag)) in enumerate(
+        zip(_FLAG_MEMBERS, _FLAG_PAIRS, strict=True), start=1
+    )
 )
 
 REQUIREMENT_CASES_FLAG_PARENT: tuple[RequirementCase, ...] = tuple(
@@ -240,11 +247,18 @@ REQUIREMENT_CASES_FLAG_PARENT: tuple[RequirementCase, ...] = tuple(
         expected_by_context={
             "tree_consumer": (
                 (
-                    "#5", ("5",), None,
+                    "#5",
+                    ("5",),
+                    None,
                     "complete" if req_flag else "incomplete",
-                    ("All 1 subrequirements are complete." if req_flag
-                     else "0 of 1 subrequirements are complete."),
-                    1 if req_flag else 0, 1, None,
+                    (
+                        "All 1 subrequirements are complete."
+                        if req_flag
+                        else "0 of 1 subrequirements are complete."
+                    ),
+                    1 if req_flag else 0,
+                    1,
+                    None,
                 ),
                 _leaf_row_projection("#5a", ("5", "a"), "#5", req_flag),
             )
@@ -282,9 +296,7 @@ REQUIREMENT_CASES_TYPE: tuple[RequirementCase, ...] = tuple(
             _EVIDENCE_ANNOTATE,
         ),
         rows=(_row("#1", requirement_type_id=type_id),),
-        expected_by_context={
-            "tree_consumer": (_leaf_row_projection("#1", ("1",), None, False),)
-        },
+        expected_by_context={"tree_consumer": (_leaf_row_projection("#1", ("1",), None, False),)},
     )
     for i, type_id in enumerate(("1", "2", "3"), start=1)
 )
@@ -321,8 +333,12 @@ REQUIREMENT_CASES_CLASS: tuple[RequirementCase, ...] = tuple(
         ),
         expected_by_context={
             "html_consumer": (
-                (("class_completed", flag), ("class_number", "26MB1"),
-                 ("class_p4_id", "2000001"), ("scout_name", "Avery Example")),
+                (
+                    ("class_completed", flag),
+                    ("class_number", "26MB1"),
+                    ("class_p4_id", "2000001"),
+                    ("scout_name", "Avery Example"),
+                ),
             )
         },
     )
@@ -419,8 +435,14 @@ REQUIREMENT_CASES_NOTE: tuple[RequirementCase, ...] = (
             "requirement_path": ((("6",), "6"), (("6", "note"), "6")),
             "tree_consumer": (
                 (
-                    "#6", ("6",), None, "incomplete",
-                    "0 of 1 subrequirements are complete.", 0, 1, None,
+                    "#6",
+                    ("6",),
+                    None,
+                    "incomplete",
+                    "0 of 1 subrequirements are complete.",
+                    0,
+                    1,
+                    None,
                 ),
                 _leaf_row_projection("Note.", ("6", "note"), "#6", False),
             ),
@@ -436,7 +458,10 @@ REQUIREMENT_CASES_NOTE: tuple[RequirementCase, ...] = (
 REQUIREMENT_CASES_TREE: tuple[RequirementCase, ...] = (
     RequirementCase(
         meta=_meta(
-            "REQ-TREE-001", "REQ-TREE", "leaf", ("tree_consumer",),
+            "REQ-TREE-001",
+            "REQ-TREE",
+            "leaf",
+            ("tree_consumer",),
             "A single '#7a' row with no other rows in its group: len(path)>1 but "
             "prior_path_indexes is empty and header_stack is empty, so parent_index stays None "
             "-- an ordinary leaf with no parent.",
@@ -449,7 +474,10 @@ REQUIREMENT_CASES_TREE: tuple[RequirementCase, ...] = (
     ),
     RequirementCase(
         meta=_meta(
-            "REQ-TREE-002", "REQ-TREE", "parent", ("tree_consumer",),
+            "REQ-TREE-002",
+            "REQ-TREE",
+            "parent",
+            ("tree_consumer",),
             "'#8' followed by its child '#8a' (completed): the child's path[:1]==('8',) matches "
             "the parent's registered path, so parent_index resolves to the parent; the parent's "
             "status is then inferred complete because its one child is complete.",
@@ -465,7 +493,10 @@ REQUIREMENT_CASES_TREE: tuple[RequirementCase, ...] = (
     ),
     RequirementCase(
         meta=_meta(
-            "REQ-TREE-003", "REQ-TREE", "grandparent", ("tree_consumer",),
+            "REQ-TREE-003",
+            "REQ-TREE",
+            "grandparent",
+            ("tree_consumer",),
             "'#9' -> '#9a' -> '#9a1' three-level chain, only the leaf marked complete: each "
             "ancestor's completion is inferred recursively from its single child, all the way up.",
             _EVIDENCE_ANNOTATE,
@@ -474,14 +505,26 @@ REQUIREMENT_CASES_TREE: tuple[RequirementCase, ...] = (
         expected_by_context={
             "tree_consumer": (
                 ("#9", ("9",), None, "complete", "All 1 subrequirements are complete.", 1, 1, None),
-                ("#9a", ("9", "a"), "#9", "complete", "All 1 subrequirements are complete.", 1, 1, None),
+                (
+                    "#9a",
+                    ("9", "a"),
+                    "#9",
+                    "complete",
+                    "All 1 subrequirements are complete.",
+                    1,
+                    1,
+                    None,
+                ),
                 _leaf_row_projection("#9a1", ("9", "a", "1"), "#9a", True),
             )
         },
     ),
     RequirementCase(
         meta=_meta(
-            "REQ-TREE-004", "REQ-TREE", "missing-parent", ("tree_consumer",),
+            "REQ-TREE-004",
+            "REQ-TREE",
+            "missing-parent",
+            ("tree_consumer",),
             "'#10a' and '#10c' with NO '#10' row ever given: the parent scan only ever checks "
             "path[:1]==('10',), which was never registered by any row, so BOTH siblings stay "
             "top-level and unlinked from each other -- a bare top-level number is required for "
@@ -498,7 +541,10 @@ REQUIREMENT_CASES_TREE: tuple[RequirementCase, ...] = (
     ),
     RequirementCase(
         meta=_meta(
-            "REQ-TREE-005", "REQ-TREE", "malformed-numbering", ("tree_consumer",),
+            "REQ-TREE-005",
+            "REQ-TREE",
+            "malformed-numbering",
+            ("tree_consumer",),
             "'#16.Option.A' (a compound TYPE-3 header, never given as a bare '#16') followed by "
             "the malformed '#(y)(1)(2)' (borrows current_top_level='16'): none of the primary "
             "path-prefix depths match any registered path, so it falls back to the nearest "
@@ -512,18 +558,25 @@ REQUIREMENT_CASES_TREE: tuple[RequirementCase, ...] = (
         expected_by_context={
             "tree_consumer": (
                 (
-                    "#16.Option.A", ("16", "option", "a"), None, "incomplete",
-                    "0 of 1 subrequirements are complete.", 0, 1, None,
+                    "#16.Option.A",
+                    ("16", "option", "a"),
+                    None,
+                    "incomplete",
+                    "0 of 1 subrequirements are complete.",
+                    0,
+                    1,
+                    None,
                 ),
-                _leaf_row_projection(
-                    "#(y)(1)(2)", ("16", "y", "1", "2"), "#16.Option.A", False
-                ),
+                _leaf_row_projection("#(y)(1)(2)", ("16", "y", "1", "2"), "#16.Option.A", False),
             )
         },
     ),
     RequirementCase(
         meta=_meta(
-            "REQ-TREE-006", "REQ-TREE", "label-only", ("tree_consumer",),
+            "REQ-TREE-006",
+            "REQ-TREE",
+            "label-only",
+            ("tree_consumer",),
             "'#17' followed by a pure-text TYPE-3 label row 'Materials Needed': the label's "
             "path prefix ('17',) matches the parent's registered path, so the label becomes a "
             "child (and header_stack) entry despite carrying no requirement letter/number.",
@@ -533,8 +586,14 @@ REQUIREMENT_CASES_TREE: tuple[RequirementCase, ...] = (
         expected_by_context={
             "tree_consumer": (
                 (
-                    "#17", ("17",), None, "incomplete",
-                    "0 of 1 subrequirements are complete.", 0, 1, None,
+                    "#17",
+                    ("17",),
+                    None,
+                    "incomplete",
+                    "0 of 1 subrequirements are complete.",
+                    0,
+                    1,
+                    None,
                 ),
                 _leaf_row_projection(
                     "Materials Needed", ("17", "materials", "needed"), "#17", False
@@ -562,9 +621,7 @@ REQUIREMENT_CASES_TREE: tuple[RequirementCase, ...] = (
 _CHOICE_PARENT_NUMBER = "#3"
 _CHOICE_PARENT_PATH: tuple[str, ...] = ("3",)
 _CHOICE_CHILD_NUMBERS = ("#3a", "#3b", "#3c", "#3d")
-_CHOICE_CHILD_PATHS: tuple[tuple[str, ...], ...] = (
-    ("3", "a"), ("3", "b"), ("3", "c"), ("3", "d")
-)
+_CHOICE_CHILD_PATHS: tuple[tuple[str, ...], ...] = (("3", "a"), ("3", "b"), ("3", "c"), ("3", "d"))
 _CHOICE_TOTAL = 4
 _CHOICE_THRESHOLD = 2
 
@@ -580,7 +637,9 @@ _CHOICE_TABLE: tuple[tuple[str, str, str, str, int], ...] = tuple(
 def _choice_rows(description: str, satisfied_count: int) -> tuple[dict[str, object], ...]:
     parent = _row(_CHOICE_PARENT_NUMBER, description=description)
     children = tuple(
-        _row(number, description=f"Do part {letter}.", completed_requirement=index < satisfied_count)
+        _row(
+            number, description=f"Do part {letter}.", completed_requirement=index < satisfied_count
+        )
         for index, (number, letter) in enumerate(zip(_CHOICE_CHILD_NUMBERS, "abcd", strict=True))
     )
     return (parent, *children)
@@ -601,11 +660,19 @@ def _choice_expected(satisfied_count: int) -> tuple[object, ...]:
         parent_reason = f"{satisfied_count} of {_CHOICE_TOTAL} subrequirements are complete."
     rows: list[object] = [
         (
-            _CHOICE_PARENT_NUMBER, _CHOICE_PARENT_PATH, None, parent_status, parent_reason,
-            satisfied_count, _CHOICE_TOTAL, _CHOICE_THRESHOLD,
+            _CHOICE_PARENT_NUMBER,
+            _CHOICE_PARENT_PATH,
+            None,
+            parent_status,
+            parent_reason,
+            satisfied_count,
+            _CHOICE_TOTAL,
+            _CHOICE_THRESHOLD,
         )
     ]
-    for index, (number, path) in enumerate(zip(_CHOICE_CHILD_NUMBERS, _CHOICE_CHILD_PATHS, strict=True)):
+    for index, (number, path) in enumerate(
+        zip(_CHOICE_CHILD_NUMBERS, _CHOICE_CHILD_PATHS, strict=True)
+    ):
         rows.append(
             _leaf_row_projection(number, path, _CHOICE_PARENT_NUMBER, index < satisfied_count)
         )
@@ -692,7 +759,16 @@ REQUIREMENT_CASES_NONMUTATE: tuple[RequirementCase, ...] = (
         rows=(_row("#20"), _row("#20a", completed_requirement=True)),
         expected_by_context={
             "tree_consumer": (
-                ("#20", ("20",), None, "complete", "All 1 subrequirements are complete.", 1, 1, None),
+                (
+                    "#20",
+                    ("20",),
+                    None,
+                    "complete",
+                    "All 1 subrequirements are complete.",
+                    1,
+                    1,
+                    None,
+                ),
                 _leaf_row_projection("#20a", ("20", "a"), "#20", True),
             )
         },
@@ -709,9 +785,7 @@ REQUIREMENT_CASES_NONMUTATE: tuple[RequirementCase, ...] = (
             _EVIDENCE_ANNOTATE,
         ),
         rows=(_row("#(z)"),),
-        expected_by_context={
-            "tree_consumer": (_leaf_row_projection("#(z)", ("z",), None, False),)
-        },
+        expected_by_context={"tree_consumer": (_leaf_row_projection("#(z)", ("z",), None, False),)},
     ),
 )
 
@@ -759,13 +833,24 @@ REQUIREMENT_CASES_IDENTITY: tuple[RequirementCase, ...] = (
         rows=(
             _row("#23", scout_name="Name Variant A", attendee_id="ZZZ"),
             _row(
-                "#23a", scout_name="Name Variant B", attendee_id="ZZZ",
+                "#23a",
+                scout_name="Name Variant B",
+                attendee_id="ZZZ",
                 completed_requirement=True,
             ),
         ),
         expected_by_context={
             "tree_consumer": (
-                ("#23", ("23",), None, "complete", "All 1 subrequirements are complete.", 1, 1, None),
+                (
+                    "#23",
+                    ("23",),
+                    None,
+                    "complete",
+                    "All 1 subrequirements are complete.",
+                    1,
+                    1,
+                    None,
+                ),
                 _leaf_row_projection("#23a", ("23", "a"), "#23", True),
             )
         },
@@ -809,6 +894,4 @@ REQUIREMENT_CASES: tuple[RequirementCase, ...] = (
     + REQUIREMENT_CASES_IDENTITY
 )
 
-ALL_REQUIREMENT_METADATA: tuple[CaseMetadata, ...] = tuple(
-    case.meta for case in REQUIREMENT_CASES
-)
+ALL_REQUIREMENT_METADATA: tuple[CaseMetadata, ...] = tuple(case.meta for case in REQUIREMENT_CASES)

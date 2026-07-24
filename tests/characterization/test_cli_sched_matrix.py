@@ -107,7 +107,9 @@ class CliRunner:
 
     # -- CLI-SCHED-001: defaults/help --------------------------------------------------------
 
-    def _ctx_CLI_SCHED_001(self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+    def _ctx_CLI_SCHED_001(
+        self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> object:
         if self.context_id == "help":
             monkeypatch.setattr(sys, "argv", ["scout_schedule_cli.py", "--help"])
             with pytest.raises(SystemExit) as exc_info:
@@ -132,7 +134,9 @@ class CliRunner:
 
     # -- CLI-SCHED-002: empty success ---------------------------------------------------------
 
-    def _ctx_CLI_SCHED_002(self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+    def _ctx_CLI_SCHED_002(
+        self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> object:
         # Deliberately NOT patching async_playwright: load_inputs raises before it is ever
         # reached for a zero-filtered scout list (see the case rationale).
         input_csv = root / "scouts.csv"
@@ -146,14 +150,17 @@ class CliRunner:
 
     # -- CLI-SCHED-003: one-scout success -----------------------------------------------------
 
-    def _ctx_CLI_SCHED_003(self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+    def _ctx_CLI_SCHED_003(
+        self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> object:
         monkeypatch.setattr(cli, "navigate_and_trigger_schedule", _ok_nav)
         monkeypatch.setattr(cli, "discover_name", _ok_name)
         monkeypatch.setattr(cli, "post_requirement", _ok_post)
         _patch_playwright(monkeypatch)
         input_csv = root / "scouts.csv"
         _write_csv(
-            input_csv, [("Avery Archer", "Youth", "https://scoutingevent.com/mobile/x?t=TESTTOKEN0001")]
+            input_csv,
+            [("Avery Archer", "Youth", "https://scoutingevent.com/mobile/x?t=TESTTOKEN0001")],
         )
         output_dir = root / "out"
         code, stderr = _run_main(
@@ -172,7 +179,9 @@ class CliRunner:
 
     # -- CLI-SCHED-004: partial failure -------------------------------------------------------
 
-    def _ctx_CLI_SCHED_004(self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+    def _ctx_CLI_SCHED_004(
+        self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> object:
         async def flaky_nav(page: object, url: str, timeout: int) -> object:
             if "bad" in url:
                 raise RuntimeError("schedule exploded")
@@ -209,7 +218,9 @@ class CliRunner:
 
     # -- CLI-SCHED-005/006: main()'s own exception wrapper ------------------------------------
 
-    def _ctx_CLI_SCHED_005(self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+    def _ctx_CLI_SCHED_005(
+        self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> object:
         async def boom(args: object, **kwargs: object) -> int:
             raise RuntimeError("boom")
 
@@ -220,7 +231,9 @@ class CliRunner:
         found = ("ERROR: boom",) if "ERROR: boom" in stderr else ()
         return CliObservation(return_code=code, stderr_contains=found)
 
-    def _ctx_CLI_SCHED_006(self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+    def _ctx_CLI_SCHED_006(
+        self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> object:
         async def interrupt(args: object, **kwargs: object) -> int:
             raise KeyboardInterrupt()
 

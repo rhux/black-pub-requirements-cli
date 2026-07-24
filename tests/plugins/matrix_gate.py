@@ -111,9 +111,7 @@ def _required_keys(config: pytest.Config, lane: str) -> set[ExecutionKey]:
     return set(execution_keys(ALL_CASES, Lane(lane)))
 
 
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     global _CURRENT
     _CURRENT = None
     lane = config.getoption("--matrix-lane")
@@ -159,13 +157,9 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     required = acc.required
     # Effective selection = items my collection hook saw, minus any later deselection.
     effective = {k: acc.collected[k] - acc.deselected[k] for k in required}
-    passed = sum(
-        1 for k in required if effective[k] == 1 and acc.outcomes.get(k) == "passed"
-    )
+    passed = sum(1 for k in required if effective[k] == 1 and acc.outcomes.get(k) == "passed")
     failed = sum(1 for k in required if effective[k] == 1 and acc.outcomes.get(k) == "failed")
-    skipped = sum(
-        1 for k in required if effective[k] == 1 and acc.outcomes.get(k) == "skipped"
-    )
+    skipped = sum(1 for k in required if effective[k] == 1 and acc.outcomes.get(k) == "skipped")
     duplicated = sum(1 for k in required if effective[k] > 1)
     missing = sum(1 for k in required if effective[k] <= 0)
     summary = (
