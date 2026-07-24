@@ -72,6 +72,15 @@ def test_scale_002_shared_name_distinct_upstream_ids() -> None:
     assert first.deduped_class_ids != second.deduped_class_ids
 
 
+def test_scale_dup_break_raises_clear_error_when_an_attendee_has_no_classes() -> None:
+    """A profile where duplicate_count exceeds the number of attendees that were actually
+    allocated at least one class must fail with an informative ValueError, not an opaque
+    IndexError deep inside dataset construction."""
+    p = profile("SCALE-DUP-BREAK", attendee_count=5, deduplicated_class_count=1, raw_class_count=4)
+    with pytest.raises(ValueError, match="cannot add a duplicate for attendee"):
+        build_dataset(p)
+
+
 # ---------------------------------------------------------------------------------------------
 # SCALE-SMALL-001..003: repeatable by profile version and seed.
 # ---------------------------------------------------------------------------------------------

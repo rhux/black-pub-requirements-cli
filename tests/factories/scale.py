@@ -266,6 +266,17 @@ def build_dataset(
         cursor += count
     all_deduped_class_ids = tuple(f"CLS-{i:05d}" for i in range(cursor))
 
+    # The reserved-position duplicate mechanism assumes deduplicated_class_count is large enough
+    # that each of the first duplicate_count attendees has at least one class allocated --
+    # validated above.
+    for attendee_index in range(duplicate_count):
+        if len(class_ids_by_attendee[attendee_index]) < 1:
+            raise ValueError(
+                f"cannot add a duplicate for attendee {attendee_index}: it was allocated 0 "
+                "classes (increase deduplicated_class_count relative to attendee_count/"
+                "duplicate_count for this profile)"
+            )
+
     # Reserve the first `duplicate_count` attendees' FIRST class as forced-complete so that
     # adding one incomplete duplicate row for it reproduces "legacy dedup retains the completed
     # member" without perturbing the completion marginal (see module docstring / plan contract).
