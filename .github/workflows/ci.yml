@@ -3,29 +3,19 @@ on:
   push: { branches: [main] }
   pull_request:
 jobs:
-  lint:
+  static-quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
       - run: uv python install 3.12
-      - run: uv sync --locked
+      - run: uv sync --locked --all-extras
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-  types:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
-      - run: uv python install 3.12
-      - run: uv sync --locked
       - run: uv run mypy
-  lock:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
       - run: uv lock --check
+      - run: uv run pytest tests/matrix/test_registry.py -q
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -39,3 +29,62 @@ jobs:
       # layer of the privacy scanner degrades to pattern-only automatically.
       - run: uv sync --locked --all-extras
       - run: uv run pytest --cov --cov-report=term-missing -q
+
+  # Runs the scoped-coverage and aggregate-baseline CHECKS (never --update, which is a manual,
+  # explicit, reviewed local action) against the checked-in tests/baselines/phase_a.json and
+  # tests/matrix/boundaries.py EXCLUSIONS. Pinned to macos-latest deliberately: every
+  # BranchExclusion in boundaries.py (and the captured baseline itself) was reviewed against a
+  # real coverage run on macOS -- three of those exclusions are OS-dispatch branches
+  # (ui/server._platform_data_root) where only ONE of win32/darwin/linux executes on any single
+  # host. Running this job on a different OS would make the darwin branch "missing" (no
+  # exclusion covers it) and the linux-fallback exclusion "stale" (now actually covered) --
+  # both real check_phase_a_coverage.py failures, not flakiness. macos-latest keeps this job
+  # reproducing the exact same coverage shape as the local Gate 1b invocation.
+  coverage-baseline:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync --locked --all-extras
+      - run: uv run coverage erase
+      - run: uv run coverage run --branch -m pytest -m "not live_service and not playwright and not private_corpus" -q
+      - run: mkdir -p build && uv run coverage json -o build/phase-a-coverage.json
+      - run: |
+          uv run python tools/check_phase_a_coverage.py \
+            --coverage-json build/phase-a-coverage.json \
+            --exclusions tests/matrix/boundaries.py \
+            --baseline tests/baselines/phase_a.json \
+            --require-complete
+      - run: |
+          uv run python tools/measure_baseline.py \
+            --profile canonical-22 \
+            --coverage-json build/phase-a-coverage.json \
+            --check tests/baselines/phase_a.json
+
+  playwright:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync --locked --all-extras
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run pytest -m playwright --matrix-lane browser --require-browser -q
+
+  # CI NEVER requires raw_data/ (the private corpus) -- the authentic/private-corpus lane stays
+  # a LOCAL-only requirement for Gate 1b, never a CI job. This job proves the OFFLINE default
+  # lane is fully self-accounted (every required execution key present exactly once) with real
+  # non-loopback egress denied at the OS level, so a test that silently depended on network
+  # access would fail loudly here instead of only in a developer's less-locked-down environment.
+  egress-denied:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync --locked --all-extras
+      - name: Deny new non-loopback egress
+        run: sudo iptables -I OUTPUT 1 ! -o lo -m conntrack --ctstate NEW -j REJECT
+      - name: Run offline default lane
+        run: uv run pytest -m "not live_service and not playwright and not private_corpus" --matrix-lane default -q
