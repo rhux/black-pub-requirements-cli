@@ -1,11 +1,7 @@
-import sys
 import uuid
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scout_schedule_cli import AttendeeId, MissingAttendeeId, RunIdentity  # noqa: E402
+from scout_schedule_cli import AttendeeId, MissingAttendeeId, RunIdentity
 
 
 def test_blank_attendee_id_fails_closed():

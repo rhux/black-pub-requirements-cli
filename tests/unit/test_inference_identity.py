@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import sys
 from dataclasses import asdict
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scout_schedule_cli import build_missing_requirements  # noqa: E402
-from tests.factories.records import make_requirement  # noqa: E402
+from scout_schedule_cli import build_missing_requirements
+from tests.factories.records import make_requirement
 
 
 def _scout(aid, rid, num):

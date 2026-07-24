@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-import scout_schedule_cli as cli  # noqa: E402
-from scout_schedule_cli import attendee_filename_stem  # noqa: E402
-from tests.factories.records import make_requirement  # noqa: E402
+import scout_schedule_cli as cli
+from scout_schedule_cli import attendee_filename_stem
+from tests.factories.records import make_requirement
 
 
 def test_stem_hides_the_raw_id_and_carries_the_full_uuid():
@@ -50,12 +46,14 @@ def test_email_reports_do_not_collide_for_same_named_attendees(tmp_path):
 
 
 def test_process_scout_raw_filenames_are_distinct_for_same_named(monkeypatch, tmp_path):
-    """The raw side (inside process_scout) must also not collide. Reuses the Task 9 fakes."""
+    """The raw side (inside process_scout) must also not collide. Reuses the Task 19 strict fakes."""
     import asyncio
 
-    # _Browser/_Resp/_Page from Task 9's test module; import or redefine minimal versions here.
-    from tests.characterization.test_process_scout import _Browser, _Resp  # noqa: E402
+    from tests.characterization.test_process_scout import _Resp
     from tests.factories.payloads import requirement_payload, schedule_payload
+    from tests.fakes.acquisition import StrictScript
+    from tests.fakes.browser import StrictFakeBrowser
+    from tests.fakes.clock import FakeClock
 
     async def name(page, fb):
         return fb
@@ -75,7 +73,8 @@ def test_process_scout_raw_filenames_are_distinct_for_same_named(monkeypatch, tm
         args = __import__("argparse").Namespace(
             timeout=45, request_delay_ms=0, allow_dead_assets=True, headed=False, channel=None
         )
-        await cli.process_scout(_Browser(), scout, args, tmp_path)
+        browser = StrictFakeBrowser(StrictScript(()), FakeClock())
+        await cli.process_scout(browser, scout, args, tmp_path)
 
     asyncio.run(run("90000001"))
     asyncio.run(run("90000002"))

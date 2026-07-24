@@ -3,15 +3,10 @@ Suspect cases are pinned AS-IS; a fix is a separate change with its own RED test
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scout_schedule_cli import requirement_path  # noqa: E402
+from scout_schedule_cli import requirement_path
 
 
 @pytest.mark.parametrize(

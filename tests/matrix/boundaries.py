@@ -451,14 +451,63 @@ _ARTIFACT_BOUNDARIES: tuple[BoundarySpec, ...] = (
     ),
 )
 
+# Platform-domain boundaries (Task 21): the single real path-sanitization seam these pure
+# Windows/macOS-shaped cases drive.
+_PLATFORM_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="PLAT-B-SLUG",
+        qualified_name="scout_schedule_cli.safe_slug",
+        domain=Domain.PLATFORM,
+        required_case_ids=frozenset(
+            {f"PLAT-WIN-{i:03d}" for i in range(1, 9)}
+            | {f"PLAT-MAC-{i:03d}" for i in range(1, 6)}
+        ),
+    ),
+)
+
+# Interface-domain boundaries (Task 21): the ui.server import-time seam, its 12 live routes, the
+# run-id path-safety guard, and the run-listing seam.
+_INTERFACE_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="UI-B-IMPORT",
+        qualified_name="ui.server (module import)",
+        domain=Domain.INTERFACE,
+        required_case_ids=frozenset({"UI-IMPORT-001", "UI-IMPORT-002"}),
+    ),
+    BoundarySpec(
+        boundary_id="UI-B-ROUTES",
+        qualified_name="ui.server.app (FastAPI route table)",
+        domain=Domain.INTERFACE,
+        required_case_ids=frozenset(
+            {f"UI-METHOD-{i:03d}" for i in range(1, 13)}
+            | {f"UI-ROUTE-{i:03d}" for i in range(1, 24)}
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="UI-B-SAFE-RUN-ID",
+        qualified_name="ui.server._safe_run_id",
+        domain=Domain.INTERFACE,
+        required_case_ids=frozenset({f"RUN-ID-{i:03d}" for i in range(1, 5)}),
+    ),
+    BoundarySpec(
+        boundary_id="UI-B-LIST-RUNS",
+        qualified_name="ui.server.list_runs",
+        domain=Domain.INTERFACE,
+        required_case_ids=frozenset({f"RUN-LIST-{i:03d}" for i in range(1, 5)}),
+    ),
+)
+
 # Populated by later slices; Task 17 adds the input-domain load_* seams, Task 18 the PDF seams,
-# Task 19 the acquisition + network-policy seams, Task 20 the requirement + artifact seams.
+# Task 19 the acquisition + network-policy seams, Task 20 the requirement + artifact seams,
+# Task 21 the platform seam + the interface (ui.server) seams.
 BOUNDARIES: tuple[BoundarySpec, ...] = (
     _INPUT_BOUNDARIES
     + _PDF_BOUNDARIES
     + _ACQUISITION_BOUNDARIES
     + _REQUIREMENT_BOUNDARIES
     + _ARTIFACT_BOUNDARIES
+    + _PLATFORM_BOUNDARIES
+    + _INTERFACE_BOUNDARIES
 )
 EXCLUSIONS: tuple[BranchExclusion, ...] = ()
 COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = ()

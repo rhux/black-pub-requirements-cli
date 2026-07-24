@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import csv
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scout_schedule_cli import ClassRecord, RequirementRecord, write_csv  # noqa: E402
-from tests.factories.records import make_class, make_requirement  # noqa: E402
+from scout_schedule_cli import ClassRecord, RequirementRecord, write_csv
+from tests.factories.records import make_class, make_requirement
 
 CLASS_HEADER = [
     "scout_name",

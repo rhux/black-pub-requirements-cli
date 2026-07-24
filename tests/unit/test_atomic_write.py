@@ -1,11 +1,7 @@
 import os
-import sys
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scout_schedule_cli import atomic_write_text  # noqa: E402
+from scout_schedule_cli import atomic_write_text
 
 
 def test_success_replaces_and_roundtrips_encoding(tmp_path):

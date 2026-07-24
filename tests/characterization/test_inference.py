@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import asdict
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scout_schedule_cli import (  # noqa: E402
+from scout_schedule_cli import (
     annotate_requirement_statuses,
     build_missing_requirements,
     choice_requirement_count,
 )
-from tests.factories.records import make_requirement  # noqa: E402
+from tests.factories.records import make_requirement
 
 
 def test_annotate_does_not_mutate_input():

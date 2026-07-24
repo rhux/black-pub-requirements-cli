@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from bootstrap.migrate import MIGRATION_MARKER, migrate_legacy_data  # noqa: E402
+from bootstrap.migrate import MIGRATION_MARKER, migrate_legacy_data
 
 
 def _legacy(root):

@@ -755,7 +755,152 @@ _ARTIFACT_AXES: tuple[AxisSpec, ...] = (
     ),
 )
 
+# Platform-domain axes (Task 21): the pure Windows/macOS path-shaped characterization of
+# scout_schedule_cli.safe_slug (see tests/matrix/cases/platform_cases.py's module docstring for
+# the full hand-traced algorithm). PURE simulated observations only -- no sys.platform
+# monkeypatching, no real OS/filesystem/installer claims.
+_PLATFORM_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="PLAT-WIN",
+        domain=Domain.PLATFORM,
+        members=frozenset(
+            {
+                "reserved-device-name",
+                "trailing-dot-space",
+                "case-collision",
+                "slash-backslash",
+                "drive-letter",
+                "unc-path",
+                "extended-length-path",
+                "traversal",
+            }
+        ),
+        min_focused_cases=8,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PLAT-B-SLUG"}),
+    ),
+    AxisSpec(
+        axis_id="PLAT-MAC",
+        domain=Domain.PLATFORM,
+        members=frozenset(
+            {
+                "nfc-nfd-equivalence",
+                "case-collision",
+                "volume-root",
+                "spaces-and-unicode",
+                "traversal",
+            }
+        ),
+        min_focused_cases=5,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"PLAT-B-SLUG"}),
+    ),
+)
+
+# Interface-domain axes (Task 21): ui/server.py's FastAPI app. UI-ROUTE's member set below is a
+# DELIBERATELY PARTIAL 23 of the full Task-21-planned 31: the 8 members requiring a background
+# asyncio.create_task worker to be driven to completion (PDF/schedule "accepted"/"worker-error",
+# events "success"/"disconnect") were not implemented in this delivery -- see the Task 21 report
+# for the explicit accounting. Every member actually declared here IS backed by a real, passing
+# case; nothing below overstates what tests/matrix/cases/interface_cases.py covers.
+_INTERFACE_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="UI-IMPORT",
+        domain=Domain.INTERFACE,
+        members=frozenset({"sandbox-root-only", "real-root-untouched"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"UI-B-IMPORT"}),
+    ),
+    AxisSpec(
+        axis_id="UI-METHOD",
+        domain=Domain.INTERFACE,
+        members=frozenset(
+            {
+                "/api/health",
+                "/api/status",
+                "/api/scouts",
+                "/api/pdf-extract",
+                "/api/schedule-download",
+                "/api/schedule-download/pause",
+                "/api/schedule-download/resume",
+                "/api/operations/OP-ID/events",
+                "/api/runs",
+                "/api/runs/RUN-ID/open-report",
+                "/api/runs/RUN-ID/generate-emails",
+                "/api/runs/RUN-ID/open-emails-folder",
+            }
+        ),
+        min_focused_cases=12,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"UI-B-ROUTES"}),
+    ),
+    AxisSpec(
+        axis_id="RUN-ID",
+        domain=Domain.INTERFACE,
+        members=frozenset({"valid", "traversal", "absolute", "separator-containing"}),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"UI-B-SAFE-RUN-ID"}),
+    ),
+    AxisSpec(
+        axis_id="RUN-LIST",
+        domain=Domain.INTERFACE,
+        members=frozenset(
+            {
+                "empty",
+                "reverse-sorted-multiple",
+                "corrupt-summary-ignored",
+                "missing-optional-report",
+            }
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"UI-B-LIST-RUNS"}),
+    ),
+    AxisSpec(
+        axis_id="UI-ROUTE",
+        domain=Domain.INTERFACE,
+        members=frozenset(
+            {
+                "health-success",
+                "status-absent",
+                "status-present",
+                "scouts-absent",
+                "scouts-present",
+                "pdf-no-files",
+                "pdf-busy",
+                "schedule-missing",
+                "schedule-busy",
+                "pause-inactive",
+                "pause-active",
+                "resume-inactive",
+                "resume-active",
+                "events-missing",
+                "runs-empty",
+                "open-report-missing",
+                "open-report-no-report",
+                "open-report-success",
+                "email-missing",
+                "email-success",
+                "email-corrupt-json",
+                "open-folder-missing",
+                "open-folder-success",
+            }
+        ),
+        min_focused_cases=23,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"UI-B-ROUTES"}),
+    ),
+)
+
 # Domain axes are declared by later slices (Tasks 19-21) and appended here.
 AXES: tuple[AxisSpec, ...] = (
-    _INPUT_AXES + _PDF_AXES + _ACQUISITION_AXES + _REQUIREMENT_AXES + _ARTIFACT_AXES
+    _INPUT_AXES
+    + _PDF_AXES
+    + _ACQUISITION_AXES
+    + _REQUIREMENT_AXES
+    + _ARTIFACT_AXES
+    + _PLATFORM_AXES
+    + _INTERFACE_AXES
 )
