@@ -12,14 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import io
 import json
 import sys
 from pathlib import Path
 
-import pytest
-
 import pdf_to_scouts
+import pytest
 import run_app
 import scout_schedule_cli as cli
 from tests.factories.pdf_builder import build_pdf
@@ -76,7 +74,7 @@ class _FakeLocator:
         self.clicked = False
 
     @property
-    def first(self) -> "_FakeLocator":
+    def first(self) -> _FakeLocator:
         return self
 
     async def count(self) -> int:
@@ -107,7 +105,12 @@ async def test_discover_name_returns_fallback_immediately_when_provided() -> Non
 
 
 async def test_discover_name_selector_loop_recovers_from_exception_and_matches() -> None:
-    selectors = ["#scoutPage h1", "#scoutPage .ui-title", ".ui-page-active .ui-title", "h1.ui-title"]
+    selectors = [
+        "#scoutPage h1",
+        "#scoutPage .ui-title",
+        ".ui-page-active .ui-title",
+        "h1.ui-title",
+    ]
     page = _DiscoverPage(
         {
             selectors[0]: _FakeLocator(0, raises=True),
@@ -120,7 +123,12 @@ async def test_discover_name_selector_loop_recovers_from_exception_and_matches()
 
 
 async def test_discover_name_exhausts_selectors_and_returns_unknown() -> None:
-    selectors = ["#scoutPage h1", "#scoutPage .ui-title", ".ui-page-active .ui-title", "h1.ui-title"]
+    selectors = [
+        "#scoutPage h1",
+        "#scoutPage .ui-title",
+        ".ui-page-active .ui-title",
+        "h1.ui-title",
+    ]
     page = _DiscoverPage({selector: _FakeLocator(0) for selector in selectors})
     assert await cli.discover_name(page, "") == "Unknown Scout"
 
@@ -128,7 +136,9 @@ async def test_discover_name_exhausts_selectors_and_returns_unknown() -> None:
 class _NavPage:
     """Only implements what navigate_and_trigger_schedule reads off a Page/Response."""
 
-    def __init__(self, locators: dict[str, _FakeLocator] | None = None, evaluate_resolves: bool = False) -> None:
+    def __init__(
+        self, locators: dict[str, _FakeLocator] | None = None, evaluate_resolves: bool = False
+    ) -> None:
         self._locators = locators or {}
         self._listeners: list = []
         self._evaluate_resolves = evaluate_resolves
@@ -142,7 +152,9 @@ class _NavPage:
         if callback in self._listeners:
             self._listeners.remove(callback)
 
-    async def goto(self, url: str, wait_until: str | None = None, timeout: int | None = None) -> None:
+    async def goto(
+        self, url: str, wait_until: str | None = None, timeout: int | None = None
+    ) -> None:
         # A page can dispatch OTHER ajax responses before the schedule one -- is_schedule_response
         # must reject them (line 410's False branch) without resolving the future.
         self._fire(matching=False)
@@ -174,8 +186,11 @@ class _NavPage:
 
 
 async def test_navigate_selector_loop_recovers_from_exception_then_clicks() -> None:
-    selectors = ['a[href="#scoutPage"]', 'a[href$="event.html#scoutPage"]', 'a:has-text("Schedule")']
-    fired = _FakeLocator(1)
+    selectors = [
+        'a[href="#scoutPage"]',
+        'a[href$="event.html#scoutPage"]',
+        'a:has-text("Schedule")',
+    ]
 
     class _ClickingLocator(_FakeLocator):
         async def click(self, *, force: bool = False, timeout: int = 0) -> None:
@@ -195,7 +210,11 @@ async def test_navigate_selector_loop_recovers_from_exception_then_clicks() -> N
 
 
 async def test_navigate_no_selector_matches_falls_back_to_evaluate() -> None:
-    selectors = ['a[href="#scoutPage"]', 'a[href$="event.html#scoutPage"]', 'a:has-text("Schedule")']
+    selectors = [
+        'a[href="#scoutPage"]',
+        'a[href$="event.html#scoutPage"]',
+        'a:has-text("Schedule")',
+    ]
     page = _NavPage({selector: _FakeLocator(0) for selector in selectors}, evaluate_resolves=True)
     response = await cli.navigate_and_trigger_schedule(page, "https://example.invalid/?t=X", 5)
     assert response is not None
@@ -348,7 +367,7 @@ def test_annotate_parent_lookup_keeps_searching_shallower_candidates() -> None:
 
 
 def test_annotate_header_stack_fallback_keeps_searching_shallower_headers() -> None:
-    """"2a" shares no path prefix at all with the prior rows, so the primary
+    """ "2a" shares no path prefix at all with the prior rows, so the primary
     prior-path-index lookup (:772-776) finds nothing and falls through to the header-stack
     fallback (:781-785). That fallback must itself keep searching past the most-recently-pushed,
     too-deep header ("1a", depth 2) back to a shallower one ("1", depth 1) -- the :783->782
@@ -398,7 +417,9 @@ def test_missing_requirements_ancestor_walk_stops_at_already_complete_parent() -
     assert numbers == {"1a"}
 
 
-def test_missing_requirements_ancestor_walk_stops_naturally_at_an_already_visited_ancestor() -> None:
+def test_missing_requirements_ancestor_walk_stops_naturally_at_an_already_visited_ancestor() -> (
+    None
+):
     """Two sibling leaves ("1a1", "1a2") share the same incomplete parent ("1a"). The first
     leaf's walk adds "1a" to ``selected`` and stops via the explicit ``break`` at :892 (no
     further parent). The second leaf's walk reaches that SAME already-``selected`` "1a" -- the
@@ -523,7 +544,7 @@ class _FakePlaywrightCM:
         async def launch(self, **kwargs) -> _AsyncMainBrowser:
             return _AsyncMainBrowser()
 
-    async def __aenter__(self) -> "_FakePlaywrightCM":
+    async def __aenter__(self) -> _FakePlaywrightCM:
         self.chromium = self._Chromium()
         return self
 
@@ -564,7 +585,12 @@ async def test_async_main_drives_progress_callback_resume_event_and_delay(
         email_report=False,
     )
     monkeypatch.setattr(
-        cli, "load_inputs", lambda *a, **k: [cli.ScoutInput(name="A", url="https://x"), cli.ScoutInput(name="B", url="https://y")]
+        cli,
+        "load_inputs",
+        lambda *a, **k: [
+            cli.ScoutInput(name="A", url="https://x"),
+            cli.ScoutInput(name="B", url="https://y"),
+        ],
     )
 
     async def set_resume_soon() -> None:
@@ -572,7 +598,9 @@ async def test_async_main_drives_progress_callback_resume_event_and_delay(
         resume_event.set()
 
     task = asyncio.ensure_future(set_resume_soon())
-    result = await cli.async_main(args, progress_callback=progress_callback, resume_event=resume_event)
+    result = await cli.async_main(
+        args, progress_callback=progress_callback, resume_event=resume_event
+    )
     await task
 
     assert result == 1  # both scouts failed (no attendeeID) -> nonzero
@@ -596,7 +624,9 @@ async def test_async_main_pause_resume_without_a_progress_callback(
 
     monkeypatch.setattr(cli, "navigate_and_trigger_schedule", fake_nav)
     monkeypatch.setattr(cli, "async_playwright", lambda: _FakePlaywrightCM())
-    monkeypatch.setattr(cli, "load_inputs", lambda *a, **k: [cli.ScoutInput(name="A", url="https://x")])
+    monkeypatch.setattr(
+        cli, "load_inputs", lambda *a, **k: [cli.ScoutInput(name="A", url="https://x")]
+    )
 
     import argparse
 
@@ -680,7 +710,9 @@ def test_decode_variants_returns_empty_for_an_empty_image() -> None:
     assert pdf_to_scouts.decode_variants(np.zeros((0, 0), dtype=np.uint8), detector) == []
 
 
-def test_decode_variants_recovers_from_otsu_threshold_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_decode_variants_recovers_from_otsu_threshold_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import numpy as np
 
     def boom(*args: object, **kwargs: object):
@@ -814,9 +846,7 @@ def test_extract_pdf_debug_render_fallback_requires_a_non_empty_dpis(tmp_path: P
     if it then raises) is exactly what closes this gap, so the honest fix is to pin the raise
     rather than to paper over it with a friendlier scenario that never actually exercises :430.
     """
-    pdf_path = build_pdf(
-        tmp_path / "one.pdf", (PdfPageSpec("Avery Archer", "Youth", "", "none"),)
-    )
+    pdf_path = build_pdf(tmp_path / "one.pdf", (PdfPageSpec("Avery Archer", "Youth", "", "none"),))
     debug_dir = tmp_path / "debug"
     with pytest.raises(ValueError, match="empty"):
         pdf_to_scouts.extract_pdf(pdf_path, dpis=(), normalize_case=True, debug_dir=debug_dir)
@@ -829,9 +859,7 @@ def test_extract_pdf_debug_render_fallback_requires_a_non_empty_dpis(tmp_path: P
 
 
 def test_pdf_main_invokes_progress_callback(tmp_path: Path) -> None:
-    pdf_path = build_pdf(
-        tmp_path / "one.pdf", (PdfPageSpec("Avery Archer", "Youth", "", "none"),)
-    )
+    pdf_path = build_pdf(tmp_path / "one.pdf", (PdfPageSpec("Avery Archer", "Youth", "", "none"),))
     calls: list[tuple[int, int, Path]] = []
 
     def progress_callback(index: int, total: int, path: Path) -> None:
@@ -935,7 +963,9 @@ def test_start_server_actually_serves_the_real_health_route() -> None:
 # =================================================================================================
 
 
-def test_ui_server_inserts_repo_root_onto_sys_path_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ui_server_inserts_repo_root_onto_sys_path_when_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import ui.server as server_module
 
     repo_root = str(server_module.REPO_ROOT)
@@ -958,7 +988,7 @@ def test_ui_server_inserts_repo_root_onto_sys_path_when_absent(monkeypatch: pyte
 
 
 async def test_safe_run_id_rejects_a_bare_dot_via_the_resolved_parent_check(tmp_path: Path) -> None:
-    """"." contains none of '/', '\\\\', '..' (the first guard), but RUNS_DIR/"." resolves to
+    """ "." contains none of '/', '\\\\', '..' (the first guard), but RUNS_DIR/"." resolves to
     RUNS_DIR itself, whose parent is RUNS_DIR's parent, not RUNS_DIR -- exactly the mismatch the
     second check (:106-107) exists to catch."""
     from tests.harnesses.legacy import load_legacy_ui
