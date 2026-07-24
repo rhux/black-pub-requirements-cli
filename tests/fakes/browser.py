@@ -152,14 +152,20 @@ class StrictFakeContext:
 
 
 class StrictFakeBrowser:
-    """Implements only ``Browser.new_context`` -- the sole method process_scout calls on it."""
+    """Implements ``Browser.new_context`` (called by ``process_scout``) and ``Browser.close``
+    (called by ``async_main``'s own ``finally: await browser.close()`` one level above
+    ``process_scout`` -- see ``scout_schedule_cli.py:1862-1863``)."""
 
     def __init__(self, script: StrictScript, clock: FakeClock) -> None:
         self._script = script
         self._clock = clock
         self.contexts: list[StrictFakeContext] = []
+        self.closed = False
 
     async def new_context(self, **kwargs: Any) -> StrictFakeContext:
         context = StrictFakeContext(self._script, self._clock)
         self.contexts.append(context)
         return context
+
+    async def close(self) -> None:
+        self.closed = True

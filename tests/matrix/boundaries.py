@@ -495,6 +495,12 @@ _INTERFACE_BOUNDARIES: tuple[BoundarySpec, ...] = (
         domain=Domain.INTERFACE,
         required_case_ids=frozenset({f"RUN-LIST-{i:03d}" for i in range(1, 5)}),
     ),
+    BoundarySpec(
+        boundary_id="CLI-B-MAIN",
+        qualified_name="scout_schedule_cli.main",
+        domain=Domain.INTERFACE,
+        required_case_ids=frozenset({f"CLI-SCHED-{i:03d}" for i in range(1, 7)}),
+    ),
 )
 
 # Populated by later slices; Task 17 adds the input-domain load_* seams, Task 18 the PDF seams,

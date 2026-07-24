@@ -353,17 +353,33 @@ async def test_interface_execution(case: InterfaceCase, context_id: str, tmp_pat
 
 
 def test_interface_registry_is_structurally_valid() -> None:
+    # CLI-SCHED is also an INTERFACE-domain axis (Task 21 continuation), but its cases live in
+    # tests/matrix/cases/cli_cases.py, not this module's interface_cases.py -- pull them in too
+    # so this domain-scoped registry check sees every case an INTERFACE-domain axis here claims.
+    # CLI-B-MAIN also cross-references PDF-B-MAIN (a PDF-domain boundary, per axes.py's
+    # docstring), so the PDF cases it requires must be included as well.
     from tests.matrix.axes import AXES
     from tests.matrix.boundaries import BOUNDARIES
+    from tests.matrix.cases.cli_cases import ALL_CLI_METADATA
     from tests.matrix.cases.interface_cases import ALL_INTERFACE_METADATA
+    from tests.matrix.cases.pdf_cases import PDF_CASES
     from tests.matrix.model import Domain
     from tests.matrix.policies import POLICIES
     from tests.matrix.registry import validate_registry
 
-    ui_axes = [axis for axis in AXES if axis.domain is Domain.INTERFACE]
-    ui_boundaries = [b for b in BOUNDARIES if b.domain is Domain.INTERFACE]
+    pdf_metadata = tuple(case.meta for case in PDF_CASES)
+    ui_axes = [
+        axis for axis in AXES if axis.domain is Domain.INTERFACE or axis.domain is Domain.PDF
+    ]
+    ui_boundaries = [
+        b for b in BOUNDARIES if b.domain is Domain.INTERFACE or b.domain is Domain.PDF
+    ]
 
     errors = validate_registry(
-        ALL_INTERFACE_METADATA, ui_axes, ui_boundaries, [], list(POLICIES)
+        ALL_INTERFACE_METADATA + ALL_CLI_METADATA + pdf_metadata,
+        ui_axes,
+        ui_boundaries,
+        [],
+        list(POLICIES),
     )
     assert errors == ()

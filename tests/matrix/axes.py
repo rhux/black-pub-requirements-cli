@@ -859,6 +859,32 @@ _INTERFACE_AXES: tuple[AxisSpec, ...] = (
         boundaries=frozenset({"UI-B-LIST-RUNS"}),
     ),
     AxisSpec(
+        axis_id="CLI-SCHED",
+        domain=Domain.INTERFACE,
+        members=frozenset(
+            {
+                "defaults-help",
+                "empty-success",
+                "one-scout-success",
+                "partial-failure",
+                "top-level-exception",
+                "keyboard-interrupt",
+            }
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        # PDF-B-MAIN is referenced here (not just under the PDF-domain axes) to give the
+        # interface domain's CLI accounting a cross-reference to pdf_to_scouts.main's own
+        # already-fully-characterized PDF-CLI-* cases (Task 18) -- this axis's OWN member set
+        # only claims scout_schedule_cli.main's 6 members above; PDF-B-MAIN's required_case_ids
+        # remain PDF-domain cases and are not duplicated or re-asserted here. A boundary's
+        # domain describes the case domain it maps to (registry.py's _validate_boundaries), not
+        # which axis/task references it, so referencing a PDF-domain boundary from an
+        # INTERFACE-domain axis is registry-valid: _validate_axes only checks that the boundary
+        # id exists, never that its domain matches the referencing axis.
+        boundaries=frozenset({"CLI-B-MAIN", "PDF-B-MAIN"}),
+    ),
+    AxisSpec(
         axis_id="UI-ROUTE",
         domain=Domain.INTERFACE,
         members=frozenset(
