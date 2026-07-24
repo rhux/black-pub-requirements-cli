@@ -26,14 +26,24 @@ Three enforcement paths, because Playwright does not offer one mechanism that co
   is relayed back to the browser as a genuine redirect response via ``route.fulfill(response=...)``,
   which makes the browser issue a brand-new top-level navigation request for it -- and that
   fresh request re-enters this same route handler normally.
-* Dedicated Web Workers, WebSocket connections, and triggered downloads are NOT interceptable
-  through ``route()`` in Playwright, so those are caught with ``page.on("worker", ...)`` /
-  ``page.on("websocket", ...)`` / ``page.on("download", ...)`` listeners instead. Playwright
-  dispatches those as fire-and-forget sync callbacks -- an exception raised inside one is
-  logged, not propagated to the awaiting caller -- so ``GuardedContext.violations`` is the
-  durable, awaitable-safe record a test reads after the action, in addition to
-  ``assert_loopback`` raising on the spot wherever a caller can actually observe it (the route
-  handler, and direct unit tests of ``assert_loopback`` itself).
+* A dedicated Web Worker's own runtime network calls (e.g. a `fetch()` issued from inside the
+  worker script) ARE interceptable through the same context-level ``route()`` -- verified
+  empirically against this Playwright/Chromium build: a worker's internal `fetch()` to a
+  non-loopback host is seen and aborted by the same route handler that catches page-level
+  fetches, with no extra wiring required. The ``page.on("worker", ...)`` listener below is
+  NOT what catches that traffic; it fires exactly once, at worker creation, with the worker's
+  own *script* URL (loopback in every case here, since the script is always same-origin) --
+  it exists only to record that a worker was spawned, not to observe anything the worker's
+  own code subsequently fetches.
+* WebSocket connections and triggered downloads genuinely are NOT interceptable through
+  ``route()`` in Playwright, so those are caught with ``page.on("websocket", ...)`` /
+  ``page.on("download", ...)`` listeners instead. Playwright dispatches those (and the
+  worker-creation event above) as fire-and-forget sync callbacks -- an exception raised
+  inside one is logged, not propagated to the awaiting caller -- so
+  ``GuardedContext.violations`` is the durable, awaitable-safe record a test reads after the
+  action, in addition to ``assert_loopback`` raising on the spot wherever a caller can
+  actually observe it (the route handler, and direct unit tests of ``assert_loopback``
+  itself).
 
 The blocked-request message never carries more than the scheme/host: never a path, query
 string, request body, or header, even though every URL used against this harness in tests is

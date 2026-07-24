@@ -208,7 +208,15 @@ async def test_egress_worker_fetch_blocked(
     page = await _new_page(context)
     await page.goto(f"{service.base_url}/worker?to={_NON_LOOPBACK}/", timeout=3000)
     await page.wait_for_timeout(300)
-    # A direct in-page fetch() is also part of this member's contract (worker-FETCH):
+    # Snapshot BEFORE any other action touches guard.violations: this is the only evidence
+    # that the worker's own internal fetch() -- not some unrelated page-level request -- was
+    # what the guard caught. Verified empirically against this Playwright/Chromium build:
+    # context.route() DOES intercept a dedicated Worker's runtime fetch() calls (see the
+    # harness module docstring), so this snapshot is a real, isolated proof of that path.
+    assert guard.violations, "a worker's internal fetch() to a non-loopback host was not blocked"
+    worker_violation_count = len(guard.violations)
+    # A direct in-page fetch() exercises a different call site through the same route()
+    # handler; asserted separately so it can never mask a broken worker-fetch guard above.
     result = await page.evaluate(
         """async (url) => {
             try { await fetch(url); return 'reached'; }
@@ -217,7 +225,9 @@ async def test_egress_worker_fetch_blocked(
         _NON_LOOPBACK + "/",
     )
     assert result == "blocked"
-    assert guard.violations, "a worker/fetch request to a non-loopback host was not blocked"
+    assert len(guard.violations) > worker_violation_count, (
+        "the trailing page-level fetch() was not itself recorded as a violation"
+    )
 
 
 @pytest.mark.matrix_case(case_id="BROWSER-EGRESS-006", context_id="browser", lane="browser")
