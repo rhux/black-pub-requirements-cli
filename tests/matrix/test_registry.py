@@ -287,3 +287,15 @@ def test_reg_meta_unresolved_text_fails():
     assert validate_registry(cases, axes, boundaries, exclusions, policies) == (
         "REG-META unresolved text: C1",
     )
+
+
+# --- registry-audit: the REAL wired ALL_CASES/AXES/BOUNDARIES/EXCLUSIONS/POLICIES, not the
+# synthetic fixtures above (Task 22, Slice 1b Phase A Gate) --------------------------------
+def test_full_registry_is_structurally_valid():
+    from tests.matrix.axes import AXES
+    from tests.matrix.boundaries import BOUNDARIES, EXCLUSIONS
+    from tests.matrix.cases import ALL_CASES
+    from tests.matrix.policies import POLICIES
+
+    assert len(ALL_CASES) > 0
+    assert validate_registry(ALL_CASES, AXES, BOUNDARIES, EXCLUSIONS, POLICIES) == ()

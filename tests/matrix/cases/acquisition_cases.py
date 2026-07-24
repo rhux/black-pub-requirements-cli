@@ -50,6 +50,7 @@ from tests.matrix.model import (
     Classification,
     Domain,
     EvidenceKind,
+    Lane,
 )
 
 # Synthetic identities only -- never real scout data.
@@ -111,6 +112,7 @@ def _meta(
     surface_id: str | None = None,
     target_owner: str | None = None,
     target_observation: str | None = None,
+    lane: Lane = Lane.DEFAULT,
 ) -> CaseMetadata:
     return CaseMetadata(
         case_id=case_id,
@@ -125,6 +127,7 @@ def _meta(
         surface_id=surface_id,
         target_owner=target_owner,
         target_observation=target_observation,
+        lane=lane,
     )
 
 
@@ -1508,6 +1511,7 @@ BROWSER_LOCAL_METADATA: tuple[CaseMetadata, ...] = (
         "A real Chromium page posting to the loopback fake service's schedule endpoint is "
         "observed by the guarded context without being blocked.",
         "tests/harnesses/browser.py guarded_context + loopback fake service",
+        lane=Lane.BROWSER,
     ),
     _meta(
         "BROWSER-LOCAL-002",
@@ -1517,6 +1521,7 @@ BROWSER_LOCAL_METADATA: tuple[CaseMetadata, ...] = (
         "The loopback fake service serves deterministic requirement JSON that a real page can "
         "fetch() and read back.",
         "tests/harnesses/browser.py loopback fake service requirement route",
+        lane=Lane.BROWSER,
     ),
     _meta(
         "BROWSER-LOCAL-003",
@@ -1527,6 +1532,7 @@ BROWSER_LOCAL_METADATA: tuple[CaseMetadata, ...] = (
         "event for a loopback navigation, proving the guard is wired to the real browser and "
         "not a no-op.",
         "tests/harnesses/browser.py install_egress_guard request listener",
+        lane=Lane.BROWSER,
     ),
     _meta(
         "BROWSER-LOCAL-004",
@@ -1537,6 +1543,7 @@ BROWSER_LOCAL_METADATA: tuple[CaseMetadata, ...] = (
         "requirement) succeeds end to end against the loopback fake service with the guard "
         "installed.",
         "tests/harnesses/browser.py guarded_context + loopback fake service, full round trip",
+        lane=Lane.BROWSER,
     ),
 )
 
@@ -1549,6 +1556,7 @@ BROWSER_EGRESS_METADATA: tuple[CaseMetadata, ...] = (
         "A direct page.goto() to a non-loopback host is blocked by the guard's request "
         "listener before Playwright can complete it.",
         "tests/harnesses/browser.py assert_loopback + request guard",
+        lane=Lane.BROWSER,
     ),
     _meta(
         "BROWSER-EGRESS-002",
@@ -1561,6 +1569,7 @@ BROWSER_EGRESS_METADATA: tuple[CaseMetadata, ...] = (
         "inspects the Location header before the browser ever sees it, and aborts in place if "
         "that target is non-loopback.",
         "tests/harnesses/browser.py install_egress_guard navigation-redirect route().fetch handling",
+        lane=Lane.BROWSER,
     ),
     _meta(
         "BROWSER-EGRESS-003",
@@ -1570,6 +1579,7 @@ BROWSER_EGRESS_METADATA: tuple[CaseMetadata, ...] = (
         "A child frame (iframe) that navigates to a non-loopback host is blocked by the "
         "guard's frame-navigation listener.",
         "tests/harnesses/browser.py assert_loopback + frame guard",
+        lane=Lane.BROWSER,
     ),
     _meta(
         "BROWSER-EGRESS-004",
@@ -1579,6 +1589,7 @@ BROWSER_EGRESS_METADATA: tuple[CaseMetadata, ...] = (
         "A popup window opened toward a non-loopback host is blocked by the guard's popup "
         "listener.",
         "tests/harnesses/browser.py assert_loopback + popup guard",
+        lane=Lane.BROWSER,
     ),
     _meta(
         "BROWSER-EGRESS-005",
@@ -1588,6 +1599,7 @@ BROWSER_EGRESS_METADATA: tuple[CaseMetadata, ...] = (
         "An in-page fetch()/XHR (and a worker's network access) toward a non-loopback host is "
         "blocked by the guard's request listener the same as any other request.",
         "tests/harnesses/browser.py assert_loopback + request guard (fetch/XHR/worker)",
+        lane=Lane.BROWSER,
     ),
     _meta(
         "BROWSER-EGRESS-006",
@@ -1597,6 +1609,7 @@ BROWSER_EGRESS_METADATA: tuple[CaseMetadata, ...] = (
         "A WebSocket connection attempt toward a non-loopback host is blocked by the guard's "
         "WebSocket listener.",
         "tests/harnesses/browser.py assert_loopback + websocket guard",
+        lane=Lane.BROWSER,
     ),
     _meta(
         "BROWSER-EGRESS-007",
@@ -1610,6 +1623,7 @@ BROWSER_EGRESS_METADATA: tuple[CaseMetadata, ...] = (
         "not a full real-Chromium download flow, since a genuinely reachable non-loopback "
         "download event is unconstructable once route() already blocks the underlying request).",
         "tests/harnesses/browser.py install_egress_guard _guard_page download listener",
+        lane=Lane.BROWSER,
     ),
 )
 

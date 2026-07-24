@@ -118,11 +118,20 @@ def _expected_request_count(dataset: SyntheticDataset) -> int:
 @pytest.mark.parametrize(
     ("case_id", "make_profile"),
     [
-        ("PERF-REQ-001", lambda: profile("SCALE-000", attendee_count=0, deduplicated_class_count=0)),
-        ("PERF-REQ-002", canonical_profile),
-        (
+        pytest.param(
+            "PERF-REQ-001",
+            lambda: profile("SCALE-000", attendee_count=0, deduplicated_class_count=0),
+            marks=pytest.mark.matrix_case(case_id="PERF-REQ-001", context_id="run", lane="default"),
+        ),
+        pytest.param(
+            "PERF-REQ-002",
+            canonical_profile,
+            marks=pytest.mark.matrix_case(case_id="PERF-REQ-002", context_id="run", lane="default"),
+        ),
+        pytest.param(
             "PERF-REQ-003",
             lambda: profile("SCALE-LARGE-050", attendee_count=50, deduplicated_class_count=150),
+            marks=pytest.mark.matrix_case(case_id="PERF-REQ-003", context_id="run", lane="default"),
         ),
     ],
 )
@@ -161,7 +170,19 @@ def _synthetic_requirement_rows(row_count: int, class_rows: int) -> list[dict[st
 
 @pytest.mark.parametrize(
     ("row_count", "class_rows"),
-    [(11, 3), (22, 5), (50, 10)],
+    [
+        (11, 3),
+        # Only ONE of these three growth-bound instances carries the PERF-GROWTH-001 matrix_case
+        # mark -- the case is declared once (member "growth-bound"), and marking every
+        # parametrized instance would make matrix_gate see it as executed more than once.
+        pytest.param(
+            22, 5,
+            marks=pytest.mark.matrix_case(
+                case_id="PERF-GROWTH-001", context_id="run", lane="default"
+            ),
+        ),
+        (50, 10),
+    ],
     ids=["profile-11", "profile-22", "profile-50"],
 )
 def test_perf_growth_001_bounded_node_visits(
@@ -196,6 +217,7 @@ def test_perf_growth_001_bounded_node_visits(
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.matrix_case(case_id="PERF-GROWTH-002", context_id="run", lane="default")
 def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
     scout_a = cli.ScoutResult(
         name="Avery Archer",

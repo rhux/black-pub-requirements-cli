@@ -229,6 +229,7 @@ def test_acquisition_case(case: AcquisitionCase, context_id: str, tmp_path: Path
 # --------------------------------------------------------------------------------------------
 # NET-POLICY: the EXISTING scoutmb.network_policy.assert_egress_allowed boundary (Slice 1a).
 # --------------------------------------------------------------------------------------------
+@pytest.mark.matrix_case(case_id="NET-POLICY-001", context_id="net-policy", lane="default")
 def test_net_policy_loopback_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     from scoutmb.network_policy import assert_egress_allowed
 
@@ -237,6 +238,7 @@ def test_net_policy_loopback_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
         assert assert_egress_allowed(host) is None
 
 
+@pytest.mark.matrix_case(case_id="NET-POLICY-002", context_id="net-policy", lane="default")
 def test_net_policy_non_loopback_denied_without_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     from scoutmb.errors import ExternalNetworkBlocked
     from scoutmb.network_policy import assert_egress_allowed
@@ -246,6 +248,7 @@ def test_net_policy_non_loopback_denied_without_opt_in(monkeypatch: pytest.Monke
         assert_egress_allowed("scoutingevent.com")
 
 
+@pytest.mark.matrix_case(case_id="NET-POLICY-003", context_id="net-policy", lane="default")
 def test_net_policy_opt_in_allows_service_host(monkeypatch: pytest.MonkeyPatch) -> None:
     from scoutmb.network_policy import assert_egress_allowed
 

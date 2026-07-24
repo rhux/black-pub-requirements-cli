@@ -58,8 +58,40 @@ _SURFACE_ROWS = {policy.surface_id: policy for policy in POLICIES if policy.surf
     "audience-shareable", "local-ui", "diagnostic",
 }}
 
+# Matches _PRIV_SURFACE_MEMBERS's enumeration order in tests/matrix/cases/artifact_cases.py
+# exactly: PRIV-SURFACE-{i:03d} for i=1..12, alternating <surface>-allowed/<surface>-forbidden.
+_PRIV_SURFACE_ALLOWED_CASE_ID = {
+    "input-private": "PRIV-SURFACE-001",
+    "adapter-private": "PRIV-SURFACE-003",
+    "operational-private": "PRIV-SURFACE-005",
+    "audience-shareable": "PRIV-SURFACE-007",
+    "local-ui": "PRIV-SURFACE-009",
+    "diagnostic": "PRIV-SURFACE-011",
+}
+_PRIV_SURFACE_FORBIDDEN_CASE_ID = {
+    "input-private": "PRIV-SURFACE-002",
+    "adapter-private": "PRIV-SURFACE-004",
+    "operational-private": "PRIV-SURFACE-006",
+    "audience-shareable": "PRIV-SURFACE-008",
+    "local-ui": "PRIV-SURFACE-010",
+    "diagnostic": "PRIV-SURFACE-012",
+}
 
-@pytest.mark.parametrize("surface_id", sorted(_SURFACE_ROWS))
+
+@pytest.mark.parametrize(
+    "surface_id",
+    [
+        pytest.param(
+            surface_id,
+            marks=pytest.mark.matrix_case(
+                case_id=_PRIV_SURFACE_ALLOWED_CASE_ID[surface_id],
+                context_id="privacy",
+                lane="default",
+            ),
+        )
+        for surface_id in sorted(_SURFACE_ROWS)
+    ],
+)
 def test_priv_surface_allowed_fields_are_nonempty(surface_id: str) -> None:
     # PRIV-SURFACE-*-allowed: every declared SurfaceClass policy names at least one field it is
     # legitimately allowed to carry -- an empty allowlist would make the surface meaningless.
@@ -67,7 +99,20 @@ def test_priv_surface_allowed_fields_are_nonempty(surface_id: str) -> None:
     assert policy.allowed_fields
 
 
-@pytest.mark.parametrize("surface_id", sorted(_SURFACE_ROWS))
+@pytest.mark.parametrize(
+    "surface_id",
+    [
+        pytest.param(
+            surface_id,
+            marks=pytest.mark.matrix_case(
+                case_id=_PRIV_SURFACE_FORBIDDEN_CASE_ID[surface_id],
+                context_id="privacy",
+                lane="default",
+            ),
+        )
+        for surface_id in sorted(_SURFACE_ROWS)
+    ],
+)
 def test_priv_surface_forbidden_sentinels_declared(surface_id: str) -> None:
     # PRIV-SURFACE-*-forbidden: every declared SurfaceClass policy names at least one sentinel
     # it must never emit.
@@ -245,6 +290,7 @@ def _requirement_row(**overrides: object) -> dict[str, object]:
     return row
 
 
+@pytest.mark.matrix_case(case_id="PRIV-EGRESS-001", context_id="privacy", lane="default")
 def test_priv_egress_filename(tmp_path: Path) -> None:
     import scout_schedule_cli as legacy
 
@@ -255,6 +301,7 @@ def test_priv_egress_filename(tmp_path: Path) -> None:
     assert SENTINEL_ABSOLUTE_PATH not in stem
 
 
+@pytest.mark.matrix_case(case_id="PRIV-EGRESS-002", context_id="privacy", lane="default")
 def test_priv_egress_json(tmp_path: Path) -> None:
     import scout_schedule_cli as legacy
 
@@ -268,6 +315,7 @@ def test_priv_egress_json(tmp_path: Path) -> None:
     assert SENTINEL_ABSOLUTE_PATH not in text
 
 
+@pytest.mark.matrix_case(case_id="PRIV-EGRESS-003", context_id="privacy", lane="default")
 def test_priv_egress_csv(tmp_path: Path) -> None:
     import scout_schedule_cli as legacy
 
@@ -280,6 +328,7 @@ def test_priv_egress_csv(tmp_path: Path) -> None:
     assert SENTINEL_ABSOLUTE_PATH not in text
 
 
+@pytest.mark.matrix_case(case_id="PRIV-EGRESS-004", context_id="privacy", lane="default")
 def test_priv_egress_html(tmp_path: Path) -> None:
     import scout_schedule_cli as legacy
 
@@ -293,6 +342,7 @@ def test_priv_egress_html(tmp_path: Path) -> None:
     assert SENTINEL_ABSOLUTE_PATH not in text
 
 
+@pytest.mark.matrix_case(case_id="PRIV-EGRESS-005", context_id="privacy", lane="default")
 def test_priv_egress_email(tmp_path: Path) -> None:
     import scout_schedule_cli as legacy
 
@@ -310,6 +360,7 @@ def test_priv_egress_email(tmp_path: Path) -> None:
             assert SENTINEL_ABSOLUTE_PATH not in text
 
 
+@pytest.mark.matrix_case(case_id="PRIV-EGRESS-006", context_id="privacy", lane="default")
 def test_priv_egress_stdout(capsys: pytest.CaptureFixture[str]) -> None:
     import scout_schedule_cli as legacy
 
@@ -319,6 +370,7 @@ def test_priv_egress_stdout(capsys: pytest.CaptureFixture[str]) -> None:
     assert SENTINEL_ABSOLUTE_PATH not in captured.out
 
 
+@pytest.mark.matrix_case(case_id="PRIV-EGRESS-007", context_id="privacy", lane="default")
 def test_priv_egress_stderr(capsys: pytest.CaptureFixture[str]) -> None:
     import scout_schedule_cli as legacy
 
@@ -328,6 +380,7 @@ def test_priv_egress_stderr(capsys: pytest.CaptureFixture[str]) -> None:
     assert SENTINEL_ABSOLUTE_PATH not in captured.err
 
 
+@pytest.mark.matrix_case(case_id="PRIV-EGRESS-008", context_id="privacy", lane="default")
 def test_priv_egress_api_error(tmp_path: Path) -> None:
     import scout_schedule_cli as legacy
 
@@ -347,6 +400,7 @@ def test_priv_egress_api_error(tmp_path: Path) -> None:
     assert SENTINEL_ABSOLUTE_PATH not in text
 
 
+@pytest.mark.matrix_case(case_id="PRIV-EGRESS-009", context_id="privacy", lane="default")
 def test_priv_egress_sse() -> None:
     """The local web UI (ui/server.py) is Task 21's ("interfaces") territory; here we only
     prove the sentinel strings are absent from its committed source, as a proxy for "no SSE
@@ -359,6 +413,7 @@ def test_priv_egress_sse() -> None:
     assert SENTINEL_ABSOLUTE_PATH not in text
 
 
+@pytest.mark.matrix_case(case_id="PRIV-EGRESS-010", context_id="privacy", lane="default")
 def test_priv_egress_diagnostics(tmp_path: Path) -> None:
     """tools/check_private_data.py's own REAL scanner (scan_patterns, the same function
     tests/privacy/test_fixture_hygiene.py drives) reports the offending FILE and a REASON only --
@@ -396,6 +451,7 @@ def test_priv_egress_diagnostics_excludes_testtoken_prefix(tmp_path: Path) -> No
 # --------------------------------------------------------------------------------------------
 # PRIV-CONTAIN-001..002
 # --------------------------------------------------------------------------------------------
+@pytest.mark.matrix_case(case_id="PRIV-CONTAIN-001", context_id="privacy", lane="default")
 def test_priv_contain_adapter_file_stays_in_root(tmp_path: Path) -> None:
     """PRIV-CONTAIN-001: an adapter-private (raw/) file, written through the real
     attendee_filename_stem + atomic_write_text path, resolves strictly inside its selected
@@ -413,6 +469,7 @@ def test_priv_contain_adapter_file_stays_in_root(tmp_path: Path) -> None:
     assert target.resolve().is_relative_to(output_root.resolve())
 
 
+@pytest.mark.matrix_case(case_id="PRIV-CONTAIN-002", context_id="privacy", lane="default")
 def test_priv_contain_no_private_field_reaches_shareable() -> None:
     """PRIV-CONTAIN-002: no field allowed on an input-private/adapter-private/
     operational-private surface (per its SurfacePolicy.allowed_fields) is also allowed on the

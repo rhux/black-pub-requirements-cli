@@ -44,6 +44,7 @@ pytestmark = pytest.mark.scale
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.matrix_case(case_id="SCALE-000", context_id="run", lane="default")
 def test_scale_000_zero_attendees() -> None:
     p = profile("SCALE-000", attendee_count=0, deduplicated_class_count=0)
     dataset = build_dataset(p)
@@ -52,6 +53,7 @@ def test_scale_000_zero_attendees() -> None:
     assert dataset.requirement_rows == ()
 
 
+@pytest.mark.matrix_case(case_id="SCALE-001", context_id="run", lane="default")
 def test_scale_001_one_attendee() -> None:
     p = profile("SCALE-001", attendee_count=1, deduplicated_class_count=3, requirement_count=6)
     dataset = build_dataset(p)
@@ -60,6 +62,7 @@ def test_scale_001_one_attendee() -> None:
     assert len(dataset.requirement_rows) == 6
 
 
+@pytest.mark.matrix_case(case_id="SCALE-002", context_id="run", lane="default")
 def test_scale_002_shared_name_distinct_upstream_ids() -> None:
     p = profile("SCALE-002", attendee_count=2, deduplicated_class_count=4)
     dataset = build_dataset(p, name_overrides={0: "Shared Name", 1: "Shared Name"})
@@ -105,7 +108,26 @@ def _ordered_attendee_ids(seed: str, count: int, ordering: str) -> tuple[str, ..
 
 @pytest.mark.parametrize(
     ("count", "ordering"),
-    [(3, "grouped"), (7, "reversed"), (11, "interleaved")],
+    [
+        pytest.param(
+            3, "grouped",
+            marks=pytest.mark.matrix_case(
+                case_id="SCALE-SMALL-001", context_id="run", lane="default"
+            ),
+        ),
+        pytest.param(
+            7, "reversed",
+            marks=pytest.mark.matrix_case(
+                case_id="SCALE-SMALL-002", context_id="run", lane="default"
+            ),
+        ),
+        pytest.param(
+            11, "interleaved",
+            marks=pytest.mark.matrix_case(
+                case_id="SCALE-SMALL-003", context_id="run", lane="default"
+            ),
+        ),
+    ],
     ids=["SCALE-SMALL-001", "SCALE-SMALL-002", "SCALE-SMALL-003"],
 )
 def test_scale_small_repeatable_by_version_and_seed(count: int, ordering: str) -> None:
@@ -148,6 +170,7 @@ def test_scale_canon_022_topology() -> None:
     assert {a.index for a in duplicated_attendees} == {0, 1, 2, 3, 4}
 
 
+@pytest.mark.matrix_case(case_id="SCALE-CANON-022", context_id="run", lane="default")
 def test_scale_canon_022_every_authoritative_marginal() -> None:
     marginals = canonical_marginals(build_dataset(canonical_profile()))
     assert marginals["flag_marginal"] == FLAG_MARGINAL
@@ -190,6 +213,7 @@ def test_scale_canon_022_different_seed_reorders_but_marginals_hold() -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.matrix_case(case_id="SCALE-LARGE-050", context_id="run", lane="default")
 def test_scale_large_050_deterministic_allocation_and_request_count() -> None:
     p = profile("SCALE-LARGE-050", attendee_count=50, deduplicated_class_count=150)
     dataset_a = build_dataset(p)
@@ -208,6 +232,7 @@ def test_scale_large_050_deterministic_allocation_and_request_count() -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.matrix_case(case_id="SCALE-PROP-001", context_id="run", lane="default")
 @given(attendee_count=st.integers(min_value=0, max_value=60))
 @settings(max_examples=40, deadline=None)
 def test_scale_prop_001_stable_ordering_and_identity_isolation(attendee_count: int) -> None:
@@ -229,6 +254,7 @@ def test_scale_prop_001_stable_ordering_and_identity_isolation(attendee_count: i
     assert [a.upstream_id for a in rebuilt.attendees] == upstream_ids
 
 
+@pytest.mark.matrix_case(case_id="SCALE-PROP-002", context_id="run", lane="default")
 @given(attendee_count=st.integers(min_value=0, max_value=60))
 @settings(max_examples=40, deadline=None)
 def test_scale_prop_002_partition_totals_always_sum_correctly(attendee_count: int) -> None:
@@ -254,6 +280,7 @@ def test_scale_prop_002_partition_totals_always_sum_correctly(attendee_count: in
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.matrix_case(case_id="SCALE-PAIR-001", context_id="run", lane="default")
 def test_scale_pair_001_reordering_one_marginal_leaves_others_unchanged() -> None:
     """Reordering ONE synthetic marginal pairing (here: the "shape" axis, by using a different
     seed that only the shape-pairing axis id would be sensitive to were it not independent)
@@ -272,6 +299,7 @@ def test_scale_pair_001_reordering_one_marginal_leaves_others_unchanged() -> Non
     assert base.shape_marginal() == reordered.shape_marginal() == SHAPE_MARGINAL
 
 
+@pytest.mark.matrix_case(case_id="SCALE-PAIR-002", context_id="run", lane="default")
 def test_scale_pair_002_correlation_evidence_is_unsupported() -> None:
     p = canonical_profile()
     with pytest.raises(UnsupportedSyntheticCorrelation):

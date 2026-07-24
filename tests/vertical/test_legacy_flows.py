@@ -148,6 +148,7 @@ async def _list_runs(data_root: Path) -> tuple[int, object]:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.matrix_case(case_id="FLOW-SUCCESS-001", context_id="run", lane="default")
 def test_flow_success_001_five_stage_end_to_end(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -258,6 +259,7 @@ def test_flow_success_001_five_stage_end_to_end(
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.matrix_case(case_id="FLOW-PARTIAL-001", context_id="run", lane="default")
 def test_flow_partial_001_one_terminal_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
