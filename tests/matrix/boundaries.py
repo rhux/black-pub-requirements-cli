@@ -30,6 +30,67 @@ class CoverageAreaSpec:
     files: tuple[str, ...]
 
 
+# Corpus-domain boundaries (Task 16 backfill, Slice 1b Phase A Gate): the tools/verify_corpus.py
+# and tests/harnesses/corpus.py seams the CORP-* cases drive. The REG-* rows (registry
+# self-tests) are NEW_ACCEPTANCE with contexts=() and are not mapped to any boundary here --
+# see tests/matrix/cases/corpus_cases.py's module docstring.
+_CORPUS_BOUNDARIES: tuple[BoundarySpec, ...] = (
+    BoundarySpec(
+        boundary_id="CORP-B-CLASSIFY",
+        qualified_name="tools.verify_corpus.classify_row",
+        domain=Domain.CORPUS,
+        required_case_ids=frozenset(
+            {"CORP-SPLIT-001", "CORP-SPLIT-002", "CORP-SPLIT-003", "CORP-SPLIT-004"}
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="CORP-B-SUMMARIZE",
+        qualified_name="tools.verify_corpus.summarize_run",
+        domain=Domain.CORPUS,
+        required_case_ids=frozenset({"CORP-SPLIT-001", "CORP-CANON-001"}),
+    ),
+    BoundarySpec(
+        boundary_id="CORP-B-MAIN",
+        qualified_name="tools.verify_corpus.main",
+        domain=Domain.CORPUS,
+        required_case_ids=frozenset({"CORP-CLI-001", "CORP-CLI-002"}),
+    ),
+    BoundarySpec(
+        boundary_id="CORP-B-FINGERPRINT",
+        qualified_name="tests.harnesses.corpus.fingerprint_tree",
+        domain=Domain.CORPUS,
+        required_case_ids=frozenset(
+            {
+                "CORP-FP-001",
+                "CORP-FP-002",
+                "CORP-FP-003",
+                "CORP-FP-004",
+                "CORP-READ-001",
+            }
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="CORP-B-CORPUS-STATUS",
+        qualified_name="tests.harnesses.corpus.corpus_status",
+        domain=Domain.CORPUS,
+        required_case_ids=frozenset(
+            {"CORP-MODE-001", "CORP-MODE-002", "CORP-MODE-003", "CORP-MODE-004"}
+        ),
+    ),
+    BoundarySpec(
+        boundary_id="CORP-B-MULTISET",
+        qualified_name="tests.harnesses.corpus.raw_payload_multiset / raw_multisets_all_match",
+        domain=Domain.CORPUS,
+        required_case_ids=frozenset({"CORP-SNAPSHOT-001", "CORP-SNAPSHOT-002"}),
+    ),
+    BoundarySpec(
+        boundary_id="CORP-B-PDF-AGGREGATE",
+        qualified_name="tests.harnesses.corpus.extract_pdf_aggregate",
+        domain=Domain.CORPUS,
+        required_case_ids=frozenset({"CORP-PDF-001"}),
+    ),
+)
+
 # Input-domain boundaries (Task 17): the load_* seams in scout_schedule_cli. Each
 # ``required_case_ids`` names input-domain cases that drive the seam.
 _INPUT_BOUNDARIES: tuple[BoundarySpec, ...] = (
@@ -611,7 +672,8 @@ _FLOW_BOUNDARIES: tuple[BoundarySpec, ...] = (
 # Task 21 the platform seam + the interface (ui.server) seams + the desktop-launcher and
 # bootstrap seams, Task 22 the scale-profile and vertical-flow/performance seams (final slice).
 BOUNDARIES: tuple[BoundarySpec, ...] = (
-    _INPUT_BOUNDARIES
+    _CORPUS_BOUNDARIES
+    + _INPUT_BOUNDARIES
     + _PDF_BOUNDARIES
     + _ACQUISITION_BOUNDARIES
     + _REQUIREMENT_BOUNDARIES

@@ -39,6 +39,7 @@ def _write_run(root: Path, name: str, payloads: list[list[object]]) -> Path:
 
 
 # ============================================================== CORP-FP-001 / 002 =======
+@pytest.mark.matrix_case(case_id="CORP-FP-001", context_id="corpus", lane="default")
 def test_fp_001_unchanged_content_compares_equal(tmp_path):
     (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
     (tmp_path / "sub").mkdir()
@@ -46,6 +47,7 @@ def test_fp_001_unchanged_content_compares_equal(tmp_path):
     assert fingerprint_tree(tmp_path) == fingerprint_tree(tmp_path)
 
 
+@pytest.mark.matrix_case(case_id="CORP-FP-002", context_id="corpus", lane="default")
 def test_fp_002_one_changed_byte_compares_unequal(tmp_path):
     target = tmp_path / "a.txt"
     target.write_text("hello", encoding="utf-8")
@@ -60,6 +62,7 @@ def test_fp_002_one_changed_byte_compares_unequal(tmp_path):
 
 
 # ============================================================== CORP-FP-003 ==============
+@pytest.mark.matrix_case(case_id="CORP-FP-003", context_id="corpus", lane="default")
 def test_fp_003_symlink_raises_unsafe(tmp_path):
     (tmp_path / "real.txt").write_text("x", encoding="utf-8")
     (tmp_path / "link.txt").symlink_to(tmp_path / "real.txt")
@@ -68,6 +71,7 @@ def test_fp_003_symlink_raises_unsafe(tmp_path):
 
 
 # ============================================================== CORP-FP-004 ==============
+@pytest.mark.matrix_case(case_id="CORP-FP-004", context_id="corpus", lane="default")
 def test_fp_004_timestamp_and_mode_changes_do_not_alter_fingerprint(tmp_path):
     target = tmp_path / "a.txt"
     target.write_text("hello", encoding="utf-8")
@@ -81,6 +85,7 @@ def test_fp_004_timestamp_and_mode_changes_do_not_alter_fingerprint(tmp_path):
 
 
 # ============================================================== CORP-READ-001 ===========
+@pytest.mark.matrix_case(case_id="CORP-READ-001", context_id="corpus", lane="default")
 def test_read_001_injected_permission_error_becomes_unreadable(tmp_path):
     (tmp_path / "secret-name.txt").write_text("private", encoding="utf-8")
 
@@ -138,6 +143,7 @@ def test_pdf_002_open_failure_redacts_path(tmp_path):
 
 
 # ============================================================== CORP-SNAPSHOT-002 ========
+@pytest.mark.matrix_case(case_id="CORP-SNAPSHOT-002", context_id="corpus", lane="default")
 def test_snapshot_002_changed_payload_breaks_multiset_equality(tmp_path):
     schedule = schedule_payload()["data"][0]
     _write_run(tmp_path, "run-1", [[schedule], [requirement_row()]])
@@ -156,15 +162,18 @@ def test_snapshot_002_identical_runs_match(tmp_path):
 
 
 # ============================================================== CORP-MODE-001..004 ======
+@pytest.mark.matrix_case(case_id="CORP-MODE-001", context_id="corpus", lane="default")
 def test_mode_001_absent_corpus_status(tmp_path):
     assert corpus_status(tmp_path / "missing") == "absent"
 
 
+@pytest.mark.matrix_case(case_id="CORP-MODE-002", context_id="corpus", lane="default")
 def test_mode_002_present_corpus_status(tmp_path):
     _write_run(tmp_path, "run-1", [[requirement_row()]])
     assert corpus_status(tmp_path) == "ok"
 
 
+@pytest.mark.matrix_case(case_id="CORP-MODE-003", context_id="corpus", lane="default")
 def test_mode_003_empty_and_wrong_layout_status(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -174,6 +183,7 @@ def test_mode_003_empty_and_wrong_layout_status(tmp_path):
     assert corpus_status(wrong) == "wrong-layout"
 
 
+@pytest.mark.matrix_case(case_id="CORP-MODE-004", context_id="corpus", lane="default")
 def test_mode_004_alternate_root_selected(tmp_path):
     alt = tmp_path / "alternate-root"
     _write_run(alt, "run-1", [[requirement_row()]])
@@ -193,6 +203,7 @@ def authentic_corpus(pytestconfig: pytest.Config) -> Path:
 
 # ============================================================== CORP-CANON-001 ===========
 @pytest.mark.private_corpus
+@pytest.mark.matrix_case(case_id="CORP-CANON-001", context_id="corpus", lane="authentic")
 def test_canon_001_canonical_payload_split(authentic_corpus: Path):
     before = fingerprint_tree(authentic_corpus)
     runs = canonical_run_dirs(authentic_corpus)
@@ -219,6 +230,7 @@ def test_canon_001_canonical_payload_split(authentic_corpus: Path):
 
 # ============================================================== CORP-SNAPSHOT-001 ========
 @pytest.mark.private_corpus
+@pytest.mark.matrix_case(case_id="CORP-SNAPSHOT-001", context_id="corpus", lane="authentic")
 def test_snapshot_001_three_runs_share_multiset(authentic_corpus: Path):
     before = fingerprint_tree(authentic_corpus)
     assert raw_multisets_all_match(authentic_corpus)
@@ -228,6 +240,7 @@ def test_snapshot_001_three_runs_share_multiset(authentic_corpus: Path):
 
 # ============================================================== CORP-PDF-001 ============
 @pytest.mark.private_corpus
+@pytest.mark.matrix_case(case_id="CORP-PDF-001", context_id="corpus", lane="authentic")
 def test_pdf_001_pdf_extraction_aggregate(authentic_corpus: Path):
     before = fingerprint_tree(authentic_corpus)
     pdf = find_single_pdf(authentic_corpus)

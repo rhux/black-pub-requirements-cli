@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from tests.factories.payloads import requirement_row, schedule_payload
 from tools.verify_corpus import (
     classify_row,
@@ -25,6 +26,7 @@ def test_number_shape_collapses_values():
 
 
 # --- CORP-SPLIT-001 ---------------------------------------------------------------------
+@pytest.mark.matrix_case(case_id="CORP-SPLIT-001", context_id="corpus", lane="default")
 def test_mixed_payload_partitions_schedule_and_requirement(tmp_path):
     schedule = schedule_payload()["data"][0]
     write_raw_payload(tmp_path, [schedule, requirement_row()])
@@ -38,6 +40,7 @@ def test_mixed_payload_partitions_schedule_and_requirement(tmp_path):
 
 
 # --- CORP-SPLIT-002 ---------------------------------------------------------------------
+@pytest.mark.matrix_case(case_id="CORP-SPLIT-002", context_id="corpus", lane="default")
 def test_requirement_schema_does_not_depend_on_flags(tmp_path):
     row = requirement_row(COMPLETED_REQ_FLAG=None, COMPLETED_CLASS_FLAG=None)
     write_raw_payload(tmp_path, [row])
@@ -47,6 +50,7 @@ def test_requirement_schema_does_not_depend_on_flags(tmp_path):
 
 
 # --- CORP-SPLIT-003 ---------------------------------------------------------------------
+@pytest.mark.matrix_case(case_id="CORP-SPLIT-003", context_id="corpus", lane="default")
 def test_row_matching_both_predicates_is_unrecognized(tmp_path):
     both = {**schedule_payload()["data"][0], **requirement_row()}
     assert classify_row(both) == "unrecognized"
@@ -66,6 +70,7 @@ def test_both_predicate_reason_is_redacted(tmp_path):
 
 
 # --- CORP-SPLIT-004 ---------------------------------------------------------------------
+@pytest.mark.matrix_case(case_id="CORP-SPLIT-004", context_id="corpus", lane="default")
 def test_non_mapping_row_is_unrecognized_without_echo(tmp_path):
     secret = "avery-secret-token"
     assert classify_row(secret) == "unrecognized"
@@ -79,6 +84,7 @@ def test_non_mapping_row_is_unrecognized_without_echo(tmp_path):
 
 
 # --- CORP-CLI-001 -----------------------------------------------------------------------
+@pytest.mark.matrix_case(case_id="CORP-CLI-001", context_id="corpus", lane="default")
 def test_cli_valid_output_exits_zero_and_leaks_nothing(tmp_path, capsys):
     run = tmp_path / "run-a"
     run.mkdir()
@@ -95,6 +101,7 @@ def test_cli_valid_output_exits_zero_and_leaks_nothing(tmp_path, capsys):
 
 
 # --- CORP-CLI-002 -----------------------------------------------------------------------
+@pytest.mark.matrix_case(case_id="CORP-CLI-002", context_id="corpus", lane="default")
 def test_cli_missing_corpus_exits_two_with_one_bounded_line(tmp_path, capsys):
     missing = tmp_path / "does-not-exist"
     rc = main([str(missing)])

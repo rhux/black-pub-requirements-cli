@@ -15,6 +15,7 @@ from tests.matrix.cases.acquisition_cases import ALL_ACQUISITION_METADATA
 from tests.matrix.cases.artifact_cases import ALL_ARTIFACT_METADATA
 from tests.matrix.cases.bootstrap_cases import ALL_BOOTSTRAP_METADATA
 from tests.matrix.cases.cli_cases import ALL_CLI_METADATA
+from tests.matrix.cases.corpus_cases import ALL_CORPUS_METADATA, ALL_REGISTRY_METADATA
 from tests.matrix.cases.desktop_cases import ALL_DESKTOP_METADATA
 from tests.matrix.cases.input_cases import INPUT_CASES
 from tests.matrix.cases.interface_cases import ALL_INTERFACE_METADATA
@@ -28,7 +29,9 @@ ALL_INPUT_METADATA: tuple[CaseMetadata, ...] = tuple(case.meta for case in INPUT
 ALL_PDF_METADATA: tuple[CaseMetadata, ...] = tuple(case.meta for case in PDF_CASES)
 
 ALL_CASES: tuple[CaseMetadata, ...] = (
-    ALL_INPUT_METADATA
+    ALL_CORPUS_METADATA
+    + ALL_REGISTRY_METADATA
+    + ALL_INPUT_METADATA
     + ALL_PDF_METADATA
     + ALL_ACQUISITION_METADATA
     + ALL_REQUIREMENT_METADATA

@@ -17,6 +17,146 @@ class AxisSpec:
 
 _NO_INTERACTIONS: frozenset[str] = frozenset()
 
+# Corpus/registry-domain axes (Task 16 backfill, Slice 1b Phase A Gate): the tools/verify_corpus.py
+# and tests/harnesses/corpus.py seams (CORP-*), plus the tests/matrix/registry.py structural
+# self-tests (REG-*, all NEW_ACCEPTANCE -- see tests/matrix/cases/corpus_cases.py's module
+# docstring for why they carry no boundary and no execution context).
+_CORPUS_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="CORP-SPLIT",
+        domain=Domain.CORPUS,
+        members=frozenset(
+            {
+                "mixed-partition",
+                "schema-independent",
+                "both-predicates-unrecognized",
+                "non-mapping-row",
+            }
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"CORP-B-CLASSIFY", "CORP-B-SUMMARIZE"}),
+    ),
+    AxisSpec(
+        axis_id="CORP-CLI",
+        domain=Domain.CORPUS,
+        members=frozenset({"valid-output", "missing-corpus"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"CORP-B-MAIN"}),
+    ),
+    AxisSpec(
+        axis_id="CORP-FP",
+        domain=Domain.CORPUS,
+        members=frozenset(
+            {"unchanged-equal", "changed-unequal", "symlink-unsafe", "timestamp-mode-invariant"}
+        ),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"CORP-B-FINGERPRINT"}),
+    ),
+    AxisSpec(
+        axis_id="CORP-READ",
+        domain=Domain.CORPUS,
+        members=frozenset({"permission-denied-unreadable"}),
+        min_focused_cases=1,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"CORP-B-FINGERPRINT"}),
+    ),
+    AxisSpec(
+        axis_id="CORP-CANON",
+        domain=Domain.CORPUS,
+        members=frozenset({"canonical-payload-split"}),
+        min_focused_cases=1,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"CORP-B-SUMMARIZE"}),
+    ),
+    AxisSpec(
+        axis_id="CORP-PDF",
+        domain=Domain.CORPUS,
+        members=frozenset({"pdf-extraction-aggregate"}),
+        min_focused_cases=1,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"CORP-B-PDF-AGGREGATE"}),
+    ),
+    AxisSpec(
+        axis_id="CORP-SNAPSHOT",
+        domain=Domain.CORPUS,
+        members=frozenset({"three-runs-share-multiset", "changed-payload-breaks-equality"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"CORP-B-MULTISET"}),
+    ),
+    AxisSpec(
+        axis_id="CORP-MODE",
+        domain=Domain.CORPUS,
+        members=frozenset({"absent", "present", "empty-and-wrong-layout", "alternate-root"}),
+        min_focused_cases=4,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"CORP-B-CORPUS-STATUS"}),
+    ),
+)
+
+_REGISTRY_AXES: tuple[AxisSpec, ...] = (
+    AxisSpec(
+        axis_id="REG-ID",
+        domain=Domain.CORPUS,
+        members=frozenset({"same-case-two-contexts", "duplicate-case-ids"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="REG-AXIS",
+        domain=Domain.CORPUS,
+        members=frozenset(
+            {
+                "unknown-axis",
+                "missing-member",
+                "too-few-cases",
+                "missing-interaction",
+                "unmapped-boundary",
+                "unreviewed-exclusion",
+            }
+        ),
+        min_focused_cases=6,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="REG-META",
+        domain=Domain.CORPUS,
+        members=frozenset(
+            {
+                "blank-rationale",
+                "incomplete-evidence",
+                "missing-owner",
+                "incomplete-intentional-change",
+                "policy-mismatch",
+            }
+        ),
+        min_focused_cases=5,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+    AxisSpec(
+        axis_id="REG-LANE",
+        domain=Domain.CORPUS,
+        members=frozenset(
+            {
+                "empty-required-set",
+                "deselected-required-key",
+                "skipped-required-key",
+                "duplicated-required-key",
+                "missing-required-key",
+            }
+        ),
+        min_focused_cases=5,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset(),
+    ),
+)
+
 # Input-domain axes (Task 17). Each member set is exhaustive for the behavior it names, and
 # ``min_focused_cases`` equals the member count because the catalog declares exactly one
 # focused case per member. ``boundaries`` name the load_* seams the axis exercises.
@@ -1097,7 +1237,9 @@ _FLOW_AXES: tuple[AxisSpec, ...] = (
 
 # Domain axes are declared by later slices (Tasks 19-21) and appended here.
 AXES: tuple[AxisSpec, ...] = (
-    _INPUT_AXES
+    _CORPUS_AXES
+    + _REGISTRY_AXES
+    + _INPUT_AXES
     + _PDF_AXES
     + _ACQUISITION_AXES
     + _REQUIREMENT_AXES
