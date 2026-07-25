@@ -368,6 +368,8 @@
     "REQ-CHOICE-030",
     "REQ-CLASS-001",
     "REQ-CLASS-002",
+    "REQ-DUP-001",
+    "REQ-DUP-002",
     "REQ-EMPTY-001",
     "REQ-EMPTY-002",
     "REQ-EXCLUDE-001",

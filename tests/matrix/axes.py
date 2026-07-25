@@ -736,6 +736,14 @@ _REQUIREMENT_AXES: tuple[AxisSpec, ...] = (
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"REQ-B-ANNOTATE"}),
     ),
+    AxisSpec(
+        axis_id="REQ-DUP",
+        domain=Domain.REQUIREMENT,
+        members=frozenset({"positional-differs-from-last-wins", "identical-descriptions"}),
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-MISSING"}),
+    ),
 )
 
 # Artifact-domain axes (Task 20): output writers, HTML/email rendering safety, filename

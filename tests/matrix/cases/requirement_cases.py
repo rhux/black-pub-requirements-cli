@@ -880,6 +880,110 @@ REQUIREMENT_CASES_IDENTITY: tuple[RequirementCase, ...] = (
 )
 
 
+# ==============================================================================================
+# REQ-DUP-001/002 -- duplicate requirement_number inside one (scout, class) group (Task 10).
+#
+# Traced by hand against build_missing_requirements (scout_schedule_cli.py:851-925):
+#   `children[]` in annotate_requirement_statuses links a child to its parent POSITIONALLY, via
+#   `prior_path_indexes` -- last-wins per PATH, consulted at the moment the child row is
+#   processed. `by_key` in build_missing_requirements is a dict comprehension over the full
+#   annotated list keyed on (attendee, class, requirement_number) -- also last-wins, but
+#   consulted later, after the whole group has been annotated. When two rows in one group share
+#   a requirement_number, these two "last-wins" resolutions can name DIFFERENT rows, because
+#   `prior_path_indexes` is keyed on the richer PATH tuple (so it can already have moved on to a
+#   nested child's path by the time a later duplicate top-level row is seen) while `by_key` only
+#   ever sees the plain NUMBER string and always ends on the last occurrence in the whole list.
+#
+# REQ-DUP-001 ("identical-descriptions" member) is the control: rows are
+#   [ "#4" (desc A, rA), "#4" (desc B, rB), "#4a" (leaf, rC) ].
+#   requirement_path gives paths ('4',), ('4',), ('4','a'); prior_path_indexes[('4',)] is
+#   overwritten to index 1 by the second "#4" row BEFORE "#4a" is processed, so "#4a" links
+#   positionally to index 1. by_key[(attendee, class, "#4")] is ALSO the last "#4" row (index 1)
+#   -- both schemes agree here, which is why REQ-DUP-001 alone would NOT prove the fixture
+#   discriminates anything; it exists so REQ-DUP-002's divergence has a same-shaped baseline to
+#   contrast against.
+#
+# REQ-DUP-002 ("positional-differs-from-last-wins" member) makes the two schemes DISAGREE by
+#   moving the second "#4" row to AFTER the child instead of before it:
+#   [ "#4" (positional parent, rA), "#4a" (leaf, rB), "#4" (last-wins ancestor, rC) ].
+#   "#4a" is processed while prior_path_indexes[('4',)] still holds index 0 (the first "#4" row
+#   has not yet been overwritten), so the TREE links "#4a" to index 0 -- the row describing
+#   itself as "Positional parent, registered first.". But by_key is built from the FINAL
+#   annotated list, so by_key[(attendee, class, "#4")] resolves to index 2 -- the row describing
+#   itself as "Last-wins ancestor, registered second.". build_missing_requirements' ancestor walk
+#   in turn follows `parent_requirement_number` through `by_key`, landing on index 2, not index 0.
+#   Index 2 also independently satisfies is_actionable_leaf() (it has no children of its own), so
+#   it is pulled in as a non-leaf ancestor via the walk; index 0's row -- the tree's actual
+#   positional parent -- never appears in the output at all. The two descriptions make the
+#   selected ancestor identifiable: only "Last-wins ancestor, registered second." should appear.
+# ==============================================================================================
+_DUP_ROWS_AGREE = (
+    _row("#4", description="Duplicate parent A.", requirement_id="rA"),
+    _row("#4", description="Duplicate parent B.", requirement_id="rB"),
+    _row("#4a", description="Actionable leaf.", requirement_id="rC"),
+)
+
+_DUP_ROWS_DISAGREE = (
+    _row("#4", description="Positional parent, registered first.", requirement_id="rA"),
+    _row("#4a", description="Actionable leaf.", requirement_id="rB"),
+    _row("#4", description="Last-wins ancestor, registered second.", requirement_id="rC"),
+)
+
+REQUIREMENT_DUP_CASES: tuple[RequirementCase, ...] = (
+    RequirementCase(
+        meta=_meta(
+            "REQ-DUP-001",
+            "REQ-DUP",
+            "identical-descriptions",
+            ("missing_selection",),
+            "Two rows share a number and both the positional tree and the last-wins "
+            "by_key map select the same row as ancestor; the control case that proves "
+            "REQ-DUP-002's divergence is real and not an artifact of the fixture shape.",
+            _EVIDENCE_MISSING,
+        ),
+        rows=_DUP_ROWS_AGREE,
+        expected_by_context={
+            "missing_selection": (
+                ("#4", "Duplicate parent A.", 0, True),
+                ("#4", "Duplicate parent B.", 0, False),
+                ("#4a", "Actionable leaf.", 1, True),
+            )
+        },
+    ),
+    RequirementCase(
+        meta=_meta(
+            "REQ-DUP-002",
+            "REQ-DUP",
+            "positional-differs-from-last-wins",
+            ("missing_selection",),
+            "The positional parent (index 0, 'registered first') and the last-wins "
+            "ancestor (index 2, 'registered second') are DIFFERENT rows with different "
+            "descriptions, so the selected ancestor is identifiable from the observation: "
+            "only the last-wins row's description may appear, never the positional parent's.",
+            _EVIDENCE_MISSING,
+        ),
+        rows=_DUP_ROWS_DISAGREE,
+        expected_by_context={
+            "missing_selection": (
+                ("#4", "Last-wins ancestor, registered second.", 0, False),
+                ("#4a", "Actionable leaf.", 1, True),
+            )
+        },
+    ),
+)
+
+
+# NOTE: REQUIREMENT_DUP_CASES is deliberately NOT folded into REQUIREMENT_CASES below.
+# REQUIREMENT_CASES is what tests/characterization/test_requirement_matrix.py's
+# ``execution_params(REQUIREMENT_CASES)`` parametrizes -- and that runner is frozen (Task 10's
+# brief: "Do not edit that runner"), with no ``_ctx_missing_selection`` handler. Folding
+# REQUIREMENT_DUP_CASES in here would hand the frozen runner two cases whose only context
+# ("missing_selection") it cannot dispatch, failing with AttributeError -- verified empirically
+# while implementing this task. REQUIREMENT_DUP_CASES's own executor lives in
+# tests/parity/test_missing_selection.py, driven directly off REQUIREMENT_DUP_CASES. Only its
+# *metadata* needs to reach the registry/lane-gate machinery (REG-AXIS member coverage,
+# --matrix-lane default's required-key accounting), which ALL_REQUIREMENT_METADATA below
+# provides by concatenating both catalogs' metadata without merging the executable case tuples.
 REQUIREMENT_CASES: tuple[RequirementCase, ...] = (
     REQUIREMENT_CASES_SHAPE
     + REQUIREMENT_CASES_FLAG
@@ -894,4 +998,6 @@ REQUIREMENT_CASES: tuple[RequirementCase, ...] = (
     + REQUIREMENT_CASES_IDENTITY
 )
 
-ALL_REQUIREMENT_METADATA: tuple[CaseMetadata, ...] = tuple(case.meta for case in REQUIREMENT_CASES)
+ALL_REQUIREMENT_METADATA: tuple[CaseMetadata, ...] = tuple(
+    case.meta for case in REQUIREMENT_CASES + REQUIREMENT_DUP_CASES
+)
