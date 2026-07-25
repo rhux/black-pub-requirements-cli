@@ -56,15 +56,18 @@ src/scoutmb/
   ports/
     clock.py            Clock, Sleeper, Jitter                                   2a
     ids.py              IdFactory                                                2a
-    storage.py                                                                   2a
+    attendee_source.py  the port ingest adapters implement                       2a
+    artifact_sink.py    the port reporting adapters implement                    2a
     scoutevent.py  observability.py                                              2b
   features/
-    ingest/             loaders and PDF orchestration                            2a
-    reporting/          html, email, csv/json writers                            2a
+    ingest/             orchestration only: select a source, dedup, filter       2a
+    reporting/          orchestration only: compose records, drive the sink      2a
     acquisition/        retry, dedup, breaker, checkpoints                       2b
   adapters/
-    files/atomic.py     atomic single-file publication, CSV writing              2a
-    pdf/                PyMuPDF and OpenCV behind a capability check             2a
+    files/atomic.py     atomic single-file publication                           2a
+    files/tabular.py    CSV + XLSX + JSON + text parsing and CSV writing         2a
+    pdf/                PyMuPDF and OpenCV parsing behind a capability check     2a
+    html/               template rendering                                       2a
     scoutevent/  telemetry/noop.py                                               2b
   interfaces/
     cli/pdf.py                                                                   2a
@@ -78,6 +81,27 @@ src/scoutmb/
 This is Phase B's **end state**, not the project's. The parent spec's target layout also
 lists `logging_setup.py`; that module arrives in Slice 4 with D20's diagnostics work and is
 deliberately absent here.
+
+### Layer roles
+
+A feature **orchestrates**; it never parses and never writes. All parsing of external
+formats (CSV, XLSX, JSON, line-delimited text, PDF) and all production of external formats
+(CSV rows, HTML, email bodies) belongs to an adapter behind a port. `features/ingest`
+selects a source, deduplicates, and applies the adult filter; it does not know that a CSV
+has a header row. `features/reporting` composes records into a projection and hands it to a
+sink; it does not know what an `<html>` tag is.
+
+This is stricter than "loaders live in the ingest feature," which is how the legacy code is
+shaped and how an earlier draft of this document described it. The distinction is what makes
+the optional-dependency contract below achievable: if PDF parsing lives in a feature, then
+importing that feature imports PyMuPDF, and a core-only install breaks.
+
+`ports/storage.py` is **not** created. There is one filesystem implementation and no second
+one in prospect, so a storage port would be an abstraction with nothing behind it. The two
+ports that do exist (`attendee_source`, `artifact_sink`) each have at least two real
+implementations — file formats and PDF for the source, and the operational and shareable
+projections for the sink. A port with one implementation and no test double is a smell, not
+a boundary.
 
 ### Module granularity
 
@@ -128,16 +152,34 @@ and `numpy`. The parent spec lists this as a structural defect, and the package 
 depends on fixing it — `features/ingest` cannot select between a CSV adapter and a PDF
 adapter if importing the feature drags in OpenCV.
 
+First, which dependencies are actually optional. `pyproject.toml` today makes `openpyxl` a
+**mandatory** dependency and only `playwright`, `PyMuPDF`, and `opencv-python-headless`
+extras, so treating all four alike would be wrong:
+
+| Distribution | Status | Owning adapter | Extra |
+| --- | --- | --- | --- |
+| `openpyxl` | mandatory | `adapters/files/tabular.py` (XLSX path) | — |
+| `PyMuPDF`, `opencv-python-headless`, `numpy` | optional | `adapters/pdf/` | `pdf` |
+| `playwright` | optional | `adapters/scoutevent/` (2b) | `acquisition` |
+| `fastapi`, `uvicorn`, `python-multipart`, `pywebview` | mandatory | `interfaces/web`, `interfaces/desktop` (2b) | — |
+
+`openpyxl` stays mandatory in Phase B. Moving it to an extra would change what a bare install
+can load, which is a packaging behavior change and not part of this restructure.
+
 Contract:
 
-- Importing `scoutmb`, anything under `core/`, `ports/`, or any `features/` module pulls in
-  **no** optional dependency. Only the adapter that needs one imports it, at call time or
-  behind a module-level guard inside that adapter.
-- A missing optional dependency produces a **typed capability error** carrying an
-  actionable message (which extra to install), never a bare `ImportError` traceback.
-- Enforced by a test that imports the core surface in a subprocess with the optional
-  distributions absent from the environment, and asserts on `sys.modules` afterward rather
-  than on the absence of an exception.
+- Importing `scoutmb`, anything under `core/` or `ports/`, or any `features/` module pulls in
+  **no** optional dependency. This is achievable precisely because parsing lives in adapters:
+  `features/ingest` imports the `attendee_source` port, never `adapters/pdf`.
+- An adapter that needs an optional distribution imports it inside the function that uses it,
+  or behind a module-level guard in that adapter only.
+- A missing optional dependency raises `CapabilityUnavailable` (a `ScoutmbError` subclass)
+  carrying the capability name, the distribution names, and the exact
+  `pip install 'scoutmb[<extra>]'` remedy — never a bare `ImportError` traceback.
+- Enforced by a subprocess test that imports the core surface in an environment with the
+  optional distributions absent, then asserts on `sys.modules` — checking that
+  `cv2`, `fitz`, and `playwright` are absent from it, rather than merely that no exception
+  was raised. Asserting "no exception" would pass even if the imports had succeeded.
 
 ### Error model
 
@@ -166,6 +208,43 @@ load-bearing and easy to lose:
   must be removed **together**. Deleting the defensive `getattr` while the web caller still
   omits the field turns a working default into an `AttributeError`.
 
+### Dependency rules
+
+The layer roles above are enforced mechanically, and the rule has to be precise about what
+"imports" means or it can be satisfied while being false.
+
+Allowed edges, and no others, between first-party `scoutmb` modules:
+
+```text
+interfaces  ->  features, core, ports, config, errors, adapters (composition only)
+features    ->  core, ports, config, errors
+adapters    ->  core, ports, config, errors
+core        ->  core, errors
+ports       ->  core, errors
+runtime     ->  core, ports, config, errors
+```
+
+Enforcement details, all of which are load-bearing:
+
+- The check runs over the **transitive** first-party import graph, not direct imports only.
+  `core` importing a module that imports an adapter is a violation.
+- Both **static** (module-level and function-level `import` statements found by AST walk) and
+  **runtime** imports are covered. Function-level imports are the common way this rule gets
+  quietly broken, and the graph is built from the AST so they are visible.
+- `importlib.import_module`, `__import__`, and any other dynamic import inside `core/`,
+  `ports/`, or `features/` is **banned outright** rather than analyzed. A dynamic import is
+  unresolvable statically, so allowing it would make the rule unfalsifiable. Adapters may use
+  one only for the optional-dependency guard described below.
+- `interfaces` is the only layer permitted to import an adapter, and only at a composition
+  root — a module whose sole job is wiring. This is checked by module name, not by intent.
+
+The **no-`__file__`-derived-data-path** rule is likewise a specific check, not a slogan: no
+module under `src/scoutmb/` may pass `__file__`, or any expression derived from it, into a
+data-path constructor. Reading a bundled resource relative to `__file__` is permitted and is
+how `resources/templates/` is loaded; what is banned is `__file__` reaching a *data* root.
+The check is AST-based, keyed on `__file__` appearing anywhere in the dataflow of an argument
+to the data-root resolver or to `Path.open`/`mkdir`/`write_*` for a non-resource path.
+
 ### The 2a / 2b seam
 
 **A boundary belongs to 2b if and only if it touches Playwright or FastAPI.** Everything
@@ -182,15 +261,52 @@ troop349-pdf      = scoutmb.interfaces.cli.pdf:main
 troop349-schedule = scoutmb.interfaces.cli.schedule:main
 ```
 
-The two stage scripts mirror the two flat scripts **argument for argument**: same options,
-same defaults, same exit codes, same stdout. Only the program name differs. This is a
-contract, not a convenience — it is what lets the `CLI-SCHED-*` and PDF-CLI cases be
+The two stage scripts mirror the two flat scripts **argument for argument**. Spelled out,
+because "same arguments" is where this contract gets read loosely — preserved unchanged:
+
+- the full option set, their short and long forms, and every default value;
+- exit codes for success, handled error, and interrupt;
+- **stdout** content, and **stderr** content, byte for byte;
+- `--help` / usage text, except for the program name substitution itself;
+- behavior under a relative `--output` path, i.e. resolution against the process working
+  directory rather than anything derived from the package location.
+
+Only the program name differs. This is what lets the `CLI-SCHED-*` and PDF-CLI cases be
 re-pointed at retirement without editing a single expected value. A `troop349 <subcommand>`
 dispatcher is rejected for the same reason: it would change the argv prefix every one of
 those cases is pinned to.
 
+Entry-point tests **execute the installed console script as a subprocess**. Calling `main()`
+in-process is not equivalent: it skips the wrapper that `pyproject.toml` generates, the
+`sys.argv[0]` the parser sees, and the exit-code path. Both are worth having, but only the
+subprocess form tests what a user runs.
+
 `pyproject.toml` currently declares `troop349 = "scoutmb.cli.app:main"`, which names a
 module that has never existed; the console script is broken today and Slice 2 fixes it.
+
+### Release root
+
+Gate 2 requires a copied release root that starts with no repository present, and D2 keeps
+the source-copy bridge until the transactional payload install replaces it in Slice 3/4. The
+condition is only testable if the layout is named, so:
+
+```text
+<app_dir>/
+  run_app.py                 launcher entry (or its package-era replacement)
+  scoutmb/                   copied from src/scoutmb, including resources/ and py.typed
+  requirements.txt
+  scouts.csv  pdf-uploads/  runs/     pre-existing user data, never touched by a sync
+```
+
+`scoutmb/` sits beside the entry script, so it imports without any `sys.path` mutation — the
+launcher already runs with `app_dir` as the script directory. `bootstrap/source_sync.py`
+extends its `_FILES`/`_DIRS` allowlist to carry `src/scoutmb` into that position, and the
+sync remains a targeted overwrite of an explicit allowlist, never a directory wipe.
+
+Acceptance is a specific command sequence, not a claim: copy the release root to a temporary
+directory outside the repository, remove the repository from the environment, launch, and
+assert the health endpoint responds and one report renders. The 2b plan owns the exact
+invocation; what this document fixes is that the layout and the assertion both exist.
 
 ## The oracle invariant
 
@@ -203,6 +319,26 @@ This is the load-bearing rule of Phase B.
 reclassifying the case to `intentional-change` with a named `target_owner` and a written
 `target_observation` — which is what makes a behavior change a reviewed decision instead of
 a refactor artifact.
+
+**Visible in review is not the same as enforced.** One commit can edit an expected value, its
+classification, its owner, the coverage baseline, and this document together, and nothing
+mechanical objects. So the invariant is backed by a check: a digest over every `preserve`
+case's `(case_id, expected_by_context)` pair is checked in beside
+`tests/baselines/phase_a.json`, and CI fails when the computed digest differs from the stored
+one. Updating it is an explicit command that prints which case IDs changed, and the Gate runs
+in check mode only — the same shape as the coverage baseline this repo already enforces.
+
+That is deliberately lighter than a per-case approval allowlist keyed to a spec digest. With
+one owner and no external consumers, the failure mode worth defending against is *forgetting*
+— editing an expectation to make a red test green and not noticing the significance — not an
+adversary. A digest that names the changed case IDs stops that.
+
+**Escape hatch.** If implementation reveals a genuine correctness bug that requires an
+expected value to change and no sanctioned exception covers it, that is not a reason to
+deadlock behind a spec amendment. Reclassify the case to `intentional-change`, name the owner,
+write the `target_observation`, update the digest, and record the row in this document's
+exception table in the same commit. The rule is that the change is *declared and attributable*
+— not that it is impossible.
 
 The invariant admits exactly **six sanctioned exceptions**, listed below. Each was written
 into the catalog by Slice 1b with `target_owner="Slice 2"` and a pre-written
@@ -269,8 +405,50 @@ it independently. The `Runner[InputT, ObservationT]` protocol in `tests/matrix/m
 already types this shape, so the catalog needs no change to support it.
 
 **Lane accounting rule:** while a domain's legacy module still exists, an execution key is
-satisfied only when **both** runners pass it. A domain cannot be declared moved on the
-strength of one green side.
+satisfied only when **both** runners pass it.
+
+Be precise about what that buys, because it is less than it sounds. Where the shim is a
+**re-export**, the two runners execute the same function object, so both-green is one result
+counted twice — it proves the catalog is satisfied, not that two implementations agree.
+Where the shim **adapts** (`parse → core → serialize`), the two paths genuinely differ and
+both-green catches a broken parser or serializer. The rule is retained for the second case
+and as a guard against a runner being silently dropped from collection; it is not
+independent verification of the move, and must not be described as such in a plan or a gate
+report.
+
+What actually protects a move is the **depth of the observation**, which is why the section
+below exists.
+
+### Observation depth and golden projections
+
+Several catalog observations are much shallower than the domain they cover, and the
+restructure is exactly the kind of change they would miss:
+
+- `ART-SCHEMA-006` observes the embedded report data as a bool, a top-level key set, and two
+  integer counts. Nothing about the fields inside `scouts[]`, `classes[]`, `requirements[]`,
+  or `errors[]`.
+- `ART-SCHEMA-008` observes file counts, a greeting prefix, and a doctype.
+
+So a move that dropped `class_completed` from every requirement row, changed a numeric field
+to a string, reordered a collection, or broke per-scout correspondence between a name and
+its rows would leave the artifact domain green.
+
+Phase B closes this **additively**, without touching any existing case. Before the first
+reporting symbol moves, 2a generates an exact structured projection of the HTML report data
+and of each rendered email body from the current implementation, hand-reviews it, and checks
+it in as a golden fixture alongside `tests/baselines/phase_a.json`. Required scope: every
+field of every row in all four report collections with its Python type; the full text of
+each rendered email body and subject; and the per-scout mapping from display name to its
+rows and files.
+
+Two things this deliberately is **not**. It is not a differential harness against a frozen
+pre-move wheel — the catalog's expectations are hand-computed and therefore already
+implementation-independent, so the gap is observation depth, and a preserved old
+implementation would work around that rather than fix it. And the golden is not authority
+over the catalog: where the two overlap, a catalog case wins and the golden is regenerated.
+
+Generation is a one-time reviewed step, and regenerating it later is an explicit command
+that shows a diff — the same discipline the coverage baseline already uses.
 
 **Lane coverage.** The rule applies per lane, not only to the default lane. The eleven
 browser-lane and three authentic-lane cases get package runners on the same terms, and the
@@ -341,14 +519,35 @@ branch percentage is passed trivially by a few lines of imports and proves nothi
 coverage area is then replaced by a structural assertion. Coverage measures the package;
 the shim gets a shape check.
 
-"Contains no business logic" is checked against the module's AST, and means every
-top-level statement is one of: an import; a module-level assignment binding an imported
-name or a literal; a class or function definition whose body contains no branching, no
-loop, no comprehension, and no `try` — only a call forwarding to an imported name, with
-argument adaptation and a return. Anything else — a conditional, an arithmetic expression,
-a string built from parts — is business logic and fails the check. This is deliberately
-strict: the point is that a shim cannot quietly re-acquire behavior that the package is
-supposed to own.
+"Contains no business logic" is checked by comparing each definition's AST **shape against an
+explicit shim template**, not by enumerating banned node types. Template-matching is used
+because a ban-list is simultaneously too strict and too weak: it rejects harmless argument
+normalization while still permitting a single forwarding call whose arguments hide arbitrary
+work in a nested expression or an imported helper.
+
+The permitted shapes are:
+
+```python
+# Form 1 — re-export
+from scoutmb.core.inference.numbering import requirement_path   # noqa: F401
+
+# Form 2 — adapting shim: parse, delegate, serialize. Nothing else.
+def annotate_requirement_statuses(requirements):
+    rows = tuple(RequirementRow.from_mapping(item) for item in requirements)
+    return [row.to_dict() for row in annotate(rows)]
+```
+
+A module passes when every top-level statement is an import, a module-level binding of an
+imported name or a literal, or a definition matching Form 2: at most one call to a package
+function, whose arguments are either passed through unchanged or wrapped in a single
+comprehension over a named DTO constructor, and whose result is returned either directly or
+through a single comprehension. No branching, loop nesting, `try`, arithmetic, or
+string-building.
+
+Be honest about the limit: this establishes *shape*, not semantic purity. A `from_mapping`
+that grew a side effect would still match the template. What the check guarantees is that a
+shim cannot accumulate visible logic — the DTO constructors it delegates to are themselves
+package code under the package's own tests.
 
 `tests/harnesses/legacy.py` exists to drive the legacy modules and retires with them, in
 the same task that removes the last module it loads.
@@ -405,6 +604,38 @@ This tiering was chosen so that it does not require editing a single `preserve` 
   filenames are display-slug plus per-run UUID. Declaring them audience-shareable is a
   **policy declaration plus a new enforcing test**, not a code change.
 
+### The shareable report schema
+
+"Drops `attendee_id`" is not a specification, so here is the schema. The shareable
+projection of the embedded report data has exactly these keys, and the enforcing test
+asserts the **complete** field set of each row rather than the absence of one name:
+
+| Collection | Fields | Change from operational |
+| --- | --- | --- |
+| top level | `generated_at_local`, `generated_at_iso`, `run_id`, `scouts`, `classes`, `requirements`, `errors` | unchanged (`ART-SCHEMA-006` holds) |
+| `scouts[]` | `name`, `output_id`, `class_count`, `requirement_count`, `error_count` | `attendee_id` → `output_id` |
+| `classes[]` | every `ClassRecord` field except `attendee_id`, plus `output_id` | `attendee_id` → `output_id` |
+| `requirements[]` | every `RequirementRecord` field except `attendee_id`, plus `output_id`, plus the inference fields `annotate_requirement_statuses` adds | `attendee_id` → `output_id` |
+| `errors[]` | `scout_name`, `output_id`, `error` | `attendee_id` → `output_id` |
+
+`output_id` is the per-run UUIDv4 from `RunIdentity`, which gives the report JS a stable
+per-scout key without exposing upstream identity. Field order within each row follows the
+operational schema with `attendee_id` removed in place, so the projection is a deletion plus
+a substitution, never a reordering.
+
+The enforcing test is not a substring scan. It requires:
+
+- a synthetic fixture carrying a distinct sentinel in **every** forbidden position — upstream
+  attendee ID, QR token, session material, raw payload fragment, and absolute path — so a
+  leak through any one of them fails on its own;
+- exact field-set equality per collection, so a field added later cannot smuggle identity in
+  without failing;
+- assertion against the rendered file's parsed JSON, not the pre-render dictionary, so the
+  template substitution path is covered too.
+
+Both audience-shareable email bodies get the same sentinel fixture and the same
+whole-content assertion via the golden projection above.
+
 Net effect: the only production change the tiering requires is the `report.html`
 projection, where `attendee_id` currently reaches the embed four ways — `scouts[]`,
 `classes[]` and `requirements[]` via `asdict`, and the `errors[]` list built explicitly.
@@ -436,9 +667,25 @@ looking up `(attendee, class, parent_requirement_number)` in a dict comprehensio
 `(scout, class)` group contains two rows sharing a requirement number, those two resolve to
 different objects.
 
-No `REQ-*` case covers duplicate requirement numbers within a group. Slice 2a therefore
-adds that case and confirms the current behavior **before** re-expressing the walk. The
-re-expression must reproduce whichever resolution the legacy code exhibits; if that
+No `REQ-*` case covers duplicate requirement numbers within a group. Slice 2a adds one
+**before** re-expressing the walk — but "add a duplicate-number case" is not sufficient, and
+a generic one would be vacuous. Most duplicate arrangements resolve identically under both
+schemes and would pass whichever way the re-expression went.
+
+The fixture must be **discriminating**: a `(scout, class)` group in which the positional
+parent from `children[]` and the last-wins ancestor from `by_key` are *different rows*. That
+requires at minimum two rows sharing one `requirement_number` at the parent depth, each with
+distinguishable content, plus a child whose `parent_requirement_number` matches that shared
+number — so the walk's choice of ancestor is observable.
+
+And it must observe the fields that reveal *which* row was chosen. Asserting only that some
+ancestor was selected passes under both schemes. The observation covers, for every selected
+row: `requirement_number`, `description` (the two duplicate rows carry different
+descriptions), `depth`, and `is_leaf` — the four fields `build_missing_requirements` puts in
+its entry dicts. A case that omits `description` cannot distinguish the two candidates and
+does not satisfy this requirement.
+
+The re-expression must then reproduce whichever resolution the legacy code exhibits. If that
 behavior is judged wrong, changing it is a separate `intentional-change` row with its own
 owner, not part of the move.
 
@@ -448,22 +695,31 @@ owner, not part of the move.
 
 - Both runners green for every execution key in the input, PDF, requirement, and artifact
   domains — legacy runners against the shims, package runners against `scoutmb`.
-- Catalog diff review: no `expected_by_context` edited except `ART-NAME-007`; every added
-  case accompanied by a reviewed `phase_a.json` bump.
-- Architecture tests: `core/` and `ports/` import no adapter, interface, bootstrap,
-  Playwright, OpenCV, or PDF library; no first-party `sys.path` mutation anywhere; no data
-  path derived from `__file__`.
+- The golden projection matches: exact report-row field sets and types, exact email bodies
+  and subjects, and per-scout name-to-rows correspondence.
+- The `preserve`-case digest matches its stored value; no `expected_by_context` edited except
+  `ART-NAME-007`; every added case accompanied by a reviewed `phase_a.json` bump.
+- The discriminating duplicate-requirement-number case exists, its two candidate rows carry
+  different descriptions, and it observes `description` — so it can actually distinguish
+  positional from last-wins ancestor resolution.
+- Dependency-rule test green over the **transitive** first-party import graph, with the
+  allowed-edge table enforced, dynamic imports absent from `core`/`ports`/`features`, no
+  first-party `sys.path` mutation anywhere, and no `__file__`-derived **data** path.
 - Coverage: package areas meet their D10 floors; the `include` pattern reaches every
   package module and the existing missing-file check confirms each declared area file
   appears in the report; no legacy area regresses below its baseline unless it has been
   replaced by the no-business-logic assertion.
-- A clean-environment wheel install succeeds with `resources/templates/` and `py.typed`
-  present, and `troop349-pdf` runs stage 1 from a directory outside the repository.
+- A clean-environment wheel install succeeds, and `resources/templates/` and `py.typed` are
+  verified **inside the built wheel's contents**, not merely present in the source tree.
+- Every console script that exists at this point runs `--help` from outside the repository
+  and its usage text matches the flat script it replaces, program name aside.
+- `troop349-pdf` runs stage 1 as a **subprocess** from a directory outside the repository.
 - Importing the core surface in a subprocess without the optional distributions installed
-  loads no optional dependency, and requesting a missing capability raises a typed error
-  with an actionable message.
-- The shareable projection contains no `attendee_id` and no `qr_url`; the per-scout email
-  bodies are covered by the same assertion.
+  leaves `cv2`, `fitz`, and `playwright` absent from `sys.modules`, and requesting a missing
+  capability raises `CapabilityUnavailable` naming the extra.
+- The shareable projection asserts exact field sets per collection against the rendered
+  file's parsed JSON, with a distinct sentinel in every forbidden position; the per-scout
+  email bodies are covered by the same fixture.
 - The authentic lane runs with `--require-corpus` against both runners for the 2a domains.
 - Default lane remains offline; `egress-denied` green.
 - **NO-GO:** restore the moved symbol's original body to the flat module, delete the
@@ -481,8 +737,12 @@ Everything in Gate 2a, plus:
 - Single-file publication failures preserve prior bytes.
 - Illegal run-state transitions fail closed; cancellation owns and closes every child;
   loopback bind holds; importing the web module performs no I/O.
-- Flat modules retired, `source_sync` ships the package, and a copied release root starts
-  with no repository present.
+- All three console scripts run `--help` and their stage-equivalent argv from outside the
+  repository, matching the flat scripts they replace on stdout, stderr, and exit code.
+- Flat modules retired and `tests/harnesses/legacy.py` removed with them.
+- `source_sync` carries `src/scoutmb` into the release-root layout named above, and the
+  acceptance sequence passes: copy the root outside the repository, remove the repository,
+  launch, health endpoint responds, one report renders.
 - **NO-GO:** restore the relevant compatibility adapter as the composed default, return the
   defect to its task, rerun the gate.
 
@@ -506,6 +766,32 @@ Everything in Gate 2a, plus:
 | D30 web boundary | Structural only: factory, `JobRegistry`, loopback, four UI defects |
 | D32 determinism | `ports/clock.py` (`Clock`, `Sleeper`, `Jitter`) and `ports/ids.py` (`IdFactory`) — a deliberate split of the parent spec's single `ports/time.py` |
 | D33 run state | Versioned machine in `core/run_state.py` (2b) |
+
+## Deliberate simplifications
+
+An independent review (OpenAI Codex, 2026-07-24) raised four things this document declines,
+recorded here so they read as decisions rather than oversights.
+
+**No differential harness against a frozen pre-move implementation.** Proposed to cover
+shallowly-observed surfaces. Declined because the catalog's expectations are hand-computed and
+therefore already implementation-independent; the gap is observation depth, and preserving an
+old implementation works around that instead of closing it. The golden-projection requirement
+closes it directly, and a golden is one reviewed file rather than a second build pipeline.
+
+**No per-case approval allowlist keyed to a spec digest** for the oracle invariant. Reduced to
+a digest over `preserve`-case expected observations that names changed case IDs on failure.
+With one owner and no external consumers, the failure mode is forgetting, not an adversary,
+and the digest stops forgetting at a fraction of the machinery.
+
+**The 2a/2b seam stays a scheduling heuristic.** "Touches Playwright or FastAPI" is not an
+architectural rule, correctly. It is not trying to be one — its only job is deciding which
+slice a boundary ships in. The architectural rule is the allowed-edge table under Dependency
+rules, which is enforced mechanically and outlives the slice split.
+
+**`Jitter` stays a named collaborator** rather than becoming a general seeded-RNG protocol
+with distribution owned by the retry policy. The cleaner shape is granted, but D32 names
+`Jitter` and the parent spec's collaborator list is not worth churning for one use site.
+Reconsider if a second randomized behavior appears.
 
 ## Open questions
 
