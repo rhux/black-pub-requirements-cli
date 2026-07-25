@@ -108,3 +108,7 @@ def test_copied_root_probe_cannot_be_satisfied_by_the_repo_install(tmp_path: Pat
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert result.returncode != 0, "the copied-root probe is not isolated"
+    assert "ModuleNotFoundError" in result.stderr, (
+        "expected the empty app dir to fail with ModuleNotFoundError (no scoutmb importable); "
+        f"got a different failure instead, which this guard must not mask:\n{result.stderr}"
+    )
