@@ -124,6 +124,22 @@ every entry path, create circular-import hazards between `core` and `features`, 
 "where does this actually live" unanswerable from the import statement. Callers import from
 the owning module.
 
+### Frozen records and collection types
+
+`core/models.py` records become `@dataclass(frozen=True, slots=True)`. Two consequences to
+decide now rather than mid-move:
+
+- **Collections become tuples.** `ScoutResult` currently declares
+  `field(default_factory=list)` for `classes`, `requirements`, and `errors`. A frozen record
+  holding a mutable list is frozen in name only, so these become `tuple[...]` with
+  `default_factory=tuple` — which breaks every `.append` site in acquisition. Those sites
+  accumulate into a local list and construct the record once, which is the shape the frozen
+  boundary wants anyway.
+- **`asdict` stays viable.** `dataclasses.asdict` recurses through frozen and slotted
+  dataclasses normally and renders both lists and tuples as lists, so the JSON and CSV shapes
+  are unaffected by the tuple change. Field order is `__dataclass_fields__` order in both
+  cases, which is what `ART-SCHEMA-002/003` pin.
+
 The package ships `src/scoutmb/py.typed` (PEP 561) so its annotations are visible to
 consumers and to mypy when it is installed rather than imported from the source tree. The
 marker must be present in the built wheel, which the clean-environment install test checks.
@@ -235,15 +251,36 @@ Enforcement details, all of which are load-bearing:
   `ports/`, or `features/` is **banned outright** rather than analyzed. A dynamic import is
   unresolvable statically, so allowing it would make the rule unfalsifiable. Adapters may use
   one only for the optional-dependency guard described below.
-- `interfaces` is the only layer permitted to import an adapter, and only at a composition
-  root — a module whose sole job is wiring. This is checked by module name, not by intent.
+- `interfaces` is the only layer permitted to import an adapter, and only from a **composition
+  root**, which is the module `interfaces/<name>/composition.py` and no other. Naming the file
+  is what makes the rule checkable — "a module whose sole job is wiring" is not a property a
+  linter can evaluate, so the convention carries it. An adapter import anywhere else under
+  `interfaces/` fails.
 
-The **no-`__file__`-derived-data-path** rule is likewise a specific check, not a slogan: no
-module under `src/scoutmb/` may pass `__file__`, or any expression derived from it, into a
-data-path constructor. Reading a bundled resource relative to `__file__` is permitted and is
-how `resources/templates/` is loaded; what is banned is `__file__` reaching a *data* root.
-The check is AST-based, keyed on `__file__` appearing anywhere in the dataflow of an argument
-to the data-root resolver or to `Path.open`/`mkdir`/`write_*` for a non-resource path.
+Consequence worth stating rather than discovering: `interfaces/web/composition.py` drives both
+pipelines, so it imports the PDF adapter and the ScoutingEvent adapter, and the local web app
+therefore requires every extra installed. That matches today's behavior — `ui/server.py`
+imports both flat modules, which import `cv2`, `fitz`, and `playwright` at module scope — so
+it is not a regression. The optional-dependency contract below constrains `core`, `ports`, and
+`features`; it does not promise a web app that runs without the extras.
+
+### No `__file__` in the package
+
+The parent spec bans deriving data paths from `__file__` (D6). Phase B implements that as a
+flat prohibition rather than a dataflow rule:
+
+> `__file__` may not appear anywhere under `src/scoutmb/`.
+
+An earlier draft specified a check "keyed on `__file__` appearing anywhere in the dataflow of
+an argument to the data-root resolver." That is interprocedural taint analysis, not something
+an AST walk decides, and specifying it would guarantee a weak approximation shipping under a
+strong description.
+
+The flat ban is decidable in one AST pass with no false negatives, and it is achievable
+because bundled resources do not need `__file__`. `resources/templates/` is loaded through
+`importlib.resources.files("scoutmb.resources")`, which is the standard Python 3.12 mechanism,
+works correctly from a zipped distribution where `__file__` arithmetic does not, and removes
+the only legitimate reason the package would reference its own location.
 
 ### The 2a / 2b seam
 
@@ -433,22 +470,40 @@ So a move that dropped `class_completed` from every requirement row, changed a n
 to a string, reordered a collection, or broke per-scout correspondence between a name and
 its rows would leave the artifact domain green.
 
-Phase B closes this **additively**, without touching any existing case. Before the first
-reporting symbol moves, 2a generates an exact structured projection of the HTML report data
-and of each rendered email body from the current implementation, hand-reviews it, and checks
-it in as a golden fixture alongside `tests/baselines/phase_a.json`. Required scope: every
-field of every row in all four report collections with its Python type; the full text of
-each rendered email body and subject; and the per-scout mapping from display name to its
-rows and files.
+Phase B closes this **additively**, without touching any existing case, using two golden
+fixtures rather than one. Two are required because 2a both moves the reporting code *and*
+changes what it emits (the shareable projection), so a single pre-move golden would be
+invalidated by an intentional change inside the same slice.
 
-Two things this deliberately is **not**. It is not a differential harness against a frozen
-pre-move wheel — the catalog's expectations are hand-computed and therefore already
-implementation-independent, so the gap is observation depth, and a preserved old
-implementation would work around that rather than fix it. And the golden is not authority
-over the catalog: where the two overlap, a catalog case wins and the golden is regenerated.
+- **Golden V1** — the operational projection, generated before the first reporting symbol
+  moves. Its job is to prove the *move* changed nothing.
+- **Golden V2** — the shareable projection, generated after the tiering lands. Its job is to
+  be the new contract.
 
-Generation is a one-time reviewed step, and regenerating it later is an explicit command
-that shows a diff — the same discipline the coverage baseline already uses.
+The gate asserts more than "each golden matches." It asserts the **V1→V2 diff is exactly the
+declared field substitution and nothing else** — `attendee_id` removed, `output_id` inserted
+at that index, in the five collections named in the tiering section. That is stronger than
+either golden alone, because it catches a move-induced change hiding inside an intentional
+one, which is the specific way a refactor smuggles a regression past a gate.
+
+Required scope for both: every field of every row in all four report collections with its
+Python type; the full text of each rendered email body and subject; and the per-scout mapping
+from display name to its rows and files.
+
+**What a golden is and is not.** It records what the code *does*, not what it *should* do. The
+catalog is the correctness oracle because its expectations were hand-computed from the source;
+a golden is drift detection, and it will faithfully freeze a bug living in a field no case
+observes. That is acceptable here — detecting unintended change is the entire job during a
+restructure — but it must not be described as equivalent to a catalog case, and it never
+outranks one. Where the two overlap, the catalog wins and the golden is regenerated.
+
+It is also deliberately **not** a differential harness against a frozen pre-move wheel. The
+catalog's expectations are already implementation-independent, so the real gap is observation
+depth; preserving an old implementation would work around that rather than close it, and costs
+a second build pipeline to maintain.
+
+Generation is a one-time reviewed step per golden, and regenerating later is an explicit
+command that prints a diff — the same discipline the coverage baseline already uses.
 
 **Lane coverage.** The rule applies per lane, not only to the default lane. The eleven
 browser-lane and three authentic-lane cases get package runners on the same terms, and the
@@ -619,9 +674,50 @@ asserts the **complete** field set of each row rather than the absence of one na
 | `errors[]` | `scout_name`, `output_id`, `error` | `attendee_id` → `output_id` |
 
 `output_id` is the per-run UUIDv4 from `RunIdentity`, which gives the report JS a stable
-per-scout key without exposing upstream identity. Field order within each row follows the
-operational schema with `attendee_id` removed in place, so the projection is a deletion plus
-a substitution, never a reordering.
+per-scout key without exposing upstream identity.
+
+**This is a projection, never a record change.** `output_id` is not added to `ClassRecord` or
+`RequirementRecord`. Adding a field would change `__dataclass_fields__`, which is exactly what
+`ART-SCHEMA-002` and `ART-SCHEMA-003` pin as the CSV header. The substitution happens in
+`output_schemas.py` when building the shareable row, and the record shapes are untouched.
+Within the projected row, `output_id` occupies the position `attendee_id` held, so the
+transformation is a deletion plus an insertion at the same index — never a reordering.
+
+#### Single run-scoped identity
+
+The substitution requires one `RunIdentity` per run, and today there is not one.
+`RunIdentity` is instantiated in three independent places: `process_scout` (defaulted),
+`async_main` (threaded into `process_scout`, so `raw/` filenames share a map), and
+`write_email_reports`, which creates its **own** instance because `write_outputs` passes it
+none. The same attendee in the same run therefore receives one UUID in `raw/` filenames and a
+different UUID in `emails/` filenames.
+
+`write_html_report` has no `RunIdentity` parameter at all, so a naive implementation of this
+schema would create a third map, and the report's `output_id` would match neither the email
+filenames nor the raw filenames. A cross-reference key that does not cross-reference is worse
+than no key.
+
+Phase B therefore requires: **one `RunIdentity` created at the run's composition root and
+threaded through acquisition, reporting, and email rendering.** No collaborator constructs its
+own. This is a prerequisite for the shareable projection, not an independent cleanup, and it
+is also what makes `ACQ-RESUME-003` meaningful — persisting one of three maps in the
+checkpoint would leave the other two regenerating fresh UUIDs on resume.
+
+Filename stems already consume a passed-in `output_id`, so this is a threading change, not a
+change to `attendee_filename_stem`. Because the UUID is random, existing `ART-NAME-*`
+expectations already normalize it and are unaffected.
+
+#### Encoding and line terminators
+
+Pinned as part of the schema, because the current behavior survives on an interaction that a
+rewrite would plausibly break: CSV bytes are produced by `csv.DictWriter` into a `StringIO`
+(default `lineterminator="\r\n"`), then written by `atomic_write_text`, which opens with
+`newline=""`. The `newline=""` is what prevents Python from translating the terminator. Change
+either half and `ART-SCHEMA-002/003` fail.
+
+The contract: CSV artifacts are `utf-8-sig` with `\r\n` terminators written through a handle
+opened `newline=""`; `scouts.json` and `report.html` are `utf-8` without a BOM. Encoding is
+per-artifact and is part of the output schema, not an adapter detail.
 
 The enforcing test is not a substring scan. It requires:
 
@@ -634,11 +730,15 @@ The enforcing test is not a substring scan. It requires:
   template substitution path is covered too.
 
 Both audience-shareable email bodies get the same sentinel fixture and the same
-whole-content assertion via the golden projection above.
+whole-content assertion via goldens V1 and V2 above.
 
-Net effect: the only production change the tiering requires is the `report.html`
-projection, where `attendee_id` currently reaches the embed four ways — `scouts[]`,
-`classes[]` and `requirements[]` via `asdict`, and the `errors[]` list built explicitly.
+Net effect: the tiering requires **two** production changes, not one. The visible change is
+the `report.html` projection, where `attendee_id` currently reaches the embed four ways —
+`scouts[]`, `classes[]` and `requirements[]` via `asdict`, and the `errors[]` list built
+explicitly. The second is the single run-scoped `RunIdentity` described above, which the
+substitution depends on and which does not exist today. An earlier draft of this section
+claimed the projection was the only change; that was wrong, and the identity threading is the
+larger of the two.
 
 `output_schemas.py` therefore exposes two projections of the same records. The operational
 projection is today's shape and preserves CSV field order, so the D16 goldens are
@@ -695,16 +795,24 @@ owner, not part of the move.
 
 - Both runners green for every execution key in the input, PDF, requirement, and artifact
   domains — legacy runners against the shims, package runners against `scoutmb`.
-- The golden projection matches: exact report-row field sets and types, exact email bodies
-  and subjects, and per-scout name-to-rows correspondence.
+- Golden V1 and V2 both match: exact report-row field sets and types, exact email bodies and
+  subjects, per-scout name-to-rows correspondence. The **V1→V2 diff equals exactly** the
+  declared `attendee_id`→`output_id` substitution in the five projected collections, with no
+  other field, type, or ordering change.
+- Exactly one `RunIdentity` exists per run: acquisition, the HTML report, and email rendering
+  all report the same `output_id` for the same attendee, asserted end to end rather than per
+  writer.
 - The `preserve`-case digest matches its stored value; no `expected_by_context` edited except
   `ART-NAME-007`; every added case accompanied by a reviewed `phase_a.json` bump.
 - The discriminating duplicate-requirement-number case exists, its two candidate rows carry
   different descriptions, and it observes `description` — so it can actually distinguish
   positional from last-wins ancestor resolution.
 - Dependency-rule test green over the **transitive** first-party import graph, with the
-  allowed-edge table enforced, dynamic imports absent from `core`/`ports`/`features`, no
-  first-party `sys.path` mutation anywhere, and no `__file__`-derived **data** path.
+  allowed-edge table enforced, adapter imports confined to `interfaces/<name>/composition.py`,
+  dynamic imports absent from `core`/`ports`/`features`, no first-party `sys.path` mutation
+  anywhere, and **no `__file__` token anywhere under `src/scoutmb/`**.
+- CSV artifacts round-trip as `utf-8-sig` with `\r\n` terminators through a `newline=""`
+  handle; `scouts.json` and `report.html` are BOM-free `utf-8`.
 - Coverage: package areas meet their D10 floors; the `include` pattern reaches every
   package module and the existing missing-file check confirms each declared area file
   appears in the report; no legacy area regresses below its baseline unless it has been
