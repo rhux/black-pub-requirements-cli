@@ -119,6 +119,10 @@ shaped and how an earlier draft of this document described it. The distinction i
 the optional-dependency contract below achievable: if PDF parsing lives in a feature, then
 importing that feature imports PyMuPDF, and a core-only install breaks.
 
+Function-local imports do not escape this rule. The dependency check walks the AST, so an
+adapter imported inside a factory method on a feature is still a `features -> adapters` edge.
+Convenience constructors that need an adapter belong in `interfaces/<name>/composition.py`.
+
 `ports/storage.py` is **not** created. There is one filesystem implementation and no second
 one in prospect, so a storage port would be an abstraction with nothing behind it. The two
 ports that do exist (`attendee_source`, `artifact_sink`) each have at least two real
@@ -220,23 +224,26 @@ Contract:
   `pip install 'scoutmb[<extra>]'` remedy — never a bare `ImportError` traceback.
 Enforcement is two separate tests, because neither alone establishes the contract:
 
-1. **Import isolation.** In a virtualenv built *without* the extras, run `python -I -c` (fully
-   isolated: no site-packages injection from the parent, no `PYTHONPATH`, no `sitecustomize`)
-   that imports **every leaf module** under `core/`, `ports/`, and `features/` — enumerated by
-   walking the package, not a hand-kept list that silently stops covering new modules — then
-   asserts `cv2`, `fitz`, and `playwright` are absent from `sys.modules`. Isolation matters
-   because pytest plugins, `conftest.py`, and coverage.py all import things into a normal test
-   process, so a bare in-process check measures the harness rather than the package.
-2. **Capability failure.** Separately, call the public PDF and acquisition entry points in that
-   same extras-free environment and assert each raises `CapabilityUnavailable` naming its
-   extra.
+1. **Import isolation, enforced by a meta-path blocker.** A `python -I -c` child installs a
+   `sys.meta_path` finder that raises `ImportError` for `cv2`, `fitz`, and `playwright`, then
+   imports **every leaf module** under `core/`, `ports/`, and `features/` — enumerated by
+   walking the package, not a hand-kept list that silently stops covering new modules. If any
+   module reaches a blocked dependency the import raises and the test fails, naming it.
+2. **Capability failure.** In the same blocked child, call the PDF capability entry point and
+   assert `CapabilityUnavailable` naming its extra — proving the guard converts a *real*
+   `ImportError` rather than a monkeypatched stub.
 
-Both are needed: `sys.modules` absence cannot distinguish "never attempted" from "attempted,
-raised `ImportError`, and got swallowed by a bare `except`" — and the swallowed case is the
-dangerous one, because it silently degrades instead of failing. Test 2 is what rules it out.
+**A note on how NOT to write these.** `python -I` implies `-E` and therefore **ignores
+`PYTHONPATH`**. A probe that sets `PYTHONPATH` in the child's environment and runs `-I` imports
+whatever is already installed — for this repo, the editable `scoutmb` — and passes while
+testing nothing. Where a subprocess needs a path, set it *inside* the executed source
+(`sys.path.insert(...)`), or install into a real venv and run that interpreter. The existing
+`tests/harnesses/subprocess.py::run_import_probe` already does this correctly and is the
+reference implementation.
 
-An earlier draft specified only "imports the core surface," which named no modules and left
-"core surface" undefined.
+The blocker is preferred over an extras-free venv because it is stronger: absence-from-a-venv
+plus `sys.modules` inspection cannot distinguish "never attempted" from "attempted, raised
+`ImportError`, and got swallowed by a bare `except`". A blocker fails at the attempt.
 
 ### Error model
 

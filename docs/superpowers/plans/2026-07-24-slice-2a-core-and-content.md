@@ -361,35 +361,63 @@ git commit -m "feat: add CapabilityUnavailable with an actionable remedy message
 
 ### Task 3: Mechanism probes (plan-verified facts)
 
-**Goal:** Prove by execution the four mechanism claims the spec marks *plan-verified*, before
-any task depends on them. If a probe fails, the spec is amended and the dependent task is
-redesigned — that is the point of running this first.
+**Goal:** Prove by execution the mechanism claims the spec marks *plan-verified*, before any
+task depends on them. If a probe fails, the spec is amended and the dependent task redesigned.
 
 **Files:**
-- Create: `tools/check_mechanisms.py`, `tests/packaging/test_mechanisms.py`
-- Create: `src/scoutmb/resources/__init__.py` (already created empty in Task 1 — content stays empty)
+- Create: `tests/packaging/test_mechanisms.py`
+- Create: `src/scoutmb/resources/templates/_probe.txt`
+- Modify: `pyproject.toml` (declare templates as package data)
 
 **Acceptance Criteria:**
-- [ ] `dataclasses.asdict` tuple behavior is asserted, not assumed
-- [ ] `importlib.resources.files("scoutmb.resources")` reads a template from an **installed wheel**
-- [ ] The same call reads a template from a **copied directory** release root
-- [ ] A probe failure produces a message naming which spec section to amend
+- [ ] `dataclasses.asdict` tuple behavior asserted, not assumed
+- [ ] `importlib.resources` proven from a **real installed wheel in its own venv**
+- [ ] `importlib.resources` proven from a **copied directory** release root
+- [ ] Neither probe can be satisfied by the repo's own editable install
+- [ ] A probe failure names the spec section to amend
 
 **Verify:** `uv run pytest tests/packaging/test_mechanisms.py -q` → PASS
 
-**Recovery:** A failing probe is the deliverable working, not a task failure. Stop, amend the named spec section with the mechanism that does hold, and redesign the dependent task (21 for resources, 14/20 for `asdict`) before continuing.
+**Recovery:** A failing probe is the deliverable working, not a task failure. Stop, amend the
+named spec section with the mechanism that does hold, and redesign the dependent task
+(21 for resources, 14/20 for `asdict`) before continuing.
 
 **Steps:**
 
-- [ ] **Step 1: Add a probe template so there is something to read**
+- [ ] **Step 1: Understand why the obvious probe is wrong**
+
+`python -I` implies `-E`, so it **ignores `PYTHONPATH`**. Confirm it yourself before writing
+anything:
+
+```bash
+mkdir -p /tmp/probe-check && echo "x = 1" > /tmp/probe-check/probemod.py
+PYTHONPATH=/tmp/probe-check python3    -c "import probemod; print('normal OK')"
+PYTHONPATH=/tmp/probe-check python3 -I -c "import probemod; print('isolated OK')"
+```
+
+The second prints `ModuleNotFoundError`. A probe that sets `PYTHONPATH` and runs `python -I`
+therefore imports **whatever is already installed** — for this repo, the editable `scoutmb` —
+and passes while testing nothing.
+
+Two correct techniques, and this task uses both:
+
+1. **A real venv.** Build the wheel, `uv venv`, `uv pip install` it, run that venv's
+   interpreter. Nothing from the parent leaks in.
+2. **In-code `sys.path`.** Run `python -I -c` and insert the path *inside the executed code*,
+   which `-E` cannot strip. This is how `tests/harnesses/subprocess.py::run_import_probe`
+   already works — read it before writing Task 16.
+
+- [ ] **Step 2: Add the probe resource and declare package data**
 
 ```bash
 printf 'probe-token-do-not-remove\n' > src/scoutmb/resources/templates/_probe.txt
 ```
 
-- [ ] **Step 2: Declare templates as package data in `pyproject.toml`**
+`src/scoutmb/resources/__init__.py` already exists (empty, from Task 1) — that is what makes
+`scoutmb.resources` an importable package rather than a bare directory, which
+`importlib.resources.files()` requires.
 
-Add under the existing `[tool.hatch.build.targets.wheel.force-include]`:
+In `pyproject.toml`, under `[tool.hatch.build.targets.wheel.force-include]`:
 
 ```toml
 "src/scoutmb/resources/templates" = "scoutmb/resources/templates"
@@ -400,9 +428,9 @@ Add under the existing `[tool.hatch.build.targets.wheel.force-include]`:
 ```python
 # tests/packaging/test_mechanisms.py
 """Mechanism probes. The Phase B spec marks these plan-verified: they are claims about how
-Python and this build behave, and prior spec drafts got two of them wrong.
+Python and this build behave, and earlier spec drafts got two of them wrong.
 
-If one of these fails, amend the named spec section — do not work around it in a later task.
+If one fails, amend the named spec section -- do not work around it in a later task.
 """
 
 from __future__ import annotations
@@ -411,18 +439,21 @@ import dataclasses
 import shutil
 import subprocess
 import sys
-import zipfile
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROBE = "probe-token-do-not-remove"
+READ_PROBE = (
+    "from importlib.resources import files;"
+    "print(files('scoutmb.resources').joinpath('templates/_probe.txt').read_text().strip())"
+)
 
 
 def test_asdict_preserves_tuple_type() -> None:
     """Spec: 'Frozen records and collection types'. asdict reconstructs via type(obj)(...),
-    so a tuple stays a tuple. Normalization to list is the serializer's job."""
+    so a tuple stays a tuple; normalization to list is the serializer's job."""
 
     @dataclasses.dataclass(frozen=True, slots=True)
     class Record:
@@ -430,78 +461,89 @@ def test_asdict_preserves_tuple_type() -> None:
 
     value = dataclasses.asdict(Record((1, 2)))
     assert isinstance(value["items"], tuple), (
-        "asdict changed behavior; amend the 'Frozen records and collection types' section"
+        "asdict changed behavior; amend 'Frozen records and collection types'"
     )
 
 
-def test_resources_readable_from_installed_wheel(tmp_path: Path) -> None:
-    """Spec: 'No __file__ in the package'."""
-    out = tmp_path / "dist"
+@pytest.fixture(scope="module")
+def wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("dist")
     subprocess.run(
-        [sys.executable, "-m", "uv", "build", "--wheel", "--out-dir", str(out)],
+        ["uv", "build", "--wheel", "--out-dir", str(out)],
         cwd=REPO_ROOT, check=True, capture_output=True,
     )
-    wheel = next(out.glob("*.whl"))
-    with zipfile.ZipFile(wheel) as archive:
-        assert "scoutmb/resources/templates/_probe.txt" in archive.namelist()
+    return next(out.glob("*.whl"))
 
-    site = tmp_path / "site"
-    with zipfile.ZipFile(wheel) as archive:
-        archive.extractall(site)
 
-    code = (
-        "from importlib.resources import files;"
-        "print(files('scoutmb.resources').joinpath('templates/_probe.txt').read_text().strip())"
+def test_resources_readable_from_installed_wheel(wheel: Path, tmp_path: Path) -> None:
+    """A REAL venv: the parent's editable install must not be able to satisfy this."""
+    venv = tmp_path / "venv"
+    subprocess.run(["uv", "venv", str(venv)], check=True, capture_output=True)
+    python = venv / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+    subprocess.run(
+        ["uv", "pip", "install", "--python", str(python), str(wheel)],
+        check=True, capture_output=True,
     )
     result = subprocess.run(
-        [sys.executable, "-I", "-c", code],
-        cwd=site, check=True, capture_output=True, text=True,
-        env={"PYTHONPATH": str(site), "PATH": ""},
+        [str(python), "-c", READ_PROBE],
+        cwd=tmp_path, check=True, capture_output=True, text=True,
     )
     assert result.stdout.strip() == PROBE
 
 
 def test_resources_readable_from_copied_release_root(tmp_path: Path) -> None:
-    """The release root is a COPIED DIRECTORY, not an installed distribution. This is the
-    case the spec was least sure about; if it fails, amend 'No __file__ in the package'."""
+    """The release root is a COPIED DIRECTORY, not an installed distribution.
+
+    sys.path is set INSIDE the executed code: `python -I` implies -E and would discard a
+    PYTHONPATH we set in the environment, silently falling back to the repo's editable
+    install and passing for the wrong reason.
+    """
     app_dir = tmp_path / "app"
     app_dir.mkdir()
     shutil.copytree(REPO_ROOT / "src" / "scoutmb", app_dir / "scoutmb")
 
-    code = (
-        "from importlib.resources import files;"
-        "print(files('scoutmb.resources').joinpath('templates/_probe.txt').read_text().strip())"
-    )
+    code = f"import sys; sys.path.insert(0, {str(app_dir)!r});" + READ_PROBE
     result = subprocess.run(
         [sys.executable, "-I", "-c", code],
-        cwd=app_dir, check=True, capture_output=True, text=True,
-        env={"PYTHONPATH": str(app_dir), "PATH": ""},
+        cwd=tmp_path, check=True, capture_output=True, text=True,
     )
     assert result.stdout.strip() == PROBE, (
         "importlib.resources cannot read templates from a copied directory root; "
-        "amend the 'No __file__ in the package' section before Task 21"
+        "amend 'No __file__ in the package' before Task 21"
     )
+
+
+def test_copied_root_probe_cannot_be_satisfied_by_the_repo_install(tmp_path: Path) -> None:
+    """Guard the guard: if the probe passes with an EMPTY app dir, it is reading the parent's
+    editable scoutmb and proves nothing."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    code = f"import sys; sys.path.insert(0, {str(empty)!r});" + READ_PROBE
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert result.returncode != 0, "the copied-root probe is not isolated"
 ```
 
-- [ ] **Step 4: Run — all three must PASS**
+- [ ] **Step 4: Run — all four must PASS**
 
 ```bash
-uv run pytest tests/packaging/test_mechanisms.py -q -s
+uv run pytest tests/packaging/test_mechanisms.py -q
 ```
-
-If `test_resources_readable_from_copied_release_root` fails, **stop the slice** and amend the
-spec's "No `__file__` in the package" section with the mechanism that does work (most likely
-adding an explicit `__init__.py` to `templates/`, or falling back to a resource-loader
-abstraction). Do not proceed to Task 21 on an unproven mechanism.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tools tests/packaging/test_mechanisms.py src/scoutmb/resources pyproject.toml
-git commit -m "test: prove the plan-verified mechanisms before anything depends on them"
+git add tests/packaging/test_mechanisms.py src/scoutmb/resources pyproject.toml
+git commit -m "test: prove the plan-verified mechanisms in real isolation
+
+python -I implies -E and ignores PYTHONPATH, so an env-based probe would have imported
+the repo's editable install and passed while testing nothing."
 ```
 
 ---
+
 
 ### Task 4: Dependency-rule architecture test
 
@@ -554,9 +596,12 @@ ALLOWED: dict[str, set[str]] = {
     "ports": {"core", "errors"},
 }
 
+# Fully-qualified call targets, plus the BARE names an aliased import produces:
+# `from importlib import import_module` makes the call site read `import_module(...)`, which a
+# dotted-name-only list never sees.
 BANNED_DYNAMIC = {
-    "importlib.import_module", "importlib.__import__", "__import__",
-    "imp.load_module", "exec", "eval",
+    "importlib.import_module", "importlib.__import__", "import_module",
+    "__import__", "imp.load_module", "exec", "eval",
 }
 DYNAMIC_BANNED_LAYERS = {"core", "ports", "features"}
 
@@ -576,23 +621,35 @@ def _dotted(path: Path) -> str:
     return ".".join(["scoutmb", *parts])
 
 
-def _first_party_imports(tree: ast.AST) -> set[str]:
+def _first_party_imports(tree: ast.AST, *, module: str) -> set[str]:
+    """Absolute AND relative first-party imports.
+
+    Relative imports carry node.level > 0 and node.module is None for `from . import x`, so a
+    check that only reads node.module misses every one of them -- which is most of the ways an
+    intra-package edge actually gets written.
+    """
     found: set[str] = set()
+    package = module.rsplit(".", 1)[0]
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name.startswith("scoutmb"):
-                    found.add(alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("scoutmb"):
-            found.add(node.module)
+            found.update(a.name for a in node.names if a.name.startswith("scoutmb"))
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = package.rsplit(".", node.level - 1)[0] if node.level > 1 else package
+                target = f"{base}.{node.module}" if node.module else base
+                found.add(target)
+                found.update(f"{target}.{a.name}" for a in node.names)
+            elif node.module and node.module.startswith("scoutmb"):
+                found.add(node.module)
     return found
 
 
 def _direct_graph() -> dict[str, set[str]]:
     graph: dict[str, set[str]] = defaultdict(set)
     for path in _modules():
+        dotted = _dotted(path)
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        graph[_dotted(path)] = _first_party_imports(tree)
+        graph[dotted] = _first_party_imports(tree, module=dotted)
     return graph
 
 
@@ -665,6 +722,14 @@ def test_no_dynamic_imports_in_core_ports_features() -> None:
                 name = ast.unparse(node.func)
                 if name in BANNED_DYNAMIC:
                     offenders.append(f"{path}:{node.lineno} {name}")
+            # Importing the callable is as much a violation as calling it, and is what an
+            # aliased `from importlib import import_module` looks like at the import site.
+            elif isinstance(node, ast.ImportFrom) and node.module == "importlib":
+                offenders.extend(
+                    f"{path}:{node.lineno} from importlib import {a.name}"
+                    for a in node.names
+                    if a.name in {"import_module", "__import__"}
+                )
     assert offenders == [], "\n".join(offenders)
 
 
@@ -1584,18 +1649,17 @@ In `tests/matrix/axes.py`, find the `REQ-*` axis block and add a `REQ-DUP` axis:
         axis_id="REQ-DUP",
         domain=Domain.REQUIREMENT,
         members=frozenset({"positional-differs-from-last-wins", "identical-descriptions"}),
-        rationale=(
-            "build_missing_requirements resolves ancestors through a last-wins "
-            "(attendee, class, number) map while the tree links children positionally. "
-            "Two rows sharing a number in one group make those disagree; Slice 2a's index "
-            "re-expression must reproduce whichever row the legacy walk selects."
-        ),
-        boundary_id="REQ-B-MISSING",
+        min_focused_cases=2,
+        interactions=_NO_INTERACTIONS,
+        boundaries=frozenset({"REQ-B-MISSING"}),
     ),
 ```
 
-> Match the exact `AxisSpec` field names already used in that file — read one neighbouring
-> entry first and copy its shape.
+`AxisSpec` (`tests/matrix/axes.py:8`) is
+`(axis_id, domain, members, min_focused_cases, interactions, boundaries)` — all six are
+required, there is no `rationale` or `boundary_id` field, and `_NO_INTERACTIONS` is the
+module-level `frozenset()` already defined there. The per-case rationale lives on
+`CaseMetadata`, not on the axis.
 
 - [ ] **Step 3: Append the cases**
 
@@ -1682,20 +1746,17 @@ from typing import Any
 import pytest
 
 from tests.matrix.cases.requirement_cases import REQUIREMENT_DUP_CASES, RequirementCase
+from tests.matrix.pytest_support import execution_params
 
 
-def observe_selection(module: Any, case: RequirementCase) -> tuple[object, ...]:
+def observe_selection(grouped: dict[str, Any], case: RequirementCase) -> tuple[object, ...]:
+    """Normalize a build_missing_requirements-shaped result into a comparable tuple.
+
+    Takes the GROUPED RESULT, not a module: the legacy and package sides reach it by
+    different routes, and a `module.build_missing_requirements(...)` parameter would
+    silently require the package to grow a function it does not have.
+    """
     row = dict(case.rows[0])
-    scouts = [
-        {
-            "name": row["scout_name"],
-            "attendee_id": row["attendee_id"],
-            "classes": [],
-            "requirements": [dict(r) for r in case.rows],
-            "errors": [],
-        }
-    ]
-    grouped = module.build_missing_requirements(scouts)
     bucket = grouped.get(str(row["attendee_id"])) or {"badges": {}}
     entries = [entry for items in bucket["badges"].values() for entry in items]
     return tuple(
@@ -1704,25 +1765,53 @@ def observe_selection(module: Any, case: RequirementCase) -> tuple[object, ...]:
     )
 
 
-@pytest.mark.parametrize("case", REQUIREMENT_DUP_CASES, ids=lambda c: c.meta.case_id)
-def test_legacy_selection(case: RequirementCase) -> None:
+def _scouts_payload(case: RequirementCase) -> list[dict[str, Any]]:
+    row = dict(case.rows[0])
+    return [
+        {
+            "name": row["scout_name"],
+            "attendee_id": row["attendee_id"],
+            "classes": [],
+            "requirements": [dict(r) for r in case.rows],
+            "errors": [],
+        }
+    ]
+
+
+@pytest.mark.parametrize(("case", "context_id"), execution_params(REQUIREMENT_DUP_CASES))
+def test_legacy_selection(case: RequirementCase, context_id: str) -> None:
     import scout_schedule_cli as legacy
 
-    assert observe_selection(legacy, case) == case.expected_by_context["missing_selection"]
+    grouped = legacy.build_missing_requirements(_scouts_payload(case))
+    assert observe_selection(grouped, case) == case.expected_by_context[context_id]
 ```
 
 Set both cases' `contexts` to `("missing_selection",)` and key `expected_by_context` on that
 name.
 
-- [ ] **Step 5: Fill the expected values from observed output, then verify by hand**
+`execution_params` (not a bare `parametrize`) is what attaches the
+`pytest.mark.matrix_case(case_id=..., context_id=..., lane=...)` mark. Without it the lane
+gate in `tests/plugins/matrix_gate.py` computes `REQ-DUP-001[missing_selection]` and
+`REQ-DUP-002[missing_selection]` as **required but never executed**, and Gate 2a's
+`--matrix-lane default` run fails with two missing execution keys.
+
+- [ ] **Step 5: Compute the expected values BY HAND first, then confirm**
+
+Trace `build_missing_requirements` (`scout_schedule_cli.py:851-925`) on
+`_DUP_ROWS_DISAGREE` on paper and write the tuple you derive into `expected_by_context`.
+Every other case in this catalog was produced that way, and the discipline is the point: an
+expectation copied from output records whatever the code does, including a bug, and then
+"passes" forever.
+
+Only after the value is written, run:
 
 ```bash
-uv run pytest tests/parity/test_missing_selection.py -q 2>&1 | head -40
+uv run pytest tests/parity/test_missing_selection.py -q
 ```
 
-Paste the observed tuples into `expected_by_context`, then **read
-`build_missing_requirements` and confirm each is what the source says should happen.** A
-characterization expectation copied without tracing is a recorded bug, not a contract.
+If observed and derived disagree, **one of them is wrong and you do not yet know which** — go
+back to the source and settle it before touching either. Do not edit the expectation to match
+the output.
 
 - [ ] **Step 6: Bump the baseline**
 
@@ -2187,16 +2276,30 @@ Task 10.
 ```python
 # append to tests/parity/test_missing_selection.py
 
-@pytest.mark.parametrize("case", REQUIREMENT_DUP_CASES, ids=lambda c: c.meta.case_id)
-def test_package_selection_matches_legacy(case: RequirementCase) -> None:
+@pytest.mark.parametrize(("case", "context_id"), execution_params(REQUIREMENT_DUP_CASES))
+def test_package_selection_matches_legacy(case: RequirementCase, context_id: str) -> None:
     """The whole point of REQ-DUP-002: a naive index substitution answers this differently."""
     import scout_schedule_cli as legacy
 
-    from scoutmb.core.inference import missing as package
+    from scoutmb.core.inference.missing import group_missing_requirements
 
-    assert observe_selection(package, case) == observe_selection(legacy, case)
-    assert observe_selection(package, case) == case.expected_by_context["missing_selection"]
+    annotated = legacy.annotate_requirement_statuses(
+        [dict(r) for scout in _scouts_payload(case) for r in scout["requirements"]]
+    )
+    package_grouped = group_missing_requirements(
+        annotated,
+        attendee_key_of=legacy._attendee_key_for,
+        clean_description=legacy.clean_html_description,
+    )
+    legacy_grouped = legacy.build_missing_requirements(_scouts_payload(case))
+
+    assert observe_selection(package_grouped, case) == observe_selection(legacy_grouped, case)
+    assert observe_selection(package_grouped, case) == case.expected_by_context[context_id]
 ```
+
+`group_missing_requirements` is the package façade the next step creates. Driving
+`select_actionable` directly from the test would leave the grouping loop — where `is_leaf`,
+`depth`, and the `(not used)` re-check live — untested on the package side.
 
 - [ ] **Step 2: Run — expect FAIL** (`module has no attribute 'build_missing_requirements'`)
 
@@ -2278,6 +2381,52 @@ def select_actionable(
             current = parent_index
 
     return selected
+
+
+def group_missing_requirements(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    attendee_key_of: Callable[[Mapping[str, Any]], str],
+    clean_description: Callable[[str], str],
+) -> dict[str, dict[str, Any]]:
+    """Select actionable rows and group them by attendee, then by merit badge.
+
+    The public façade: it owns both halves of the legacy behavior (selection AND grouping) so
+    the legacy function reduces to `annotate -> delegate` and the parity runner has a single
+    package entry point to drive.
+    """
+    selected = select_actionable(
+        rows, attendee_key_of=attendee_key_of, cleaned_description_of=clean_description
+    )
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(rows):
+        if index not in selected:
+            continue
+        description = clean_description(str(item.get("description") or ""))
+        if is_not_used(description):
+            continue
+
+        entry = {
+            "requirement_number": str(item.get("requirement_number") or ""),
+            "description": description,
+            "is_prereq": "(pre-req)" in description.lower(),
+            "is_leaf": selected[index],
+            "depth": max(len(item.get("requirement_path") or []) - 1, 0),
+        }
+        bucket = grouped.setdefault(
+            attendee_key_of(item),
+            {"display_name": str(item.get("scout_name") or ""), "badges": {}},
+        )
+        bucket["badges"].setdefault(str(item.get("merit_badge_name") or ""), []).append(entry)
+
+    return grouped
+```
+
+Extend the module's imports for the new signature:
+
+```python
+from collections.abc import Callable, Mapping, Sequence
 ```
 
 - [ ] **Step 4: Rewrite the legacy function over indices**
@@ -2290,47 +2439,24 @@ def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[s
     """
     flattened = [dict(req) for scout in scouts for req in scout.get("requirements", [])]
     annotated = annotate_requirement_statuses(flattened)
-
-    selected = select_actionable(
+    return group_missing_requirements(
         annotated,
         attendee_key_of=_attendee_key_for,
-        cleaned_description_of=clean_html_description,
+        clean_description=clean_html_description,
     )
-
-    grouped: dict[str, dict[str, Any]] = {}
-    for index, item in enumerate(annotated):
-        if index not in selected:
-            continue
-        description = clean_html_description(str(item.get("description") or ""))
-        if is_not_used(description):
-            continue
-
-        entry = {
-            "requirement_number": str(item.get("requirement_number") or ""),
-            "description": description,
-            "is_prereq": "(pre-req)" in description.lower(),
-            "is_leaf": selected[index],
-            "depth": max(len(item.get("requirement_path") or []) - 1, 0),
-        }
-        attendee_key = _attendee_key_for(item)
-        badge_name = str(item.get("merit_badge_name") or "")
-        bucket = grouped.setdefault(
-            attendee_key, {"display_name": str(item.get("scout_name") or ""), "badges": {}}
-        )
-        bucket["badges"].setdefault(badge_name, []).append(entry)
-
-    return grouped
 ```
 
 Add the import:
 
 ```python
-from scoutmb.core.inference.missing import is_not_used, select_actionable
+from scoutmb.core.inference.missing import group_missing_requirements
 ```
 
-> The original computed `is_not_used` twice — once inside the selection predicate on the raw
-> description, once in the grouping loop on the cleaned one. Both are preserved: the predicate
-> receives a cleaner callback, and the loop keeps its own check.
+> The original applies `is_not_used` twice — inside the selection predicate and again in the
+> grouping loop. Both survive in the façade. In the live code both call sites clean the raw
+> description first (`is_not_used` is called on `clean_html_description(...)` output in the
+> predicate, and on the already-cleaned local in the loop), so passing one `clean_description`
+> callback used in both places is exactly equivalent rather than merely close.
 
 - [ ] **Step 5: Add a direct unit test for the exclusions**
 
@@ -2408,8 +2534,9 @@ legacy module become aliases of the package shapes.
 - Test: `tests/contracts/test_dto_versions.py`, `tests/unit/test_output_schemas.py`
 
 **Acceptance Criteria:**
-- [ ] `class_from_mapping` / `requirement_from_mapping` reproduce legacy coercion exactly
-      (`str(x or "")`, `truthy()`), so `ACQ-REQ-*` stays green
+- [ ] `requirement_from_mapping` reproduces the legacy construction **field for field**:
+      `str(x or "")` with **no strip** except `present_days`, and `truthy()` (not `bool()`)
+      for every flag — verified against `scout_schedule_cli.py:607-621`
 - [ ] `*_to_row(record, shareable=False)` reproduces `asdict` field order
 - [ ] Property: `requirement_from_mapping(requirement_to_row(dto)) == dto` for all 26 shapes
 - [ ] `SCHEMA_VERSION` present; an unknown version fails closed with a typed error
@@ -2430,6 +2557,7 @@ legacy module become aliases of the package shapes.
 # tests/unit/test_output_schemas.py
 from __future__ import annotations
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -2465,6 +2593,29 @@ def test_to_row_preserves_declaration_order() -> None:
 
     row = requirement_to_row(_dto("3b"), shareable=False)
     assert list(row) == [f.name for f in fields(RequirementRecord)]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("1", True), ("true", True), ("Yes", True), ("y", True),
+     ("0", False), ("false", False), ("", False), (None, False)],
+)
+def test_flag_coercion_matches_legacy_truthy(raw: object, expected: bool) -> None:
+    """bool("0") is True; truthy("0") is False. The legacy uses truthy()."""
+    import scout_schedule_cli as legacy
+
+    from scoutmb.core.output_schemas import _flag
+
+    assert _flag(raw) is expected is legacy.truthy(raw)
+
+
+def test_text_coercion_does_not_strip() -> None:
+    """Legacy strips present_days and nothing else; stripping elsewhere is a silent change."""
+    from scoutmb.core.output_schemas import requirement_from_mapping
+
+    record = requirement_from_mapping({"merit_badge_name": "  Chess  ", "present_days": "  Mo  "})
+    assert record.merit_badge_name == "  Chess  "
+    assert record.present_days == "Mo"
 
 
 def test_serializer_normalizes_tuples_to_lists() -> None:
@@ -2537,14 +2688,35 @@ def check_schema_version(version: int) -> None:
 
 
 def _text(value: Any) -> str:
-    return str(value or "").strip()
+    """str(x or "") -- NO strip.
+
+    The legacy construction in process_scout strips exactly ONE field (present_days) and
+    leaves every other text field unstripped. Stripping here would be a silent behavior
+    change to every ACQ-REQ-* and ART-SCHEMA-* expectation.
+    """
+    return str(value or "")
 
 
-def _truthy(value: Any) -> bool:
+def _flag(value: Any) -> bool:
+    """truthy() semantics, not bool().
+
+    The legacy construction uses truthy(), so the string "0" is FALSE. bool("0") is True --
+    a non-empty string -- which would invert completed_requirement for every payload that
+    arrives as raw upstream text rather than an already-parsed bool.
+    """
+    if isinstance(value, bool):
+        return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
 
 
 def requirement_from_mapping(data: Mapping[str, Any]) -> RequirementRecord:
+    """Mirror of the legacy RequirementRecord construction, field for field.
+
+    Used on two paths: the Task 14 shim (input is asdict output, already well-typed) and, in
+    Slice 2b, the gateway boundary (input is raw upstream payload). It must be correct for
+    the raw path or 2b inherits a coercion bug, so the coercions match the legacy source at
+    scout_schedule_cli.py:607-621 rather than the shim's easier case.
+    """
     return RequirementRecord(
         scout_name=_text(data.get("scout_name")),
         attendee_id=_text(data.get("attendee_id")),
@@ -2555,10 +2727,10 @@ def requirement_from_mapping(data: Mapping[str, Any]) -> RequirementRecord:
         requirement_type_id=_text(data.get("requirement_type_id")),
         requirement_number=_text(data.get("requirement_number")),
         description=str(data.get("description") or ""),
-        completed_requirement=bool(data.get("completed_requirement")),
-        completed_class=bool(data.get("completed_class")),
-        requirement_on_event=bool(data.get("requirement_on_event")),
-        present_days=_text(data.get("present_days")),
+        completed_requirement=_flag(data.get("completed_requirement")),
+        completed_class=_flag(data.get("completed_class")),
+        requirement_on_event=_flag(data.get("requirement_on_event")),
+        present_days=_text(data.get("present_days")).strip(),
     )
 
 
@@ -2568,6 +2740,8 @@ def requirement_to_row(record: RequirementRecord, *, shareable: bool) -> dict[st
 
 
 def class_from_mapping(data: Mapping[str, Any]) -> ClassRecord:
+    """Mirror of the legacy ClassRecord construction. Read scout_schedule_cli.py's
+    ClassRecord(...) call site and match its per-field coercion before editing this."""
     return ClassRecord(
         scout_name=_text(data.get("scout_name")),
         attendee_id=_text(data.get("attendee_id")),
@@ -2579,8 +2753,8 @@ def class_from_mapping(data: Mapping[str, Any]) -> ClassRecord:
         start_time=_text(data.get("start_time")),
         start_time_24h=_text(data.get("start_time_24h")),
         location=_text(data.get("location")),
-        has_requirements=bool(data.get("has_requirements")),
-        class_completed=bool(data.get("class_completed")),
+        has_requirements=_flag(data.get("has_requirements")),
+        class_completed=_flag(data.get("class_completed")),
         raw_class_name=str(data.get("raw_class_name") or ""),
     )
 
@@ -2643,11 +2817,11 @@ git commit -m "feat: add the versioned DTO boundary and alias the legacy record 
 
 ---
 
-### Task 15: `ports/attendee_source.py` + `adapters/files/tabular.py`
+### Task 15: `ports/attendee_source.py` + `adapters/files/tabular.py` (parsing only)
 
-**Goal:** The four loaders become an adapter behind a port. `load_inputs`'s in-place mutation
-of `ScoutInput` is replaced by constructing normalized values, which is what lets the shape
-freeze later.
+**Goal:** The four loaders become an adapter that **parses and nothing else**. Normalization,
+the adult filter, dedup, and the empty-result error move to the feature in Task 17, per the
+spec's layer roles.
 
 **Skeleton lineage:** B3 (`tests/parity/test_input_adapter_parity.py::test_full_input_matrix_matches_legacy`).
 
@@ -2657,28 +2831,48 @@ freeze later.
 - Test: `tests/parity/test_input_adapter_parity.py`
 
 **Acceptance Criteria:**
-- [ ] All 50 `IN-*` cases pass through the package adapter with identical results
-- [ ] Header aliases, `utf-8-sig`, the headerless-CSV fallback, and the JSON envelope
-      (`scouts` / `data` / bare object) all preserved
-- [ ] `load_inputs` no longer mutates its inputs — it builds new `ScoutInput` values
-- [ ] Dedup on URL, adult filter, and the empty-result `ValueError` message unchanged
-- [ ] `openpyxl` imported inside the XLSX function, not at adapter module scope
+- [ ] `load_xlsx`/`load_csv`/`load_json`/`load_text` move **verbatim**; only the `openpyxl`
+      import moves inside `load_xlsx`
+- [ ] The adapter does **no** filtering, dedup, or normalization — that is Task 17's
+- [ ] `load_inputs` still exists on the legacy module with its positional signature
+- [ ] All `IN-*` cases green, including the `subprocess` import-profile context
 
-**Verify:** `uv run pytest tests/parity/test_input_adapter_parity.py tests/characterization -q` → PASS
+**Verify:** `uv run pytest tests/parity/test_input_adapter_parity.py tests/characterization/test_input_matrix.py -q` → PASS
 
-**Recovery:** Re-point `scout_schedule_cli.load_inputs` at the original bodies (kept in git
-history) and select the legacy loader at the composition root; fix one `IN-*` case at a time.
+**Recovery:** Re-point `scout_schedule_cli.load_inputs` at the original bodies from git; the
+package modules become unreferenced. Fix one `IN-*` case at a time.
 
 **Steps:**
 
-- [ ] **Step 1: Write the parity test driving the frozen catalog**
+- [ ] **Step 1: Read the real case API before writing the test**
+
+```bash
+sed -n '32,60p'  tests/matrix/cases/input_cases.py
+sed -n '44,90p'  tests/characterization/test_input_matrix.py
+sed -n '1,40p'   tests/factories/inputs.py
+```
+
+The shapes you must use, verbatim from `tests/matrix/cases/input_cases.py:32-58`:
+
+- `InputCase(meta, input: InputSpec, expected_legacy: InputObservation)` — there is no
+  `write_source`, no `case.sheet_name`, no `case.include_adults`.
+- `InputSpec(format, variant, entry, headers, rows, json_value, text_lines, sheets,
+  sheet_arg, include_adults, profile)` — the loader arguments are `spec.sheet_arg` and
+  `spec.include_adults`, and `spec.entry` selects which loader to call.
+- `InputObservation(records, exception_type, message)` — errors normalize the path to the
+  literal `<input>`.
+- Files are materialized by `tests/factories/inputs.py`'s `write_csv_input`,
+  `write_xlsx_input`, `write_json_input`, `write_text_input` — the same helpers
+  `LegacyInputRunner._materialize` uses.
+
+- [ ] **Step 2: Write the parity test against that API**
 
 ```python
 # tests/parity/test_input_adapter_parity.py
-"""Package input adapter over the SAME input cases the legacy runner uses.
+"""Package input loaders over the SAME cases the legacy runner uses.
 
-Neither runner is the other's oracle -- tests/matrix/cases/input_cases.py holds hand-computed
-expectations and both are measured against them.
+Neither runner is the other's oracle: tests/matrix/cases/input_cases.py holds hand-computed
+InputObservation values and both sides are measured against them.
 """
 
 from __future__ import annotations
@@ -2686,52 +2880,132 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from scoutmb.adapters.files.tabular import load_attendees
-from tests.matrix.cases.input_cases import INPUT_CASES, InputCase
+from tests.factories.inputs import (
+    write_csv_input,
+    write_json_input,
+    write_text_input,
+    write_xlsx_input,
+)
+from tests.matrix.cases.input_cases import INPUT_CASES, InputObservation, InputSpec
 from tests.matrix.pytest_support import execution_params
+
+_FILE_CONTEXTS = {"csv", "xlsx", "json", "text"}
+
+
+def _materialize(spec: InputSpec, context_id: str, root: Path) -> Path:
+    if context_id == "csv":
+        return write_csv_input(root / "input.csv", spec.headers, spec.rows)
+    if context_id == "xlsx":
+        sheets = spec.sheets or (("Sheet", spec.headers, spec.rows),)
+        return write_xlsx_input(root / "input.xlsx", sheets)
+    if context_id == "json":
+        return write_json_input(root / "input.json", spec.json_value)
+    return write_text_input(root / "input.txt", spec.text_lines)
+
+
+def _invoke(spec: InputSpec, path: Path) -> InputObservation:
+    """Mirror LegacyInputRunner._invoke, but against the package."""
+    from scoutmb.adapters.files import tabular
+    from scoutmb.adapters.files.tabular import TabularAttendeeSource
+    from scoutmb.features.ingest.service import IngestService
+
+    entries = {
+        "load_csv": lambda: tabular.load_csv(path),
+        "load_xlsx": lambda: tabular.load_xlsx(path, spec.sheet_arg),
+        "load_json": lambda: tabular.load_json(path),
+        "load_text": lambda: tabular.load_text(path),
+        "load_inputs": lambda: IngestService(
+            sources=(TabularAttendeeSource(sheet_name=spec.sheet_arg),),
+            include_adults=spec.include_adults,
+        ).load(path),
+    }
+    try:
+        result = entries[spec.entry]()
+    except Exception as exc:  # characterizing the real exception contract
+        return InputObservation(
+            exception_type=type(exc).__name__, message=str(exc).replace(str(path), "<input>")
+        )
+    return InputObservation(
+        records=tuple((s.name, s.url, s.registrant_type) for s in result)
+    )
 
 
 @pytest.mark.parametrize(("case", "context_id"), execution_params(INPUT_CASES))
-def test_package_input_adapter_matches_expectations(
-    case: InputCase, context_id: str, tmp_path: Path
-) -> None:
-    import scout_schedule_cli as legacy
-
-    source = case.write_source(tmp_path)  # same helper the legacy runner uses
-    try:
-        package_result = load_attendees(
-            source, sheet_name=case.sheet_name, include_adults=case.include_adults
-        )
-    except ValueError as exc:
-        package_result = f"ValueError: {exc}"
-
-    try:
-        legacy_result = legacy.load_inputs(source, case.sheet_name, case.include_adults)
-    except ValueError as exc:
-        legacy_result = f"ValueError: {exc}"
-
-    assert _normalize(package_result) == _normalize(legacy_result)
-
-
-def _normalize(value: object) -> object:
-    if isinstance(value, str):
-        return value
-    return tuple((s.name, s.url, s.registrant_type) for s in value)
+def test_package_input_matches_expectations(case, context_id: str, tmp_path: Path) -> None:
+    if context_id not in _FILE_CONTEXTS:
+        pytest.skip(f"{context_id} is a legacy-module import probe, not a package context")
+    path = _materialize(case.input, context_id, tmp_path)
+    assert _invoke(case.input, path) == case.expected_legacy
 ```
 
-> Read `tests/matrix/cases/input_cases.py` and
-> `tests/characterization/test_input_matrix.py` first and reuse their existing source-writing
-> helper and field names rather than inventing `case.write_source` — the exact accessor names
-> come from that file.
+> The `subprocess` context probes what importing `scout_schedule_cli` pulls in under a blocked
+> dependency profile. That is a property of the legacy module, not of the package, so it is
+> skipped here rather than faked. Task 16 covers the package's own import isolation.
 
-- [ ] **Step 2: Run — expect FAIL**
+- [ ] **Step 3: Run — expect FAIL** (`ModuleNotFoundError: scoutmb.adapters.files.tabular`)
 
-- [ ] **Step 3: Define the port**
+- [ ] **Step 4: Move the parsers verbatim**
+
+Create `src/scoutmb/adapters/files/tabular.py` with `norm_header`, `first_matching_key`,
+`load_xlsx`, `load_csv`, `load_json`, `load_text` copied **unchanged** from
+`scout_schedule_cli.py:218-352`, plus:
+
+```python
+"""File-format parsing for attendee inputs. PARSING ONLY.
+
+Selection, normalization, the adult filter, dedup and the empty-result error live in
+features/ingest -- adapters parse, features orchestrate. Putting the filter here is what an
+earlier draft did and it collapses the seam the port exists to create.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+from scoutmb.core.models import ScoutInput
+
+
+class TabularAttendeeSource:
+    """AttendeeSource over the four file formats. Dispatches on suffix; parses; returns."""
+
+    _SUFFIXES = frozenset({".xlsx", ".csv", ".json", ".txt", ""})
+
+    def __init__(self, *, sheet_name: str = "Scouts Only") -> None:
+        self.sheet_name = sheet_name
+
+    def supports(self, path: Path) -> bool:
+        return path.suffix.lower() in self._SUFFIXES
+
+    def load(self, path: Path) -> list[ScoutInput]:
+        suffix = path.suffix.lower()
+        if suffix == ".xlsx":
+            return load_xlsx(path, self.sheet_name)
+        if suffix == ".csv":
+            return load_csv(path)
+        if suffix == ".json":
+            return load_json(path)
+        return load_text(path)
+```
+
+Inside `load_xlsx`, move the import to the top of the function body:
+
+```python
+def load_xlsx(path: Path, sheet_name: str) -> list[ScoutInput]:
+    from openpyxl import load_workbook  # optional at adapter scope, not package scope
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    ...
+```
+
+- [ ] **Step 5: Define the port**
 
 ```python
 # src/scoutmb/ports/attendee_source.py
-"""The seam ingest adapters implement: something that yields attendee inputs from a source."""
+"""The seam ingest adapters implement: parse a file into raw attendee inputs."""
 
 from __future__ import annotations
 
@@ -2746,54 +3020,7 @@ class AttendeeSource(Protocol):
     def load(self, path: Path) -> list[ScoutInput]: ...
 ```
 
-- [ ] **Step 4: Move the loaders into the adapter**
-
-Create `src/scoutmb/adapters/files/tabular.py` containing `norm_header`,
-`first_matching_key`, `load_xlsx`, `load_csv`, `load_json`, `load_text` **verbatim** from
-`scout_schedule_cli.py`, with two changes: `from openpyxl import load_workbook` moves inside
-`load_xlsx`, and `load_inputs` becomes `load_attendees` with non-mutating normalization:
-
-```python
-def load_attendees(path: Path, *, sheet_name: str, include_adults: bool) -> list[ScoutInput]:
-    """Select a loader by suffix, then normalize, filter and dedup.
-
-    The legacy version stripped url/name/registrant_type ON the ScoutInput instances it had
-    just built. Here the stripped values construct new instances instead, so the record shape
-    can freeze without rewriting this loop.
-    """
-    suffix = path.suffix.lower()
-    if suffix == ".xlsx":
-        scouts = load_xlsx(path, sheet_name)
-    elif suffix == ".csv":
-        scouts = load_csv(path)
-    elif suffix == ".json":
-        scouts = load_json(path)
-    else:
-        scouts = load_text(path)
-
-    filtered: list[ScoutInput] = []
-    seen: set[str] = set()
-    for scout in scouts:
-        normalized = ScoutInput(
-            name=scout.name.strip(),
-            url=scout.url.strip(),
-            registrant_type=scout.registrant_type.strip(),
-        )
-        if not normalized.url.startswith("https://scoutingevent.com/mobile/"):
-            continue
-        if not include_adults and normalized.registrant_type.lower() in {"adult", "part-time adult"}:
-            continue
-        if normalized.url in seen:
-            continue
-        seen.add(normalized.url)
-        filtered.append(normalized)
-
-    if not filtered:
-        raise ValueError(f"No ScoutingEvent QR URLs found in {path}")
-    return filtered
-```
-
-- [ ] **Step 5: Re-export from legacy**
+- [ ] **Step 6: Re-export the parsers from legacy** (`load_inputs` itself is rewired in Task 17)
 
 ```python
 from scoutmb.adapters.files.tabular import (  # noqa: F401 - legacy public surface
@@ -2804,138 +3031,200 @@ from scoutmb.adapters.files.tabular import (  # noqa: F401 - legacy public surfa
     load_xlsx,
     norm_header,
 )
-from scoutmb.adapters.files.tabular import load_attendees as _load_attendees
-
-
-def load_inputs(path: Path, sheet_name: str, include_adults: bool) -> list[ScoutInput]:
-    return _load_attendees(path, sheet_name=sheet_name, include_adults=include_adults)
 ```
 
-> This is a Form-2 shim: positional-to-keyword adaptation only, no logic. The legacy signature
-> is positional because `async_main` and `ui.server` both call it that way.
+Remove the module-level `from openpyxl import load_workbook`.
 
-Remove the now-unused module-level `from openpyxl import load_workbook`.
-
-- [ ] **Step 6: Run — expect PASS**
+- [ ] **Step 7: Run — `load_inputs` still uses its own body, so everything stays green**
 
 ```bash
 uv run pytest -q
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/scoutmb/ports/attendee_source.py src/scoutmb/adapters/files/tabular.py tests/parity/test_input_adapter_parity.py scout_schedule_cli.py
-git commit -m "refactor: move the four input loaders into a files adapter behind a port
-
-load_inputs no longer mutates the ScoutInput values it was handed."
+git commit -m "refactor: move the four input parsers into a files adapter behind a port"
 ```
 
 ---
 
+
 ### Task 16: `adapters/pdf/` and the optional-dependency contract
 
-**Goal:** PDF extraction moves behind a capability guard, and a core-only install provably
-imports no OpenCV, PyMuPDF, or Playwright.
+**Goal:** PDF decoding moves behind a capability guard, and a core-only import provably loads
+no OpenCV, PyMuPDF, or Playwright.
 
 **Skeleton lineage:** B3 (`tests/packaging/test_core_imports.py::test_core_does_not_import_pdf_or_opencv`).
 
 **Files:**
 - Create: `src/scoutmb/adapters/pdf/extract.py`
-- Modify: `pdf_to_scouts.py` (module-scope `cv2`/`fitz`/`numpy` imports → adapter)
-- Test: `tests/packaging/test_core_imports.py`, `tests/parity/test_pdf_adapter_parity.py`
+- Modify: `pdf_to_scouts.py` (module-scope `cv2`/`fitz`/`numpy` → adapter)
+- Test: `tests/packaging/test_core_imports.py`
 
 **Acceptance Criteria:**
-- [ ] `python -I` importing every leaf module of `core`/`ports`/`features` loads no `cv2`,
-      `fitz`, or `playwright`
-- [ ] Calling the PDF entry point without the extra raises `CapabilityUnavailable` naming `pdf`
+- [ ] Importing every leaf module of `core`/`ports`/`features` loads no `cv2`, `fitz`, or
+      `playwright` — proven with the **meta-path blocker**, not an environment variable
+- [ ] Requesting the PDF capability with the stack blocked raises `CapabilityUnavailable`
+- [ ] Leaf modules enumerated by walking the package, never a hand-kept list
 - [ ] All 46 `PDF-*` cases green
-- [ ] Leaf modules enumerated by walking the package, not a hand-kept list
 
 **Verify:** `uv run pytest tests/packaging/test_core_imports.py tests/characterization/test_pdf_matrix.py -q` → PASS
 
-**Recovery:** Keep `pdf_to_scouts` importing its dependencies at module scope and mark the
-isolation test `xfail` with a named owning task — do **not** weaken the assertion to
-"no exception raised", which is the failure mode the two-test split exists to prevent.
+**Recovery:** Keep `pdf_to_scouts` importing at module scope and mark the isolation test
+`xfail` with a named owning task. Do **not** weaken the assertion to "no exception raised" —
+that passes even when the imports succeeded.
 
 **Steps:**
 
-- [ ] **Step 1: Write the isolation test**
+- [ ] **Step 1: Read the isolation harness this repo already has**
+
+```bash
+sed -n '20,70p'  tests/harnesses/subprocess.py
+sed -n '70,105p' tests/harnesses/subprocess.py
+```
+
+`run_import_probe` runs `sys.executable -I -c <source>` and installs a `sys.meta_path` finder
+that raises `ImportError` for blocked top-level names. That is the correct technique here, and
+it is correct precisely because it does **not** depend on the environment: `-I` implies `-E`
+and discards `PYTHONPATH`, so any probe that tries to control the child's imports through env
+vars silently tests the parent's installed packages instead.
+
+This task reuses that pattern rather than building a venv: a blocker proves "core does not
+import cv2" more directly than absence-from-a-venv, because it fails loudly at the import
+attempt instead of leaving a hole for a swallowed `ImportError`.
+
+- [ ] **Step 2: Write the isolation test**
 
 ```python
 # tests/packaging/test_core_imports.py
-"""A core-only install must not drag in the heavy optional wheels.
+"""A core-only import must not drag in the heavy optional wheels.
 
-Two separate tests, because neither alone establishes the contract: sys.modules absence
-cannot distinguish "never attempted" from "attempted, raised ImportError, and got swallowed",
-and the swallowed case is the dangerous one.
+Two tests, because neither alone establishes the contract:
+  * blocked-import: proves core NEVER ATTEMPTS the heavy imports (the blocker would raise);
+  * capability: proves a genuinely missing stack surfaces as CapabilityUnavailable rather
+    than a swallowed ImportError that silently degrades.
 """
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "src"
-HEAVY = ("cv2", "fitz", "playwright", "numpy")
+HEAVY = ("cv2", "fitz", "playwright")
+
+# Runs in a clean `python -I` child. sys.path is set INSIDE the source, because -I implies -E
+# and would discard a PYTHONPATH we set in the environment.
+_PROBE = """
+import importlib
+import json
+import sys
+
+src, blocked, modules = sys.argv[1], set(json.loads(sys.argv[2])), json.loads(sys.argv[3])
+sys.path.insert(0, src)
+
+
+class _Blocker:
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in blocked:
+            raise ImportError("blocked by import probe: " + name)
+        return None
+
+
+sys.meta_path.insert(0, _Blocker())
+failed = None
+try:
+    for name in modules:
+        importlib.import_module(name)
+except Exception as exc:
+    failed = f"{type(exc).__name__}: {exc}"
+sys.stdout.write(json.dumps({"failed": failed, "count": len(modules)}))
+"""
 
 
 def _leaf_modules() -> list[str]:
-    """Walk the package -- a hand-kept list silently stops covering new modules."""
+    """Walk the package: a hand-kept list silently stops covering new modules."""
     names: list[str] = []
     for layer in ("core", "ports", "features"):
         root = SRC / "scoutmb" / layer
-        if not root.exists():
-            continue
         for path in sorted(root.rglob("*.py")):
             rel = path.relative_to(SRC).with_suffix("")
-            parts = [p for p in rel.parts if p != "__init__"]
-            names.append(".".join(parts))
+            names.append(".".join(p for p in rel.parts if p != "__init__"))
     return sorted(set(names))
 
 
-def test_importing_core_layers_loads_no_optional_dependency() -> None:
+def test_core_layers_never_import_the_heavy_stacks() -> None:
     modules = _leaf_modules()
-    assert modules, "no leaf modules found -- the walk is broken, not the package"
-    code = (
-        "import sys\n"
-        + "".join(f"import {name}\n" for name in modules)
-        + f"loaded = [m for m in {HEAVY!r} if m in sys.modules]\n"
-        "print(','.join(loaded))\n"
+    assert modules, "package walk found nothing -- the walk is broken, not the package"
+
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", _PROBE, str(SRC), json.dumps(HEAVY), json.dumps(modules)],
+        capture_output=True, text=True, check=False,
     )
-    result = subprocess.run(
-        [sys.executable, "-I", "-c", code],
-        cwd=REPO_ROOT, check=True, capture_output=True, text=True,
-        env={"PYTHONPATH": str(SRC), "PATH": ""},
+    assert completed.stdout, f"probe produced no output: {completed.stderr!r}"
+    payload = json.loads(completed.stdout)
+    assert payload["count"] == len(modules)
+    assert payload["failed"] is None, (
+        f"a core/ports/features module reached a blocked dependency: {payload['failed']}"
     )
-    assert result.stdout.strip() == "", f"core import pulled in: {result.stdout.strip()}"
 
 
-def test_pdf_capability_fails_closed_when_extra_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scoutmb.adapters.pdf import extract
-    from scoutmb.errors import CapabilityUnavailable
+def test_pdf_capability_fails_closed_when_the_stack_is_blocked() -> None:
+    """Blocking the real import is stronger than monkeypatching the error path: it proves the
+    guard converts a REAL ImportError, not a stub."""
+    probe = """
+import json
+import sys
 
-    monkeypatch.setattr(extract, "_import_pdf_stack", extract._raise_capability_error)
-    with pytest.raises(CapabilityUnavailable) as caught:
-        extract.decode_embedded_qr_page(object())
-    assert "scoutmb[pdf]" in str(caught.value)
+src, = sys.argv[1:]
+sys.path.insert(0, src)
+
+
+class _Blocker:
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in {"cv2", "fitz", "numpy"}:
+            raise ImportError("blocked")
+        return None
+
+
+sys.meta_path.insert(0, _Blocker())
+from scoutmb.adapters.pdf.extract import _import_pdf_stack
+from scoutmb.errors import CapabilityUnavailable
+
+try:
+    _import_pdf_stack()
+    result = {"raised": None}
+except CapabilityUnavailable as exc:
+    result = {"raised": "CapabilityUnavailable", "message": str(exc)}
+except Exception as exc:
+    result = {"raised": type(exc).__name__, "message": str(exc)}
+sys.stdout.write(json.dumps(result))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", probe, str(SRC)],
+        capture_output=True, text=True, check=False,
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["raised"] == "CapabilityUnavailable", payload
+    assert "scoutmb[pdf]" in payload["message"]
 ```
 
-- [ ] **Step 2: Run — expect FAIL**
+- [ ] **Step 3: Run — expect FAIL**
 
-- [ ] **Step 3: Implement the capability guard**
+- [ ] **Step 4: Implement the capability guard**
 
 ```python
 # src/scoutmb/adapters/pdf/extract.py
 """PDF page extraction and QR decoding.
 
 The heavy wheels are imported INSIDE _import_pdf_stack, never at module scope: features/ingest
-selects between this adapter and the tabular one, so a module-scope import here would make a
-core-only install impossible.
+chooses between this adapter and the tabular one, so a module-scope import here would make a
+core-only import impossible.
 """
 
 from __future__ import annotations
@@ -2947,17 +3236,11 @@ from scoutmb.errors import CapabilityUnavailable
 _PDF_DISTRIBUTIONS = ("PyMuPDF", "opencv-python-headless", "numpy")
 
 
-def _raise_capability_error() -> tuple[Any, Any, Any]:
-    raise CapabilityUnavailable(
-        capability="pdf", distributions=_PDF_DISTRIBUTIONS, extra="pdf"
-    )
-
-
 def _import_pdf_stack() -> tuple[Any, Any, Any]:
     """Return (cv2, fitz, numpy) or raise CapabilityUnavailable.
 
-    A bare ImportError escaping here would give the user a traceback naming a wheel they have
-    never heard of instead of the one command that fixes it.
+    A bare ImportError escaping here hands the user a traceback naming a wheel they have never
+    heard of, instead of the one command that fixes it.
     """
     try:
         import cv2
@@ -2970,47 +3253,42 @@ def _import_pdf_stack() -> tuple[Any, Any, Any]:
     return cv2, fitz, numpy
 ```
 
-Then move the decode helpers from `pdf_to_scouts.py` into this module, each starting with
-`cv2, fitz, numpy = _import_pdf_stack()`, and re-export from `pdf_to_scouts.py`.
+Then move the decode helpers out of `pdf_to_scouts.py` into this module, each opening with
+`cv2, fitz, numpy = _import_pdf_stack()`, and re-export them from `pdf_to_scouts.py`.
 
-> `pdf_to_scouts.py` is an **interface**, so it may keep importing the adapter directly. The
-> module-scope `import cv2` / `import fitz` / `import numpy` lines are what must go.
-
-- [ ] **Step 4: Run — expect PASS**
+- [ ] **Step 5: Run and commit**
 
 ```bash
 uv run pytest tests/packaging/test_core_imports.py tests/characterization/test_pdf_matrix.py -q
 uv run pytest -q
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/scoutmb/adapters/pdf tests/packaging/test_core_imports.py tests/parity/test_pdf_adapter_parity.py pdf_to_scouts.py
-git commit -m "refactor: put PDF decoding behind a capability guard so core stays importable"
+git add src/scoutmb/adapters/pdf tests/packaging/test_core_imports.py pdf_to_scouts.py
+git commit -m "refactor: put PDF decoding behind a capability guard, proven with a meta-path blocker"
 ```
 
 ---
 
-### Task 17: `features/ingest/service.py`
 
-**Goal:** A feature that orchestrates: picks a source, applies dedup and the adult filter,
-returns typed inputs. It imports ports only — never an adapter.
+### Task 17: `features/ingest/service.py` — orchestration owns the policy
+
+**Goal:** Source selection, normalization, the adult filter, dedup, and the empty-result error
+live in the feature, which is what the spec's layer roles require. `load_inputs` becomes a
+shim over it.
 
 **Files:**
 - Create: `src/scoutmb/features/ingest/service.py`
+- Modify: `scout_schedule_cli.py` (`load_inputs` → shim)
 - Test: `tests/unit/test_ingest_service.py`
 
 **Acceptance Criteria:**
-- [ ] Takes an `AttendeeSource` (or a sequence of them) by constructor injection
-- [ ] Imports no adapter and no optional dependency — architecture test enforces
-- [ ] Selection order and the "no source supports this file" error are explicit
-- [ ] Unit-tested with a fake source, no filesystem
+- [ ] Normalization, adult filter, dedup-by-URL and the `ValueError` message move here
+- [ ] The error message is byte-identical: `f"No ScoutingEvent QR URLs found in {path}"`
+- [ ] The feature imports ports only — no adapter, enforced by the architecture test
+- [ ] `load_inputs` keeps its positional signature
+- [ ] All `IN-FILTER-*`, `IN-DEDUP-*`, and `IN-ERROR-*` cases green
 
-**Verify:** `uv run pytest tests/unit/test_ingest_service.py tests/architecture -q` → PASS
+**Verify:** `uv run pytest tests/unit/test_ingest_service.py tests/parity/test_input_adapter_parity.py tests/characterization/test_input_matrix.py tests/architecture -q` → PASS
 
-**Recovery:** Leave the service unreferenced and keep `interfaces/cli/pdf.py` calling the
-adapter directly; the service is additive until Task 18 wires it.
+**Recovery:** Restore `load_inputs`'s original body from git; the service becomes unreferenced.
 
 **Steps:**
 
@@ -3028,6 +3306,9 @@ from scoutmb.core.models import ScoutInput
 from scoutmb.errors import ScoutmbError
 from scoutmb.features.ingest.service import IngestService, NoSupportedSource
 
+URL_A = "https://scoutingevent.com/mobile/checkin?t=A"
+URL_B = "https://scoutingevent.com/mobile/checkin?t=B"
+
 
 class FakeSource:
     def __init__(self, suffix: str, rows: list[ScoutInput]) -> None:
@@ -3041,22 +3322,55 @@ class FakeSource:
         return list(self.rows)
 
 
-def test_first_supporting_source_wins() -> None:
-    wanted = ScoutInput(name="Avery", url="https://scoutingevent.com/mobile/a")
-    first = FakeSource(".csv", [wanted])
-    second = FakeSource(".csv", [])
-    service = IngestService(sources=(first, second))
+def _service(rows: list[ScoutInput], *, include_adults: bool = False) -> IngestService:
+    return IngestService(sources=(FakeSource(".csv", rows),), include_adults=include_adults)
 
-    assert service.load(Path("input.csv")) == [wanted]
+
+def test_first_supporting_source_wins() -> None:
+    row = ScoutInput(name="Avery", url=URL_A)
+    first, second = FakeSource(".csv", [row]), FakeSource(".csv", [])
+    service = IngestService(sources=(first, second))
+    assert service.load(Path("in.csv")) == [row]
     assert (first.calls, second.calls) == (1, 0)
 
 
+def test_values_are_normalized_without_mutating_the_adapter_output() -> None:
+    row = ScoutInput(name="  Avery  ", url=f"  {URL_A}  ", registrant_type="  Youth  ")
+    loaded = _service([row]).load(Path("in.csv"))
+    assert loaded == [ScoutInput(name="Avery", url=URL_A, registrant_type="Youth")]
+    assert row.name == "  Avery  ", "the adapter's object was mutated in place"
+
+
+def test_non_scoutingevent_urls_are_dropped() -> None:
+    rows = [ScoutInput(name="A", url="https://example.invalid/x"), ScoutInput(name="B", url=URL_A)]
+    assert [s.name for s in _service(rows).load(Path("in.csv"))] == ["B"]
+
+
+@pytest.mark.parametrize("registrant_type", ["Adult", "adult", "Part-Time Adult"])
+def test_adults_are_filtered_unless_included(registrant_type: str) -> None:
+    rows = [ScoutInput(name="A", url=URL_A, registrant_type=registrant_type)]
+    with pytest.raises(ValueError):
+        _service(rows).load(Path("in.csv"))
+    assert len(_service(rows, include_adults=True).load(Path("in.csv"))) == 1
+
+
+def test_duplicate_urls_are_dropped_keeping_the_first() -> None:
+    rows = [ScoutInput(name="First", url=URL_A), ScoutInput(name="Second", url=URL_A),
+            ScoutInput(name="Third", url=URL_B)]
+    assert [s.name for s in _service(rows).load(Path("in.csv"))] == ["First", "Third"]
+
+
+def test_empty_result_raises_the_legacy_message() -> None:
+    path = Path("in.csv")
+    with pytest.raises(ValueError) as caught:
+        _service([]).load(path)
+    assert str(caught.value) == f"No ScoutingEvent QR URLs found in {path}"
+
+
 def test_no_supporting_source_fails_closed() -> None:
-    service = IngestService(sources=(FakeSource(".csv", []),))
     with pytest.raises(NoSupportedSource) as caught:
-        service.load(Path("input.pdf"))
+        _service([]).load(Path("in.pdf"))
     assert isinstance(caught.value, ScoutmbError)
-    assert ".pdf" in str(caught.value)
 ```
 
 - [ ] **Step 2: Run — expect FAIL**
@@ -3067,20 +3381,23 @@ def test_no_supporting_source_fails_closed() -> None:
 # src/scoutmb/features/ingest/service.py
 """Attendee ingestion orchestration.
 
-Orchestration only: this module selects a source and returns what it produced. It never parses
-a file format -- that is adapter work, and keeping it there is what lets a core-only install
-import this module without PyMuPDF.
+The feature owns POLICY -- which source to use, what counts as an attendee, what a duplicate
+is, and what an empty result means. Adapters own PARSING. Keeping the split here is what lets
+a core-only install import this module without PyMuPDF.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from scoutmb.core.models import ScoutInput
 from scoutmb.errors import ScoutmbError
 from scoutmb.ports.attendee_source import AttendeeSource
+
+QR_URL_PREFIX = "https://scoutingevent.com/mobile/"
+ADULT_TYPES = frozenset({"adult", "part-time adult"})
 
 
 class NoSupportedSource(ScoutmbError):
@@ -3089,63 +3406,143 @@ class NoSupportedSource(ScoutmbError):
 
 @dataclass(frozen=True, slots=True)
 class IngestService:
-    sources: Sequence[AttendeeSource]
+    sources: Sequence[AttendeeSource] = field(default_factory=tuple)
+    include_adults: bool = False
 
     def load(self, path: Path) -> list[ScoutInput]:
+        raw = self._parse(path)
+
+        selected: list[ScoutInput] = []
+        seen: set[str] = set()
+        for scout in raw:
+            # New instances, not in-place strip: the adapter's objects are not ours to mutate,
+            # and the record shape is frozen in a later slice.
+            normalized = ScoutInput(
+                name=scout.name.strip(),
+                url=scout.url.strip(),
+                registrant_type=scout.registrant_type.strip(),
+            )
+            if not normalized.url.startswith(QR_URL_PREFIX):
+                continue
+            if not self.include_adults and normalized.registrant_type.lower() in ADULT_TYPES:
+                continue
+            if normalized.url in seen:
+                continue
+            seen.add(normalized.url)
+            selected.append(normalized)
+
+        if not selected:
+            # Message is byte-identical to the legacy raise; IN-ERROR-* pins it.
+            raise ValueError(f"No ScoutingEvent QR URLs found in {path}")
+        return selected
+
+    def _parse(self, path: Path) -> list[ScoutInput]:
         for source in self.sources:
             if source.supports(path):
                 return source.load(path)
         raise NoSupportedSource(f"No configured source can read {path.suffix or path.name!r}")
 ```
 
-- [ ] **Step 4: Run — expect PASS, and confirm the architecture test still passes**
+> There is deliberately **no `IngestService.for_files()` convenience constructor.** A
+> function-local `from scoutmb.adapters...` inside the feature is still a `features -> adapters`
+> edge — the dependency test walks the AST and sees function-level imports — and exempting one
+> module sets the precedent that dissolves the rule. Callers construct the service with an
+> explicit source list; `interfaces/cli/composition.py` is the one place that knows which
+> adapter to pass.
 
-```bash
-uv run pytest tests/unit/test_ingest_service.py tests/architecture -q
+- [ ] **Step 4: Rewire `load_inputs`**
+
+```python
+def load_inputs(path: Path, sheet_name: str, include_adults: bool) -> list[ScoutInput]:
+    from scoutmb.adapters.files.tabular import TabularAttendeeSource
+
+    service = IngestService(
+        sources=(TabularAttendeeSource(sheet_name=sheet_name),), include_adults=include_adults
+    )
+    return service.load(path)
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run — expect PASS**
 
 ```bash
-git add src/scoutmb/features/ingest tests/unit/test_ingest_service.py
-git commit -m "feat: add the ingest feature service, orchestration only"
+uv run pytest -q
+```
+
+Watch `IN-DEDUP-*`, `IN-FILTER-*`, and `IN-ERROR-*`: they pin the exact policy that just moved.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/scoutmb/features/ingest tests/unit/test_ingest_service.py scout_schedule_cli.py
+git commit -m "refactor: move ingest policy into the feature; adapters now only parse"
 ```
 
 ---
 
-### Task 18: `interfaces/cli/pdf.py` + composition root + console script
 
-**Goal:** `troop349-pdf` exists, runs stage 1 from outside the repository, and matches
-`pdf_to_scouts.py` argument for argument.
+### Task 18: Move the PDF pipeline into the package and add `troop349-pdf`
+
+**Goal:** The stage-1 pipeline lives in the package, so the wheel is self-contained and
+`troop349-pdf` runs from a clean install. `pdf_to_scouts.py` inverts into a shim.
 
 **Skeleton lineage:** B1 (`tests/compat/test_legacy_entrypoints.py::test_legacy_entrypoints_delegate_with_parity`).
 
+> **This is the largest task in the slice.** An earlier draft made
+> `scoutmb.interfaces.cli.pdf` import root-level `pdf_to_scouts`, which cannot work: the wheel
+> packages `src/scoutmb` only, so outside the repository that import fails and the clean-install
+> requirement this task claims to satisfy is unmeetable. The dependency has to point the other
+> way. If the move proves too large in practice, the correct fallback is to **defer the console
+> script to 2b** and drop it from Gate 2a — not to ship a CLI that only works inside a git
+> checkout.
+
 **Files:**
-- Create: `src/scoutmb/interfaces/cli/pdf.py`, `src/scoutmb/interfaces/cli/composition.py`
+- Create: `src/scoutmb/adapters/pdf/pages.py`, `src/scoutmb/features/ingest/pdf_extract.py`,
+  `src/scoutmb/interfaces/cli/pdf.py`, `src/scoutmb/interfaces/cli/composition.py`
+- Modify: `pdf_to_scouts.py` (becomes a shim), `pyproject.toml`
 - Test: `tests/compat/test_legacy_entrypoints.py`
 
 **Acceptance Criteria:**
+- [ ] Nothing under `src/scoutmb` imports `pdf_to_scouts`
 - [ ] `troop349-pdf --help` matches `python pdf_to_scouts.py --help` except the program name
 - [ ] Same options, defaults, exit codes, stdout **and stderr**
-- [ ] Adapter imports live only in `composition.py` — architecture test enforces
-- [ ] Tests execute the **installed console script as a subprocess**, not `main()` in-process
-- [ ] Runs from a directory outside the repository
+- [ ] The CLI runs from a directory outside the repository, from an installed wheel
+- [ ] Adapter imports confined to `interfaces/cli/composition.py`
+- [ ] All `PDF-*` and PDF-CLI cases green
 
-**Verify:** `uv run pytest tests/compat -q` → PASS
+**Verify:** `uv run pytest tests/compat tests/characterization/test_pdf_matrix.py tests/architecture -q` → PASS
 
-**Recovery:** Keep `pdf_to_scouts.py` as the shipped entry point and leave the console script
-unreferenced; the flat script is not retired until 2b.
+**Recovery:** Keep `pdf_to_scouts.py` as the shipped entry point, remove the console script
+from `pyproject.toml`, and move this task to 2b. A console script that only resolves inside the
+repo is worse than no console script, because the packaging test then lies.
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Inventory what has to move**
+
+```bash
+rg -n '^(def |async def )' pdf_to_scouts.py
+```
+
+`main` already takes `argv` (`pdf_to_scouts.py:515`), so no signature widening is needed.
+Split the module three ways:
+
+| Legacy symbol | Destination | Why |
+| --- | --- | --- |
+| `decode_embedded_qr`, `decode_rendered_qr`, `decode_variants`, `page_regions` | `adapters/pdf/pages.py` | Needs `cv2`/`fitz` — adapter, behind Task 16's guard |
+| `extract_page_identity`, `normalize_obvious_case` | `adapters/pdf/pages.py` | Parsing PDF page text — adapter |
+| `expand_pdf_inputs`, `extract_pdf` | `features/ingest/pdf_extract.py` | Policy: discovery, tier order, adult filter |
+| `write_attendees_csv`, `write_errors_csv` | `features/ingest/pdf_extract.py` | Output policy — these carry their OWN `io.StringIO` + `csv.DictWriter` (`pdf_to_scouts.py:467`) and do **not** call `scout_schedule_cli.atomic_write_text`, so they move verbatim with no dependency on Task 20 |
+| `main`, `parse_args` | `interfaces/cli/pdf.py` | Interface |
+
+- [ ] **Step 2: Write the failing test**
 
 ```python
 # tests/compat/test_legacy_entrypoints.py
-"""The console script must be argv-identical to the flat script it replaces.
+"""The console script must be argv-identical to the flat script it replaces, and must work
+from an installed wheel with no repository present.
 
-Executed as a SUBPROCESS: calling main() in-process skips the generated wrapper, the
-sys.argv[0] the parser sees, and the exit-code path -- which is most of what could differ.
+Executed as SUBPROCESSES: calling main() in-process skips the generated wrapper, the
+sys.argv[0] the parser sees, and the exit-code path -- most of what could actually differ.
 """
 
 from __future__ import annotations
@@ -3161,38 +3558,58 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _normalize_usage(text: str) -> str:
-    """Strip the program name; everything else must match."""
     return re.sub(r"(usage:\s*)\S+", r"\1PROG", text).strip()
 
 
-@pytest.mark.parametrize("flag", ["--help"])
-def test_pdf_console_script_usage_matches_flat_script(flag: str, tmp_path: Path) -> None:
-    legacy = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "pdf_to_scouts.py"), flag],
-        cwd=tmp_path, capture_output=True, text=True,
-    )
-    package = subprocess.run(
-        ["troop349-pdf", flag],
-        cwd=tmp_path, capture_output=True, text=True,
-    )
+@pytest.fixture(scope="module")
+def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A real venv with the wheel installed. Returns the scripts directory."""
+    root = tmp_path_factory.mktemp("install")
+    dist = root / "dist"
+    subprocess.run(["uv", "build", "--wheel", "--out-dir", str(dist)],
+                   cwd=REPO_ROOT, check=True, capture_output=True)
+    wheel = next(dist.glob("*.whl"))
+    venv = root / "venv"
+    subprocess.run(["uv", "venv", str(venv)], check=True, capture_output=True)
+    python = venv / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+    subprocess.run(["uv", "pip", "install", "--python", str(python), f"{wheel}[pdf]"],
+                   check=True, capture_output=True)
+    return python.parent
+
+
+def test_pdf_console_script_usage_matches_flat_script(installed: Path, tmp_path: Path) -> None:
+    legacy = subprocess.run([sys.executable, str(REPO_ROOT / "pdf_to_scouts.py"), "--help"],
+                            cwd=tmp_path, capture_output=True, text=True)
+    package = subprocess.run([str(installed / "troop349-pdf"), "--help"],
+                             cwd=tmp_path, capture_output=True, text=True)
     assert package.returncode == legacy.returncode
     assert _normalize_usage(package.stdout) == _normalize_usage(legacy.stdout)
     assert _normalize_usage(package.stderr) == _normalize_usage(legacy.stderr)
 
 
-def test_pdf_console_script_runs_outside_the_repository(tmp_path: Path) -> None:
-    """No PDFs supplied -> the documented 'no PDFs matched' path, exit code preserved."""
+def test_pdf_console_script_runs_with_no_repository_present(installed: Path, tmp_path: Path) -> None:
+    """cwd is outside the repo and the wheel is the only source of scoutmb."""
     result = subprocess.run(
-        ["troop349-pdf", str(tmp_path / "absent.pdf"), "--output", str(tmp_path / "out.csv")],
+        [str(installed / "troop349-pdf"), str(tmp_path / "absent.pdf"),
+         "--output", str(tmp_path / "out.csv")],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert "No PDF files matched the supplied inputs." in result.stderr
     assert result.returncode != 0
+
+
+def test_package_never_imports_the_flat_pdf_module() -> None:
+    offenders = subprocess.run(
+        ["rg", "-n", r"\bimport pdf_to_scouts\b|\bfrom pdf_to_scouts\b", "src/scoutmb"],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    )
+    assert offenders.stdout == "", offenders.stdout
 ```
 
-- [ ] **Step 2: Run — expect FAIL** (`troop349-pdf: command not found`)
+- [ ] **Step 3: Run — expect FAIL**
 
-- [ ] **Step 3: Write the composition root**
+- [ ] **Step 4: Move the symbols** per the Step-1 table, keeping every body verbatim. Then write
+  the composition root:
 
 ```python
 # src/scoutmb/interfaces/cli/composition.py
@@ -3208,65 +3625,56 @@ from scoutmb.adapters.files.tabular import TabularAttendeeSource
 from scoutmb.features.ingest.service import IngestService
 
 
-def build_ingest_service() -> IngestService:
-    return IngestService(sources=(TabularAttendeeSource(),))
+def build_ingest_service(*, sheet_name: str = "Scouts Only", include_adults: bool = False) -> IngestService:
+    return IngestService(
+        sources=(TabularAttendeeSource(sheet_name=sheet_name),), include_adults=include_adults
+    )
 ```
 
-> This requires a small `TabularAttendeeSource` class in the tabular adapter that satisfies the
-> `AttendeeSource` protocol by delegating to `load_attendees`. Add it there:
-> ```python
-> class TabularAttendeeSource:
->     def __init__(self, *, sheet_name: str = "Scouts Only", include_adults: bool = False) -> None:
->         self.sheet_name, self.include_adults = sheet_name, include_adults
->
->     def supports(self, path: Path) -> bool:
->         return path.suffix.lower() in {".xlsx", ".csv", ".json", ".txt", ""}
->
->     def load(self, path: Path) -> list[ScoutInput]:
->         return load_attendees(path, sheet_name=self.sheet_name, include_adults=self.include_adults)
-> ```
-
-- [ ] **Step 4: Write the CLI entry as a thin delegate**
+- [ ] **Step 5: Invert `pdf_to_scouts.py`**
 
 ```python
-# src/scoutmb/interfaces/cli/pdf.py
-"""Stage-1 entry point. Argument-for-argument identical to pdf_to_scouts.py.
+"""Compatibility shim. The implementation lives in scoutmb.interfaces.cli.pdf.
 
-Delegates to the legacy main() for now: the PDF pipeline's own decomposition is not part of
-Slice 2a, and duplicating its argparse here would create two definitions of a pinned CLI
-contract (CLI-PDF-* cases) that could drift.
+Kept so existing invocations and the Slice 1b characterization runners keep working; retired
+in Slice 2b together with its runners.
 """
 
 from __future__ import annotations
 
-import sys
+from scoutmb.adapters.pdf.pages import (  # noqa: F401 - legacy public surface
+    decode_embedded_qr,
+    decode_rendered_qr,
+    extract_page_identity,
+    normalize_obvious_case,
+)
+from scoutmb.features.ingest.pdf_extract import (  # noqa: F401
+    expand_pdf_inputs,
+    extract_pdf,
+    write_attendees_csv,
+    write_errors_csv,
+)
+from scoutmb.interfaces.cli.pdf import main, parse_args  # noqa: F401
 
-
-def main(argv: list[str] | None = None) -> int:
-    import pdf_to_scouts
-
-    return pdf_to_scouts.main(argv if argv is not None else sys.argv[1:])
+if __name__ == "__main__":
+    raise SystemExit(main())
 ```
 
-> If `pdf_to_scouts.main` does not currently accept an `argv` argument, add that parameter to
-> it in this task with a default of `None` preserving `sys.argv[1:]` — a signature widening,
-> not a behavior change, and `CLI-PDF-*` cases confirm it.
-
-- [ ] **Step 5: Install and run**
+- [ ] **Step 6: Run and commit**
 
 ```bash
 uv sync --locked --all-extras
-uv run pytest tests/compat tests/architecture -q
-```
+uv run pytest tests/compat tests/characterization/test_pdf_matrix.py tests/architecture -q
+uv run pytest -q
+git add src/scoutmb pdf_to_scouts.py tests/compat pyproject.toml
+git commit -m "refactor: move the PDF pipeline into the package; pdf_to_scouts becomes a shim
 
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/scoutmb/interfaces tests/compat pdf_to_scouts.py src/scoutmb/adapters/files/tabular.py
-git commit -m "feat: add troop349-pdf console script with argv parity, wired at a composition root"
+The dependency had to invert: the wheel packages only src/scoutmb, so a package module
+importing the root-level flat script cannot resolve outside a git checkout."
 ```
 
 ---
+
 
 ### Task 19: Golden V1 — the operational projection
 
@@ -3283,6 +3691,7 @@ reporting symbol moves. This is the drift detector for Tasks 20–22.
 - [ ] Golden records exact cell values, keyed by `output_id` — never by display name
 - [ ] Full text of every rendered email body and subject
 - [ ] UUIDs and timestamps normalized deterministically so the golden is stable
+- [ ] Timestamps replaced with fixed sentinels so the golden is stable across runs
 - [ ] Regeneration is an explicit command that prints a diff
 
 **Verify:** `uv run pytest tests/goldens -q` → PASS
@@ -3326,6 +3735,42 @@ def _class(scout: str, attendee: str) -> ClassRecord:
         start_time_24h="09:00", location="Pavilion", has_requirements=True,
         class_completed=False, raw_class_name="MoTuWeTh - Chess",
     )
+
+
+def sentinel_results() -> list[ScoutResult]:
+    """The golden fixture with a DISTINCT sentinel in every forbidden position.
+
+    The privacy assertions are only meaningful if the values they forbid are actually present
+    upstream: asserting that a string the fixture never contained is absent from the output is
+    a test that cannot fail. Each sentinel occupies the field an adapter would leak it through.
+    """
+    upstream = "zzsentinel-upstream-id-should-never-leak"
+    qr = "zzsentinel-qr-bearer-token-should-never-leak"
+    session = "zzsentinel-session-cookie-should-never-leak"
+    payload = "zzsentinel-raw-payload-fragment-should-never-leak"
+    abs_path = "/zzsentinel/absolute/path/should/never/leak"
+
+    name = "Sentinel Subject"
+    return [
+        ScoutResult(
+            name=name,
+            qr_url=f"https://scoutingevent.com/mobile/checkin?t={qr}",
+            attendee_id=upstream,
+            classes=(_class(name, upstream),),
+            requirements=(
+                RequirementRecord(
+                    scout_name=name, attendee_id=upstream, class_number="26MB1",
+                    class_p4_id="2000001", merit_badge_name="Chess", requirement_id=payload,
+                    requirement_type_id="1", requirement_number="1",
+                    description=f"See {abs_path} and cookie {session}.",
+                    completed_requirement=False, completed_class=False,
+                    requirement_on_event=True, present_days="MoTuWeTh",
+                ),
+            ),
+            errors=(f"failed reading {abs_path}",),
+        ),
+        *golden_results(),
+    ]
 
 
 def golden_results() -> list[ScoutResult]:
@@ -3397,6 +3842,13 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 _UUID = re.compile(r"[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}")
 
+# write_outputs reads the wall clock for both timestamps, so they change every run. They are
+# replaced with fixed sentinels rather than dropped: their PRESENCE and KEY are part of
+# ART-SCHEMA-006's pinned top-level key set.
+_FIXED_LOCAL = "GENERATED_AT_LOCAL"
+_FIXED_ISO = "GENERATED_AT_ISO"
+_TIMESTAMP_KEYS = {"generated_at_local": _FIXED_LOCAL, "generated_at_iso": _FIXED_ISO}
+
 
 def _normalize(value: object, uuid_map: dict[str, str]) -> object:
     """Replace run-scoped UUIDs with stable ordinals so the golden is comparable.
@@ -3410,13 +3862,24 @@ def _normalize(value: object, uuid_map: dict[str, str]) -> object:
             return uuid_map.setdefault(raw.replace("-", ""), f"OUTPUT_ID_{len(uuid_map):02d}")
         return _UUID.sub(swap, value)
     if isinstance(value, dict):
-        return {key: _normalize(item, uuid_map) for key, item in value.items()}
+        return {
+            key: _TIMESTAMP_KEYS[key] if key in _TIMESTAMP_KEYS else _normalize(item, uuid_map)
+            for key, item in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [_normalize(item, uuid_map) for item in value]
     return value
 
 
 def build(kind: str) -> dict[str, object]:
+    """Render the fixture through the CURRENT implementation and normalize.
+
+    `kind` is metadata only -- it records which projection the current code produces, it does
+    not select one. That is deliberate: after Task 23 the implementation emits the shareable
+    projection, and build("v1") must then report the shareable shape so the V1 golden's
+    comparison FAILS loudly rather than silently regenerating. Task 23 re-points the V1 test
+    at a stored-vs-stored comparison for exactly this reason.
+    """
     import scout_schedule_cli as legacy
 
     from tests.goldens.fixture import golden_results
@@ -3486,14 +3949,30 @@ from pathlib import Path
 GOLDENS = Path(__file__).parent
 
 
-def test_v1_matches_current_implementation() -> None:
+def test_current_implementation_matches_the_active_golden() -> None:
+    """Compare the live render against whichever projection is currently shipped.
+
+    Until Task 23 that is V1; after it, V2. Pinning this test to `v1_operational.json` forever
+    would make it regenerate-and-compare against the wrong file the moment the tiering lands,
+    turning the whole suite red for a reason that has nothing to do with a regression.
+    """
     from tools.gen_golden import build
 
-    stored = json.loads((GOLDENS / "v1_operational.json").read_text(encoding="utf-8"))
-    assert build("v1") == stored, (
-        "The operational projection drifted. If this is an intended change, regenerate with "
-        "`uv run python tools/gen_golden.py v1` and review the diff."
+    active = "v2_shareable.json" if (GOLDENS / "v2_shareable.json").exists() else "v1_operational.json"
+    stored = json.loads((GOLDENS / active).read_text(encoding="utf-8"))
+    live = build(stored["kind"])
+    assert live == stored, (
+        f"{active} drifted. If intended, regenerate with "
+        f"`uv run python tools/gen_golden.py {stored['kind']}` and review the diff."
     )
+
+
+def test_v1_is_immutable_once_written() -> None:
+    """V1 records the pre-move operational shape. It is never regenerated after Task 19 --
+    the V1->V2 diff assertion depends on it being a fixed reference point."""
+    stored = json.loads((GOLDENS / "v1_operational.json").read_text(encoding="utf-8"))
+    assert stored["kind"] == "v1"
+    assert stored["report_data"]["classes"], "V1 was generated from an empty fixture"
 
 
 def test_same_named_attendees_stay_separate_in_the_golden() -> None:
@@ -3834,19 +4313,38 @@ projection — the tiering is Task 23.
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
-
-import pytest
 
 from tests.goldens.fixture import golden_results
 
 
-def _digest_tree(root: Path) -> dict[str, str]:
-    return {
-        str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
+_UUID32 = re.compile(r"[0-9a-f]{32}")
+_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^\"<]*")
+
+
+def _mask_timestamps(text: str) -> str:
+    return _TIMESTAMP.sub("TIMESTAMP", text)
+
+
+def _normalized_tree(root: Path) -> dict[str, str]:
+    """Relative paths and content digests, with per-run UUIDs mapped to stable ordinals.
+
+    Filenames embed the run UUID, so a raw digest map can never be equal between two runs;
+    normalizing makes the comparison meaningful instead of vacuous.
+    """
+    mapping: dict[str, str] = {}
+
+    def normalize(value: str) -> str:
+        return _UUID32.sub(lambda m: mapping.setdefault(m.group(0), f"UUID{len(mapping):02d}"), value)
+
+    tree: dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        body = _mask_timestamps(normalize(path.read_text(encoding="utf-8-sig", errors="replace")))
+        tree[normalize(str(path.relative_to(root)))] = hashlib.sha256(body.encode()).hexdigest()
+    return tree
 
 
 def test_write_outputs_is_byte_identical_through_the_service(tmp_path: Path) -> None:
@@ -3866,19 +4364,30 @@ def test_write_outputs_is_byte_identical_through_the_service(tmp_path: Path) -> 
         generated_at_local=fixed_local, generated_at_iso=fixed_iso,
     )
 
-    # Filenames embed run UUIDs, so compare the SET of relative shapes plus content of the
-    # deterministic files. UUID-bearing names are compared after normalization.
-    assert set(_digest_tree(direct)) - {"report.html"} == set(_digest_tree(via)) - {"report.html"} or True
-    assert (direct / "classes.csv").read_bytes() == (via / "classes.csv").read_bytes()
-    assert (direct / "requirements.csv").read_bytes() == (via / "requirements.csv").read_bytes()
-    assert (direct / "errors.csv").read_bytes() == (via / "errors.csv").read_bytes()
+    # Deterministic files: byte-for-byte.
+    for name in ("classes.csv", "requirements.csv", "errors.csv", "scouts.json"):
+        assert (direct / name).read_bytes() == (via / name).read_bytes(), name
+
+    # UUID-bearing paths: compare the normalized tree shape, and the CONTENT of each email
+    # after mapping its per-run UUID to a positional placeholder. `or True` on a set
+    # comparison, which an earlier draft used here, asserts nothing at all.
+    assert _normalized_tree(direct) == _normalized_tree(via)
+
+    # report.html embeds the two wall-clock timestamps, so compare it with those masked.
+    assert _mask_timestamps((direct / "report.html").read_text(encoding="utf-8")) == _mask_timestamps(
+        (via / "report.html").read_text(encoding="utf-8")
+    )
 ```
 
 > `write_outputs` currently reads the wall clock for `generated_at_*`. The service takes them
 > as parameters so the comparison is deterministic; `write_outputs` keeps computing them and
 > passing them down, which preserves its own signature.
 
-- [ ] **Step 2: Define the sink port**
+- [ ] **Step 2: Define the sink port AND its one concrete implementation**
+
+A port with no implementation is not a seam. The feature is forbidden from importing the
+atomic adapter directly, so the adapter supplies the implementation and a composition root
+injects it.
 
 ```python
 # src/scoutmb/ports/artifact_sink.py
@@ -3889,13 +4398,68 @@ from typing import Any, Protocol
 
 
 class ArtifactSink(Protocol):
-    def publish_text(self, path: Path, content: str, *, encoding: str) -> None: ...
+    """Where published artifacts go. One implementation today (the filesystem); the port
+    exists because the reporting feature must not import the atomic adapter."""
+
+    def publish_text(self, path: Path, content: str, *, encoding: str = "utf-8-sig") -> None: ...
     def publish_rows(self, path: Path, rows: list[Any], fieldnames: list[str]) -> None: ...
 ```
 
-- [ ] **Step 3: Write the service**, moving the body of `write_outputs` into
-  `ReportingService.publish` with `generated_at_*` and `run_identity` as parameters, and
-  leaving `write_outputs` as a Form-2 shim that computes the timestamps and delegates.
+```python
+# src/scoutmb/adapters/files/atomic.py -- append
+class AtomicFileSink:
+    """ArtifactSink over atomic_write_text / write_csv."""
+
+    def publish_text(self, path: Path, content: str, *, encoding: str = "utf-8-sig") -> None:
+        atomic_write_text(path, content, encoding=encoding)
+
+    def publish_rows(self, path: Path, rows: list[Any], fieldnames: list[str]) -> None:
+        write_csv(path, rows, fieldnames)
+```
+
+- [ ] **Step 3: Write the service with the sink injected**
+
+Move the body of `write_outputs` into `ReportingService.publish`, taking the sink, the two
+timestamps, and the run identity as parameters. Every write goes through `self.sink`, never
+through a direct `atomic_write_text` call — that is what the architecture test checks.
+
+```python
+# src/scoutmb/features/reporting/service.py
+@dataclass(frozen=True, slots=True)
+class ReportingService:
+    sink: ArtifactSink
+    renderer: ReportRenderer  # Protocol satisfied by adapters/html/report.render_report
+
+    def publish(
+        self,
+        output_dir: Path,
+        results: Sequence[ScoutResult],
+        *,
+        generated_at_local: str,
+        generated_at_iso: str,
+        run_identity: RunIdentity,
+        generate_html: bool = True,
+        html_name: str = "report.html",
+        generate_email_report: bool = False,
+    ) -> None:
+        ...
+```
+
+Then add the composition root that wires it:
+
+```python
+# src/scoutmb/interfaces/cli/composition.py -- append
+from scoutmb.adapters.files.atomic import AtomicFileSink
+from scoutmb.adapters.html.report import render_report
+from scoutmb.features.reporting.service import ReportingService
+
+
+def build_reporting_service() -> ReportingService:
+    return ReportingService(sink=AtomicFileSink(), renderer=render_report)
+```
+
+`write_outputs` becomes a Form-2 shim: compute the two timestamps, build the service through
+the composition root, delegate. The parity test constructs the service the same way.
 
 - [ ] **Step 4: Run — Golden V1 unchanged**
 
@@ -3982,13 +4546,13 @@ def _embedded(report_html: str) -> dict:
 
 @pytest.fixture()
 def rendered(tmp_path: Path) -> dict:
+    """Render the SENTINEL fixture, not the clean golden fixture."""
     import scout_schedule_cli as legacy
 
-    from tests.goldens.fixture import golden_results
+    from tests.goldens.fixture import sentinel_results
 
-    results = golden_results()
-    legacy.write_outputs(tmp_path, results, generate_html=True, generate_email_report=True,
-                         run_identity=legacy.RunIdentity())
+    legacy.write_outputs(tmp_path, sentinel_results(), generate_html=True,
+                         generate_email_report=True, run_identity=legacy.RunIdentity())
     return _embedded((tmp_path / "report.html").read_text(encoding="utf-8"))
 
 
@@ -4005,6 +4569,9 @@ def test_requirement_rows_have_exactly_the_shareable_field_set(rendered: dict) -
 
 
 def test_no_sentinel_reaches_the_shareable_report(rendered: dict) -> None:
+    """Only meaningful because sentinel_results() PLACES each sentinel in the corresponding
+    forbidden position. Asserting the absence of a value the fixture never contained is a
+    test that cannot fail."""
     text = json.dumps(rendered)
     for name, sentinel in SENTINELS.items():
         assert sentinel not in text, f"{name} leaked into report.html"
@@ -4016,18 +4583,31 @@ def test_unresolved_attempt_carries_null_output_id(rendered: dict) -> None:
     assert unreached[0]["output_id"] is None
 
 
-def test_two_unresolved_attempts_do_not_merge() -> None:
-    """Null identity must not become a grouping key."""
+def test_requirement_rows_have_exactly_the_shareable_identity_fields(rendered: dict) -> None:
+    """Inference adds display-only keys, so assert the identity fields exactly and require the
+    rest to be a superset of the record shape -- not a bare 'attendee_id not in row'."""
+    for row in rendered["requirements"]:
+        assert "attendee_id" not in row
+        assert "output_id" in row
+        assert set(_EXPECTED_REQ) <= set(row), sorted(set(_EXPECTED_REQ) - set(row))
+
+
+def test_two_unresolved_attempts_do_not_merge(tmp_path: Path) -> None:
+    """Null identity must not become a grouping key: two unreached attendees stay two rows."""
+    import scout_schedule_cli as legacy
+
     from scoutmb.core.models import ScoutResult
-    from scoutmb.features.reporting.service import ReportingService
 
     results = [
         ScoutResult(name="A Unreached", qr_url="https://x.invalid/a", attendee_id="", errors=("t",)),
         ScoutResult(name="B Unreached", qr_url="https://x.invalid/b", attendee_id="", errors=("t",)),
     ]
-    rows = ReportingService().shareable_scout_rows(results, run_identity=None)
+    legacy.write_outputs(tmp_path, results, generate_html=True, run_identity=legacy.RunIdentity())
+    rows = _embedded((tmp_path / "report.html").read_text(encoding="utf-8"))["scouts"]
+
     assert len(rows) == 2
     assert all(row["output_id"] is None for row in rows)
+    assert {row["name"] for row in rows} == {"A Unreached", "B Unreached"}
 ```
 
 - [ ] **Step 2: Run — expect FAIL**
@@ -4162,16 +4742,56 @@ sys.path.insert(0, str(REPO_ROOT))
 DIGEST_PATH = REPO_ROOT / "tests" / "baselines" / "preserve_cases.json"
 
 
+# tests.matrix.cases.ALL_CASES is CaseMetadata ONLY -- it carries no expectations, so hashing
+# it would digest None for all 478 rows and never detect anything. The per-domain tuples hold
+# the real data, and the expectation FIELD NAME differs by domain (input uses expected_legacy,
+# requirement uses expected_by_context), so the provider is explicit rather than duck-typed.
+_EXPECTATION_FIELDS = ("expected_by_context", "expected_legacy", "expected")
+
+
+def _case_tuples() -> list[tuple[str, tuple[object, ...]]]:
+    from tests.matrix.cases.artifact_cases import ARTIFACT_CASES
+    from tests.matrix.cases.input_cases import INPUT_CASES
+    from tests.matrix.cases.pdf_cases import PDF_CASES
+    from tests.matrix.cases.requirement_cases import REQUIREMENT_CASES
+
+    return [
+        ("input", INPUT_CASES),
+        ("pdf", PDF_CASES),
+        ("requirement", REQUIREMENT_CASES),
+        ("artifact", ARTIFACT_CASES),
+    ]
+
+
+def _canonical(case: object) -> str:
+    """Stable text for whichever expectation field this domain uses.
+
+    repr() of a frozen dataclass is deterministic within a version; dict ordering inside
+    expected_by_context is insertion order, which is stable in the source. Sorting the field
+    names keeps the digest independent of which fields a domain happens to define.
+    """
+    parts = [
+        f"{field}={getattr(case, field)!r}"
+        for field in sorted(_EXPECTATION_FIELDS)
+        if hasattr(case, field)
+    ]
+    if not parts:
+        raise RuntimeError(f"no expectation field on {type(case).__name__}; update the provider")
+    return "|".join(parts)
+
+
 def compute() -> dict[str, str]:
-    from tests.matrix.cases import ALL_CASES
     from tests.matrix.model import Classification
 
     digests: dict[str, str] = {}
-    for case in ALL_CASES:
-        if case.classification is not Classification.PRESERVE:
-            continue
-        payload = repr(getattr(case, "expected_by_context", None))
-        digests[case.case_id] = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    for domain, cases in _case_tuples():
+        for case in cases:
+            if case.meta.classification is not Classification.PRESERVE:
+                continue
+            payload = f"{domain}:{_canonical(case)}"
+            digests[case.meta.case_id] = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    if not digests:
+        raise RuntimeError("digest covered zero cases -- the provider is broken, not the catalog")
     return digests
 
 
@@ -4206,9 +4826,12 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-> `ALL_CASES` holds `CaseMetadata`, which has no `expected_by_context`. Read
-> `tests/matrix/cases/__init__.py` first: if it exports metadata only, iterate the per-domain
-> case tuples instead so the digest covers the actual expected data.
+> Verified: `tests/matrix/cases/__init__.py:29-44` builds `ALL_CASES` from per-domain
+> `ALL_*_METADATA` tuples, so it is `CaseMetadata` only and carries no expectations. The
+> per-domain case tuples (`INPUT_CASES`, `PDF_CASES`, `REQUIREMENT_CASES`, `ARTIFACT_CASES`)
+> hold the real data, and the field name differs by domain — `expected_legacy` on
+> `InputCase` (`input_cases.py:58`), `expected_by_context` on `RequirementCase`. Confirm the
+> artifact and PDF field names the same way before running the tool.
 
 - [ ] **Step 2: Wire the digest into the suite and CI**
 
@@ -4243,16 +4866,84 @@ def test_preserve_case_expectations_are_unchanged() -> None:
 
 - [ ] **Step 4: Add package coverage areas**
 
+`CoverageAreaSpec.files` entries are **exact coverage-JSON keys**, not globs:
+`tools/check_phase_a_coverage.py:79` does `files.get(file_name)` and `:116` fails when a listed
+name is absent. A glob would be reported as a nonexistent file and hard-fail the gate.
+
+So enumerate the modules explicitly, and add a test that keeps the list honest:
+
 ```python
 # tests/matrix/boundaries.py -- extend COVERAGE_AREAS
-    CoverageAreaSpec(area_id="pkg-core", files=("src/scoutmb/core/**/*.py",)),
-    CoverageAreaSpec(area_id="pkg-adapters", files=("src/scoutmb/adapters/**/*.py",)),
-    CoverageAreaSpec(area_id="pkg-features", files=("src/scoutmb/features/**/*.py",)),
-    CoverageAreaSpec(area_id="pkg-ports", files=("src/scoutmb/ports/**/*.py",)),
+    CoverageAreaSpec(
+        area_id="pkg-core",
+        files=(
+            "src/scoutmb/core/models.py",
+            "src/scoutmb/core/identity.py",
+            "src/scoutmb/core/output_schemas.py",
+            "src/scoutmb/core/inference/numbering.py",
+            "src/scoutmb/core/inference/tree.py",
+            "src/scoutmb/core/inference/status.py",
+            "src/scoutmb/core/inference/missing.py",
+        ),
+    ),
+    CoverageAreaSpec(
+        area_id="pkg-ports",
+        files=(
+            "src/scoutmb/ports/clock.py",
+            "src/scoutmb/ports/ids.py",
+            "src/scoutmb/ports/attendee_source.py",
+            "src/scoutmb/ports/artifact_sink.py",
+        ),
+    ),
+    CoverageAreaSpec(
+        area_id="pkg-adapters",
+        files=(
+            "src/scoutmb/adapters/files/atomic.py",
+            "src/scoutmb/adapters/files/tabular.py",
+            "src/scoutmb/adapters/pdf/extract.py",
+            "src/scoutmb/adapters/pdf/pages.py",
+            "src/scoutmb/adapters/html/report.py",
+        ),
+    ),
+    CoverageAreaSpec(
+        area_id="pkg-features",
+        files=(
+            "src/scoutmb/features/ingest/service.py",
+            "src/scoutmb/features/ingest/pdf_extract.py",
+            "src/scoutmb/features/reporting/service.py",
+        ),
+    ),
+```
+
+```python
+# tests/matrix/test_coverage_areas.py
+"""An explicit file list silently stops covering new modules. This is the tripwire."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from tests.matrix.boundaries import COVERAGE_AREAS
+
+SRC = Path(__file__).resolve().parents[2] / "src"
+_PREFIXES = ("core", "ports", "adapters", "features")
+
+
+def test_every_package_module_belongs_to_a_coverage_area() -> None:
+    declared = {name for area in COVERAGE_AREAS for name in area.files}
+    on_disk = {
+        str(path.relative_to(SRC.parent))
+        for prefix in _PREFIXES
+        for path in (SRC / "scoutmb" / prefix).rglob("*.py")
+        if path.name != "__init__.py"
+    }
+    assert on_disk - declared == set(), sorted(on_disk - declared)
+    assert declared - on_disk == set(), sorted(declared - on_disk)
 ```
 
 Then set floors in `phase_a.json`: `pkg-core` and `pkg-ports` at 95.0 branch, `pkg-adapters`
-and `pkg-features` at 90.0 branch (D10).
+and `pkg-features` at 90.0 branch (D10). Empty `__init__.py` files are excluded from the area
+lists — they have no statements, and coverage.py omits them from the report entirely.
 
 - [ ] **Step 5: Replace shimmed legacy areas with the shape check**
 
@@ -4396,6 +5087,16 @@ of the flat modules with `tests/harnesses/legacy.py`.
   `select_actionable` (T13) is used by the legacy `build_missing_requirements`.
   `requirement_from_mapping`/`requirement_to_row` (T14) are the names in T20's shim template
   and T23's `_project`. `render_report`/`load_template` (T21) are used by T22.
-- **Known sharp edge.** T15's parity test calls `case.write_source(tmp_path)` and
-  `case.sheet_name`; the real accessor names must be read from
-  `tests/matrix/cases/input_cases.py` before writing that file. Flagged in the step itself.
+- **Second-pass corrections (post plan-review).** Every step that calls an existing API now
+  cites the file and line where it is defined, because the first draft invented eight of them.
+  Specifically fixed: `python -I` ignores `PYTHONPATH` (Tasks 3 and 16 would have imported the
+  repo's editable install and passed while testing nothing); the real `InputCase` shape is
+  `(meta, input: InputSpec, expected_legacy)` with `spec.sheet_arg`, materialized by
+  `tests/factories/inputs.py`, not the invented `case.write_source`; `AxisSpec` needs
+  `min_focused_cases`/`interactions`/`boundaries`; `ALL_CASES` is metadata-only so the digest
+  iterates the per-domain tuples; `CoverageAreaSpec.files` are exact coverage-JSON keys, not
+  globs; `_text` must not strip and flags must use `truthy()`, not `bool()`; the package
+  needs `group_missing_requirements` for the parity runner to have an entry point; the goldens
+  must mask wall-clock timestamps; `pdf_to_scouts` cannot be imported from inside the wheel.
+- **Dependency graph.** The sidecar declares a real DAG, not a linear chain: Tasks 2, 3, 4, 5,
+  8, 9 and 10 all unblock immediately after Task 1. Verified acyclic with no forward edges.
