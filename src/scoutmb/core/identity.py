@@ -36,8 +36,9 @@ class RunIdentity:
     """Assigns a UUIDv4 per attendee for one run. Stable within the run instance.
 
     Exactly one instance exists per run and is threaded to every collaborator that needs an
-    output id. Constructing a second one inside a writer produces UUIDs that disagree with the
-    rest of the run, which is what the legacy code did in write_email_reports.
+    output id. Constructing a second instance mid-run produces UUIDs that disagree with the
+    rest of the run, so callers must accept an existing RunIdentity rather than default-
+    constructing their own.
     """
 
     _by_attendee: dict[str, str] = field(default_factory=dict)
