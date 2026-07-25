@@ -31,7 +31,14 @@ modules, and ship a release root that starts without the repository.
 - `scout_schedule_cli.py` still owns argparse, Playwright control, acquisition, and
   `async_main`. It is not yet a delegation shim, so `SHIMMED_MODULES` in the architecture test
   is still empty.
-- `ui/server.py` and `run_app.py` are untouched.
+- `ui/server.py` and `run_app.py` are untouched. **Known gap to close here:** 2a Task 7 threaded
+  one `RunIdentity` through `write_outputs` → `write_email_reports` → `async_main` so an
+  attendee gets the same `output_id` in `raw/` and `emails/` filenames within one run — but
+  `ui/server.py`'s `POST /api/runs/{run_id}/generate-emails` endpoint (`generate_emails`,
+  ~line 365) still calls `write_email_reports(run_dir, scouts)` with no `run_identity`, so it
+  still mints an unrelated fresh identity map. Whichever task threads `ui/server.py`'s routes
+  through the new services must pass that run's `RunIdentity` through to this endpoint too, or
+  the split-map defect 2a fixed reappears through this second call path.
 - `tests/harnesses/legacy.py` still loads the legacy UI.
 
 ## Tasks (preliminary)
