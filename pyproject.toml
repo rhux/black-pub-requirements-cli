@@ -20,7 +20,7 @@ acquisition = ["playwright>=1.57,<2"]
 pdf = ["PyMuPDF>=1.24,<2", "opencv-python-headless>=4.10,<5"]
 
 [project.scripts]
-troop349 = "scoutmb.cli.app:main"
+troop349-pdf = "scoutmb.interfaces.cli.pdf:main"
 
 [dependency-groups]
 dev = [
@@ -33,10 +33,14 @@ dev = [
     "ruff>=0.8,<1",
     "mypy>=1.13,<2",
     "pyyaml>=6,<7",
+    "uv>=0.11.32",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/scoutmb"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/scoutmb/py.typed" = "scoutmb/py.typed"
 
 [tool.hatch.build]
 exclude = ["bootstrap", "raw_data", "docs", "tests"]
@@ -119,6 +123,6 @@ include = [
     "bootstrap/paths.py",
     "bootstrap/marker.py",
     "bootstrap/source_sync.py",
-    "src/scoutmb/*.py",
+    "src/scoutmb/**/*.py",
     "tools/*.py",
 ]
