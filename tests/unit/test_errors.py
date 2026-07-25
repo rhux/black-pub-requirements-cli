@@ -5,7 +5,9 @@ from scoutmb.errors import CapabilityUnavailable, ScoutmbError
 
 
 def test_capability_error_names_capability_distributions_and_remedy() -> None:
-    exc = CapabilityUnavailable(capability="pdf", distributions=("PyMuPDF", "opencv-python-headless"), extra="pdf")
+    exc = CapabilityUnavailable(
+        capability="pdf", distributions=("PyMuPDF", "opencv-python-headless"), extra="pdf"
+    )
     text = str(exc)
     assert "pdf" in text
     assert "PyMuPDF" in text

@@ -41,7 +41,9 @@ def wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     out = tmp_path_factory.mktemp("dist")
     subprocess.run(
         ["uv", "build", "--wheel", "--out-dir", str(out)],
-        cwd=REPO_ROOT, check=True, capture_output=True,
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
     )
     return next(out.glob("*.whl"))
 
@@ -53,11 +55,15 @@ def test_resources_readable_from_installed_wheel(wheel: Path, tmp_path: Path) ->
     python = venv / ("Scripts" if sys.platform == "win32" else "bin") / "python"
     subprocess.run(
         ["uv", "pip", "install", "--python", str(python), str(wheel)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     result = subprocess.run(
         [str(python), "-c", READ_PROBE],
-        cwd=tmp_path, check=True, capture_output=True, text=True,
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     assert result.stdout.strip() == PROBE
 
@@ -84,7 +90,10 @@ def test_resources_readable_from_copied_release_root(tmp_path: Path) -> None:
     code = f"import sys; sys.path.insert(0, {str(app_dir)!r});" + READ_PROBE
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-c", code],
-        cwd=tmp_path, check=True, capture_output=True, text=True,
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     assert result.stdout.strip() == PROBE, (
         "importlib.resources cannot read templates from a copied directory root; "
@@ -105,7 +114,9 @@ def test_copied_root_probe_cannot_be_satisfied_by_the_repo_install(tmp_path: Pat
     code = f"import sys; sys.path.insert(0, {str(empty)!r});" + READ_PROBE
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-c", code],
-        cwd=tmp_path, capture_output=True, text=True,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode != 0, "the copied-root probe is not isolated"
     assert "ModuleNotFoundError" in result.stderr, (
