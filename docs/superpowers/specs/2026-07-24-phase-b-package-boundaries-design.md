@@ -34,7 +34,7 @@ makes the local web app a factory, and ships clean distributions.
   byte-identical, which is what preserves `PRIV-EGRESS-006`, `PRIV-EGRESS-007`, and the CLI
   cases. Legacy printing is already almost entirely at the CLI edge: seven calls in
   `scout_schedule_cli` (six in `async_main`/`main`, one `pageerror` handler in
-  `process_scout`), twelve in `pdf_to_scouts` almost all in `main`, and none in `ui.server`.
+  `process_scout`), twelve in `pdf_to_scouts` all inside `main`, and none in `ui.server`.
 - **Changing the `Note.`-grafting or empty-number inference behaviors.** Resolved as
   keep-as-is by the parent spec's open-questions section.
 - **Everything the parent spec marks POSTPONED (vNext)**, including CSRF/CSP/auth,
@@ -54,7 +54,8 @@ src/scoutmb/
     inference/          numbering, tree, status, missing                         2a
     run_state.py        versioned run-state machine                              2b
   ports/
-    time.py             Clock, Sleeper, Jitter, IdFactory                        2a
+    clock.py            Clock, Sleeper, Jitter                                   2a
+    ids.py              IdFactory                                                2a
     storage.py                                                                   2a
     scoutevent.py  observability.py                                              2b
   features/
@@ -93,6 +94,77 @@ A module is too big when it has more than one reason to change, or when a subgro
 its own dependencies. Roughly 300–500 lines is where to start looking for that seam. If
 `output_schemas.py` later accumulates several schema versions, it splits by version
 (`output_schemas/v1.py`), never by type.
+
+`scoutmb/__init__.py` stays **empty**. No convenience re-exports: they add import cost on
+every entry path, create circular-import hazards between `core` and `features`, and make
+"where does this actually live" unanswerable from the import statement. Callers import from
+the owning module.
+
+The package ships `src/scoutmb/py.typed` (PEP 561) so its annotations are visible to
+consumers and to mypy when it is installed rather than imported from the source tree. The
+marker must be present in the built wheel, which the clean-environment install test checks.
+
+### Nondeterminism ports
+
+The parent spec requires nondeterminism injected **per collaborator, not as one bag**, and
+its illustrative layout puts all of it in `ports/time.py`. Phase B splits it, because
+`IdFactory` is not a time concern and a four-collaborator module contradicts the principle
+it exists to implement:
+
+```text
+ports/clock.py      Clock (UTC wall time), Sleeper (monotonic delay), Jitter (seeded RNG)
+ports/ids.py        IdFactory (UUIDv4)
+```
+
+`ports/clock.py` also avoids a module named `time` inside the package. Absolute imports
+make `import time` unambiguous, so this is a readability choice rather than a correctness
+one — but a reader scanning `ports/` should not have to think about it.
+
+### Optional dependencies
+
+Today every heavy dependency is imported at legacy module scope: `scout_schedule_cli`
+imports `openpyxl` and `playwright.async_api`, and `pdf_to_scouts` imports `cv2`, `fitz`,
+and `numpy`. The parent spec lists this as a structural defect, and the package layout
+depends on fixing it — `features/ingest` cannot select between a CSV adapter and a PDF
+adapter if importing the feature drags in OpenCV.
+
+Contract:
+
+- Importing `scoutmb`, anything under `core/`, `ports/`, or any `features/` module pulls in
+  **no** optional dependency. Only the adapter that needs one imports it, at call time or
+  behind a module-level guard inside that adapter.
+- A missing optional dependency produces a **typed capability error** carrying an
+  actionable message (which extra to install), never a bare `ImportError` traceback.
+- Enforced by a test that imports the core surface in a subprocess with the optional
+  distributions absent from the environment, and asserts on `sys.modules` afterward rather
+  than on the absence of an exception.
+
+### Error model
+
+`errors.py` defines a `ScoutmbError` hierarchy replacing the broad exception handling in
+adapter paths. Changing exception *types* is free; changing what a user sees is not.
+
+The catalog pins the error **envelope**, and it must survive unchanged: `errors.csv`'s
+header is `['scout_name', 'attendee_id', 'error']` (`ART-SCHEMA-004`), the web layer's
+failure body carries `error_message` (`UI-ROUTE-025`, `UI-ROUTE-027`), and in both the
+underlying message text is **passed through verbatim** rather than reformatted. So an
+exception type may change, gain structure, or move modules, but the string that reaches
+`ScoutResult.errors` and `error_message` is the same string it is today. Wrapping that adds
+a prefix, a class name, or a traceback fragment is a behavior change and needs its own
+`intentional-change` row.
+
+### Configuration
+
+Frozen config dataclasses replace `argparse.Namespace` threading (D6). Two behaviors are
+load-bearing and easy to lose:
+
+- **CLI defaults are pinned** by the `CLI-SCHED-*` and PDF-CLI cases. The dataclass defaults
+  and the argparse defaults must be the same values, defined once, so they cannot drift.
+- `ui.server` hand-builds a `Namespace` that **omits** `email_report`, and `async_main`
+  compensates with `getattr(args, "email_report", False)`. Replacing this with an explicit
+  dataclass default of `False` preserves behavior — but the `getattr` and the missing field
+  must be removed **together**. Deleting the defensive `getattr` while the web caller still
+  omits the field turns a working default into an `AttributeError`.
 
 ### The 2a / 2b seam
 
@@ -200,6 +272,20 @@ already types this shape, so the catalog needs no change to support it.
 satisfied only when **both** runners pass it. A domain cannot be declared moved on the
 strength of one green side.
 
+**Lane coverage.** The rule applies per lane, not only to the default lane. The eleven
+browser-lane and three authentic-lane cases get package runners on the same terms, and the
+authentic lane matters most for the 2a domains — it is the only place the package's ingest
+and PDF adapters meet real upstream shapes. Gate 2a runs the authentic lane with
+`--require-corpus`; a skip is not a pass.
+
+**Property tests.** The parent spec's testing strategy puts Hypothesis on parsers and state
+transitions, and Phase B is where both appear. Two are required rather than optional:
+round-tripping the DTO boundary (`to_row(from_mapping(x))` reproduces `x` for every
+generated payload shape, including the 26 requirement-number shapes), and totality of the
+run-state transition table in 2b (every state/event pair either has a defined transition or
+fails closed — no pair falls through). These complement the catalog; they do not substitute
+for any case in it.
+
 ### Compatibility shims
 
 While a flat module survives, it is a compatibility module in the parent spec's sense: it
@@ -252,9 +338,20 @@ gate is worse than no gate. Four invariants govern the migration.
 
 **Shimmed modules lose their coverage floor.** Once a legacy module is pure delegation, its
 branch percentage is passed trivially by a few lines of imports and proves nothing. Its
-coverage area is then replaced by a structural assertion that the module contains no
-business logic — imports, re-exports, and entry wiring only. Coverage measures the package;
+coverage area is then replaced by a structural assertion. Coverage measures the package;
 the shim gets a shape check.
+
+"Contains no business logic" is checked against the module's AST, and means every
+top-level statement is one of: an import; a module-level assignment binding an imported
+name or a literal; a class or function definition whose body contains no branching, no
+loop, no comprehension, and no `try` — only a call forwarding to an imported name, with
+argument adaptation and a return. Anything else — a conditional, an arithmetic expression,
+a string built from parts — is business logic and fails the check. This is deliberately
+strict: the point is that a shim cannot quietly re-acquire behavior that the package is
+supposed to own.
+
+`tests/harnesses/legacy.py` exists to drive the legacy modules and retires with them, in
+the same task that removes the last module it loads.
 
 **Catalog growth is explicit.** `tests/baselines/phase_a.json` carries a `case_ids` array
 of all 478 cases, so every case Slice 2 adds requires a reviewed baseline bump. This is
@@ -277,8 +374,40 @@ artifacts are shareable rather than by weakening either rule.
 | `scouts.json` | operational-private | `attendee_id`, `qr_url` |
 | `classes.csv`, `requirements.csv`, `errors.csv` | operational-private | `attendee_id` |
 | `raw/` | adapter-private | full upstream payloads |
+| `emails/missing_requirements.csv` | operational-private | `attendee_id` |
 | `report.html` | audience-shareable | neither `attendee_id` nor `qr_url` |
-| `emails/**` | audience-shareable | neither `attendee_id` nor `qr_url` |
+| `emails/<slug>.txt`, `emails/<slug>.html` | audience-shareable | neither `attendee_id` nor `qr_url` |
+
+The `emails/` directory holds two different kinds of file and they tier differently.
+`missing_requirements.csv` is a **mail-merge worksheet** — it carries `subject`,
+`body_text`, and `body_html` columns for the owner to send from, and it is not itself sent
+to anyone. The per-scout `.txt` and `.html` files are the bodies that actually reach a
+recipient.
+
+### Consistency with the frozen catalog
+
+This tiering was chosen so that it does not require editing a single `preserve` case:
+
+- `ART-SCHEMA-001` pins `scouts.json` as containing `qr_url` and `attendee_id`;
+  `ART-SCHEMA-002/003` pin the two record CSV headers as
+  `__dataclass_fields__` in declaration order; `ART-SCHEMA-004` pins
+  `errors.csv` as `['scout_name', 'attendee_id', 'error']`; `ART-SCHEMA-007` pins
+  `emails/missing_requirements.csv` as
+  `['scout_name', 'attendee_id', 'status', 'merit_badge_count',
+  'missing_requirement_count', 'subject', 'body_text', 'body_html']`. All five stay
+  operational-private and are untouched.
+- `ART-SCHEMA-006` pins only the **top-level key set** of the embedded report data
+  (`generated_at_local`, `generated_at_iso`, `run_id`, `scouts`, `classes`,
+  `requirements`, `errors`) and asserts nothing about the fields inside those collections.
+  No `ART-HTML-*` or `REQ-*` html-consumer case pins `attendee_id` either. The shareable
+  projection therefore changes only inner rows and breaks no pinned expectation.
+- The per-scout email bodies already contain no `attendee_id` and no `qr_url`, and their
+  filenames are display-slug plus per-run UUID. Declaring them audience-shareable is a
+  **policy declaration plus a new enforcing test**, not a code change.
+
+Net effect: the only production change the tiering requires is the `report.html`
+projection, where `attendee_id` currently reaches the embed four ways — `scouts[]`,
+`classes[]` and `requirements[]` via `asdict`, and the `errors[]` list built explicitly.
 
 `output_schemas.py` therefore exposes two projections of the same records. The operational
 projection is today's shape and preserves CSV field order, so the D16 goldens are
@@ -328,12 +457,19 @@ owner, not part of the move.
   package module and the existing missing-file check confirms each declared area file
   appears in the report; no legacy area regresses below its baseline unless it has been
   replaced by the no-business-logic assertion.
-- A clean-environment wheel install succeeds with `resources/templates/` present, and
-  `troop349-pdf` runs stage 1 from a directory outside the repository.
-- The shareable projection contains no `attendee_id` and no `qr_url`.
+- A clean-environment wheel install succeeds with `resources/templates/` and `py.typed`
+  present, and `troop349-pdf` runs stage 1 from a directory outside the repository.
+- Importing the core surface in a subprocess without the optional distributions installed
+  loads no optional dependency, and requesting a missing capability raises a typed error
+  with an actionable message.
+- The shareable projection contains no `attendee_id` and no `qr_url`; the per-scout email
+  bodies are covered by the same assertion.
+- The authentic lane runs with `--require-corpus` against both runners for the 2a domains.
 - Default lane remains offline; `egress-denied` green.
-- **NO-GO:** keep the legacy symbol as the composed default, return the defect to its task,
-  rerun the gate.
+- **NO-GO:** restore the moved symbol's original body to the flat module, delete the
+  package module and its parity file, return the defect to its task, rerun the gate. There
+  is no adapter-selection switch during 2a — a shim either delegates or it does not, so
+  rollback is a revert, not a configuration change.
 
 ### Gate 2 — Identity, output, and runtime
 
@@ -368,7 +504,7 @@ Everything in Gate 2a, plus:
 | D24 spec/plan split | This document holds contracts; ordering lives in the plans |
 | D27 offline | `NET-WIRE-001/002` wire `assert_egress_allowed` into both gateways |
 | D30 web boundary | Structural only: factory, `JobRegistry`, loopback, four UI defects |
-| D32 determinism | `ports/time.py` splits `Clock`, `Sleeper`, `Jitter`, `IdFactory` |
+| D32 determinism | `ports/clock.py` (`Clock`, `Sleeper`, `Jitter`) and `ports/ids.py` (`IdFactory`) — a deliberate split of the parent spec's single `ports/time.py` |
 | D33 run state | Versioned machine in `core/run_state.py` (2b) |
 
 ## Open questions
