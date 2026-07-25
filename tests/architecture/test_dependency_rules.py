@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import ast
+import io
+import sys
 import tokenize
 from collections import defaultdict
 from pathlib import Path
+
+import pytest
 
 PKG_ROOT = Path(__file__).resolve().parents[2] / "src" / "scoutmb"
 
@@ -57,15 +61,23 @@ def _dotted(path: Path) -> str:
     return ".".join(["scoutmb", *parts])
 
 
-def _first_party_imports(tree: ast.AST, *, module: str) -> set[str]:
+def _first_party_imports(tree: ast.AST, *, module: str, is_package: bool) -> set[str]:
     """Absolute AND relative first-party imports.
 
     Relative imports carry node.level > 0 and node.module is None for `from . import x`, so a
     check that only reads node.module misses every one of them -- which is most of the ways an
     intra-package edge actually gets written.
+
+    `package` must match what Python's import machinery would use as `__package__` when
+    resolving the relative import, which for a package's `__init__.py` is the package's OWN
+    dotted name (e.g. `scoutmb.core`), not one level up. `_dotted()` already returns that own
+    name for `__init__.py` (it strips the `__init__` path segment), so for a package we must NOT
+    also strip a trailing component -- doing so would resolve `from .model import T` inside
+    `scoutmb/core/__init__.py` to the nonexistent `scoutmb.model` instead of the correct
+    `scoutmb.core.model`.
     """
     found: set[str] = set()
-    package = module.rsplit(".", 1)[0]
+    package = module if is_package else module.rsplit(".", 1)[0]
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             found.update(a.name for a in node.names if a.name.startswith("scoutmb"))
@@ -77,6 +89,7 @@ def _first_party_imports(tree: ast.AST, *, module: str) -> set[str]:
                 found.update(f"{target}.{a.name}" for a in node.names)
             elif node.module and node.module.startswith("scoutmb"):
                 found.add(node.module)
+                found.update(f"{node.module}.{a.name}" for a in node.names)
     return found
 
 
@@ -85,7 +98,8 @@ def _direct_graph() -> dict[str, set[str]]:
     for path in _modules():
         dotted = _dotted(path)
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        graph[dotted] = _first_party_imports(tree, module=dotted)
+        is_package = path.name == "__init__.py"
+        graph[dotted] = _first_party_imports(tree, module=dotted, is_package=is_package)
     return graph
 
 
@@ -134,7 +148,13 @@ def test_adapter_imports_confined_to_composition_roots() -> None:
 
 
 def test_no_dunder_file_token_anywhere_in_package() -> None:
-    """Lexical scan, not AST: an AST walk misses __file__ inside a string handed to eval."""
+    """Lexical scan, not AST: an AST walk misses __file__ used as attribute access.
+
+    `some_module.__file__` never appears as an ast.Name node -- it's
+    Attribute(value=Name(...), attr='__file__'), and `attr` is a bare string, not a Name
+    subnode, so an ast.Name-only walk would miss it. It DOES remain a NAME token after the
+    dot, though, so the tokenize scan below still catches it.
+    """
     offenders: list[str] = []
     for path in _modules():
         with path.open("rb") as handle:
@@ -180,13 +200,83 @@ def test_no_dynamic_imports_in_core_ports_features() -> None:
     assert offenders == [], "\n".join(offenders)
 
 
+def test_first_party_imports_resolves_relative_import_in_package_init() -> None:
+    """A package's __init__.py has __package__ == its own dotted name, not one level up.
+
+    `from .model import T` written inside scoutmb/core/__init__.py must resolve to the
+    same-layer scoutmb.core.model, not the incorrect, layer-less scoutmb.model that a naive
+    `rsplit(".", 1)` would produce.
+    """
+    tree = ast.parse("from .model import T\n")
+    found = _first_party_imports(tree, module="scoutmb.core", is_package=True)
+    assert "scoutmb.core.model" in found
+    assert "scoutmb.model" not in found
+
+
+def test_first_party_imports_resolves_relative_import_in_leaf_module() -> None:
+    """Regression guard: a non-package module's __package__ is still its parent package."""
+    tree = ast.parse("from . import model\n")
+    found = _first_party_imports(tree, module="scoutmb.core.service", is_package=False)
+    assert "scoutmb.core.model" in found
+
+
+def test_first_party_imports_resolves_absolute_submodule_import() -> None:
+    """`from scoutmb import adapters` must record scoutmb.adapters (a real, layered node),
+    not just the layer-less root `scoutmb` -- otherwise this spelling of a cross-layer
+    import silently evades every dependency-rule check in this file.
+    """
+    tree = ast.parse("from scoutmb import adapters\n")
+    found = _first_party_imports(tree, module="scoutmb.interfaces.foo", is_package=False)
+    assert "scoutmb.adapters" in found
+
+
+def test_dunder_file_token_scan_catches_attribute_access() -> None:
+    """Proves the corrected rationale for the tokenize scan: `mod.__file__` is
+    Attribute(value=Name('mod'), attr='__file__'), so `__file__` never appears as an
+    ast.Name node -- but it does remain a NAME token after the dot, which is what the
+    tokenize-based scan in test_no_dunder_file_token_anywhere_in_package relies on.
+    """
+    source = b"import scoutmb\nx = scoutmb.__file__\n"
+    tokens = list(tokenize.tokenize(io.BytesIO(source).readline))
+    assert any(t.type == tokenize.NAME and t.string == "__file__" for t in tokens)
+    tree = ast.parse(source.decode())
+    assert not any(isinstance(n, ast.Name) and n.id == "__file__" for n in ast.walk(tree))
+
+
+def test_no_first_party_sys_path_mutation_catches_aliased_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`import sys as s; s.path.append(...)` unparses as "s.path.append", which the fixed
+    {"sys.path.append", ...} set never matches without alias resolution. Point the tripwire
+    at a synthetic package containing exactly this pattern and confirm it still fires.
+    """
+    pkg_root = tmp_path / "scoutmb"
+    pkg_root.mkdir()
+    (pkg_root / "__init__.py").write_text("")
+    (pkg_root / "leaky.py").write_text("import sys as s\ns.path.append('/nope')\n")
+    monkeypatch.setattr(sys.modules[__name__], "PKG_ROOT", pkg_root)
+    with pytest.raises(AssertionError, match=r"s\.path\.append"):
+        test_no_first_party_sys_path_mutation()
+
+
 def test_no_first_party_sys_path_mutation() -> None:
     offenders: list[str] = []
     for path in _modules():
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        # `import sys as s` then `s.path.append(...)` unparses as "s.path.append", which the
+        # fixed dotted-name set never matches. Resolve the alias back to the real module first,
+        # mirroring the same resolution done for BANNED_DYNAMIC above.
+        aliases = {
+            alias.asname or alias.name: alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 target = ast.unparse(node.func)
-                if target in {"sys.path.append", "sys.path.insert", "sys.path.extend"}:
+                head, _, tail = target.partition(".")
+                resolved = f"{aliases[head]}.{tail}" if tail and head in aliases else target
+                if resolved in {"sys.path.append", "sys.path.insert", "sys.path.extend"}:
                     offenders.append(f"{path}:{node.lineno} {target}")
     assert offenders == [], "\n".join(offenders)
