@@ -20,6 +20,29 @@ proposition: **the catalog is the oracle, and the restructure is correct exactly
 the legacy and the package implementations satisfy it.** The contracts below make that
 proposition enforceable.
 
+## Asserted contracts vs plan-verified mechanisms
+
+Three review rounds against this document found the same class of defect each time: not a
+wrong architecture, but a **wrong claim about how Python or this codebase actually behaves**.
+`dataclasses.asdict` was said to convert tuples to lists (it preserves them). The launcher was
+said to put `app_dir` on `sys.path` automatically (the embeddable distribution does not; a
+bootstrap `.pth` patch does). A `__file__` dataflow check was specified that no AST walk can
+decide. Each read as settled fact and each was false.
+
+So this document distinguishes two kinds of statement, and the distinction is binding:
+
+- **Contracts** — what must be true of the system: boundaries, schemas, invariants, gate
+  conditions. These are decided here and a plan may not renegotiate them.
+- **Mechanisms** — how a library, interpreter, or build tool behaves. These are marked
+  *plan-verified*. The plan task that depends on one must **prove it by running code** before
+  the work that relies on it, and if reality disagrees, the mechanism claim is amended here
+  rather than worked around in the plan.
+
+A mechanism assertion with no verifying task is a defect in this document, not a detail. The
+plan-verified items are: `importlib.resources` behavior from the copied release root; the
+`.pth` and `build.spec` release-root wiring; `asdict` normalization at the serializer; and the
+tractability of the token and AST checks named under Dependency rules.
+
 ## Scope
 
 Phase B moves the flat modules into `src/scoutmb` behind hexagonal boundaries, decomposes
@@ -135,10 +158,13 @@ decide now rather than mid-move:
   `default_factory=tuple` — which breaks every `.append` site in acquisition. Those sites
   accumulate into a local list and construct the record once, which is the shape the frozen
   boundary wants anyway.
-- **`asdict` stays viable.** `dataclasses.asdict` recurses through frozen and slotted
-  dataclasses normally and renders both lists and tuples as lists, so the JSON and CSV shapes
-  are unaffected by the tuple change. Field order is `__dataclass_fields__` order in both
-  cases, which is what `ART-SCHEMA-002/003` pin.
+- **`asdict` preserves the collection type.** `dataclasses.asdict` reconstructs sequences via
+  `type(obj)(...)`, so a tuple field comes back as a **tuple**, not a list. `json.dumps` then
+  emits it as a JSON array, so the on-disk JSON is unchanged — but any intermediate projection,
+  golden comparison, or CSV cell holding a tuple sees a tuple. Normalization to lists is
+  therefore the **serializer's** job in `output_schemas.py`, stated explicitly, and the golden
+  compares the normalized projection rather than raw `asdict` output. Field order is
+  `__dataclass_fields__` order either way, which is what `ART-SCHEMA-002/003` pin.
 
 The package ships `src/scoutmb/py.typed` (PEP 561) so its annotations are visible to
 consumers and to mypy when it is installed rather than imported from the source tree. The
@@ -192,10 +218,25 @@ Contract:
 - A missing optional dependency raises `CapabilityUnavailable` (a `ScoutmbError` subclass)
   carrying the capability name, the distribution names, and the exact
   `pip install 'scoutmb[<extra>]'` remedy — never a bare `ImportError` traceback.
-- Enforced by a subprocess test that imports the core surface in an environment with the
-  optional distributions absent, then asserts on `sys.modules` — checking that
-  `cv2`, `fitz`, and `playwright` are absent from it, rather than merely that no exception
-  was raised. Asserting "no exception" would pass even if the imports had succeeded.
+Enforcement is two separate tests, because neither alone establishes the contract:
+
+1. **Import isolation.** In a virtualenv built *without* the extras, run `python -I -c` (fully
+   isolated: no site-packages injection from the parent, no `PYTHONPATH`, no `sitecustomize`)
+   that imports **every leaf module** under `core/`, `ports/`, and `features/` — enumerated by
+   walking the package, not a hand-kept list that silently stops covering new modules — then
+   asserts `cv2`, `fitz`, and `playwright` are absent from `sys.modules`. Isolation matters
+   because pytest plugins, `conftest.py`, and coverage.py all import things into a normal test
+   process, so a bare in-process check measures the harness rather than the package.
+2. **Capability failure.** Separately, call the public PDF and acquisition entry points in that
+   same extras-free environment and assert each raises `CapabilityUnavailable` naming its
+   extra.
+
+Both are needed: `sys.modules` absence cannot distinguish "never attempted" from "attempted,
+raised `ImportError`, and got swallowed by a bare `except`" — and the swallowed case is the
+dangerous one, because it silently degrades instead of failing. Test 2 is what rules it out.
+
+An earlier draft specified only "imports the core surface," which named no modules and left
+"core surface" undefined.
 
 ### Error model
 
@@ -232,13 +273,19 @@ The layer roles above are enforced mechanically, and the rule has to be precise 
 Allowed edges, and no others, between first-party `scoutmb` modules:
 
 ```text
-interfaces  ->  features, core, ports, config, errors, adapters (composition only)
-features    ->  core, ports, config, errors
-adapters    ->  core, ports, config, errors
+interfaces  ->  interfaces, features, core, ports, config, errors,
+                adapters (composition roots only)
+features    ->  features, core, ports, config, errors
+adapters    ->  adapters, core, ports, config, errors
+runtime     ->  core, ports, config, errors
 core        ->  core, errors
 ports       ->  core, errors
-runtime     ->  core, ports, config, errors
 ```
+
+Same-layer edges are permitted and necessary: `interfaces/cli/pdf.py` must import
+`interfaces/cli/composition.py`, and `adapters/html/` must use `adapters/files/atomic.py` to
+publish. An earlier draft omitted them while saying "and no others," which forbade the wiring
+the design requires.
 
 Enforcement details, all of which are load-bearing:
 
@@ -247,10 +294,13 @@ Enforcement details, all of which are load-bearing:
 - Both **static** (module-level and function-level `import` statements found by AST walk) and
   **runtime** imports are covered. Function-level imports are the common way this rule gets
   quietly broken, and the graph is built from the AST so they are visible.
-- `importlib.import_module`, `__import__`, and any other dynamic import inside `core/`,
-  `ports/`, or `features/` is **banned outright** rather than analyzed. A dynamic import is
-  unresolvable statically, so allowing it would make the rule unfalsifiable. Adapters may use
-  one only for the optional-dependency guard described below.
+- Dynamic imports inside `core/`, `ports/`, or `features/` are banned as a **syntactic
+  restriction**, not a semantic one, because "any dynamic import" is not decidable. The
+  prohibited AST forms are exactly: a `Call` whose function resolves to the name
+  `importlib.import_module`, `importlib.__import__`, `__import__`, `imp.load_module`, or
+  `exec`/`eval` with a string argument. Anything cleverer than that list defeats the check and
+  is a review problem rather than a lint problem — the rule exists to stop the ordinary case,
+  and says so. Adapters may use `importlib` only for the optional-dependency guard below.
 - `interfaces` is the only layer permitted to import an adapter, and only from a **composition
   root**, which is the module `interfaces/<name>/composition.py` and no other. Naming the file
   is what makes the rule checkable — "a module whose sole job is wiring" is not a property a
@@ -276,11 +326,23 @@ an argument to the data-root resolver." That is interprocedural taint analysis, 
 an AST walk decides, and specifying it would guarantee a weak approximation shipping under a
 strong description.
 
-The flat ban is decidable in one AST pass with no false negatives, and it is achievable
-because bundled resources do not need `__file__`. `resources/templates/` is loaded through
-`importlib.resources.files("scoutmb.resources")`, which is the standard Python 3.12 mechanism,
-works correctly from a zipped distribution where `__file__` arithmetic does not, and removes
-the only legitimate reason the package would reference its own location.
+The check is a **lexical token scan**, not an AST walk: `tokenize` the module and reject any
+`NAME` token equal to `__file__`. A token scan is used because an AST walk misses `__file__`
+inside a string passed to `eval`, and because the flat ban has no legitimate exception to
+carve out — there is nothing for a syntax tree to disambiguate.
+
+The ban is achievable only if bundled resources can be read without it. The intended mechanism
+is `importlib.resources.files("scoutmb.resources")`, which requires `resources/` to be a real
+package with an `__init__.py` and the templates declared as package data in the build config.
+
+**This mechanism is plan-verified, not asserted here.** The release root is a *copied
+directory*, not an installed distribution, and `importlib.resources` behavior in that setting
+depends on how the package is laid out and imported. The first Slice 2a task that touches
+`resources/` must prove `files("scoutmb.resources").joinpath(...).read_text()` works from (a)
+an installed wheel and (b) the copied release root, before any template moves. If it does not
+work from the copied root, the resource-loading mechanism changes and this section is amended
+— the `__file__` ban stands either way, since a `__file__`-based loader is what the ban exists
+to prevent. No claim is made about zipped distributions; that case is untested and unused.
 
 ### The 2a / 2b seam
 
@@ -335,15 +397,33 @@ condition is only testable if the layout is named, so:
   scouts.csv  pdf-uploads/  runs/     pre-existing user data, never touched by a sync
 ```
 
-`scoutmb/` sits beside the entry script, so it imports without any `sys.path` mutation — the
-launcher already runs with `app_dir` as the script directory. `bootstrap/source_sync.py`
-extends its `_FILES`/`_DIRS` allowlist to carry `src/scoutmb` into that position, and the
-sync remains a targeted overwrite of an explicit allowlist, never a directory wipe.
+**Three** places must change together, and an earlier draft named only one.
 
-Acceptance is a specific command sequence, not a claim: copy the release root to a temporary
-directory outside the repository, remove the repository from the environment, launch, and
-assert the health endpoint responds and one report renders. The 2b plan owns the exact
-invocation; what this document fixes is that the layout and the assertion both exist.
+1. `bootstrap/source_sync.py` extends its `_FILES`/`_DIRS` allowlist to copy `src/scoutmb` to
+   `<app_dir>/scoutmb`, keeping the sync a targeted overwrite of an explicit allowlist, never
+   a directory wipe.
+2. `bootstrap/build.spec` adds `src/scoutmb` to `datas` under `app_src`. Its current list
+   carries only the four flat modules, `requirements.txt`, and `ui/` — so a built installer
+   would have nothing to sync, and step 1 alone would silently no-op in the one configuration
+   that matters.
+3. `bootstrap/python_env.py` already appends `app_dir` to the embedded interpreter's `.pth`
+   file, which is what puts it on `sys.path`. That entry keeps working for `scoutmb` with no
+   change, but the dependency must be recorded — it is load-bearing and non-obvious.
+
+An earlier draft claimed `scoutmb/` beside the entry script "imports without any `sys.path`
+mutation" because the launcher runs with `app_dir` as its script directory. That is **false**
+for this runtime, and `python_env.py` says so in a comment: the embeddable distribution's
+isolated path mode does not add the launched script's directory to `sys.path`, which is
+precisely why the `.pth` patch exists. The architecture rule is still satisfied — the `.pth`
+entry is interpreter path configuration written by bootstrap, not first-party code mutating
+`sys.path` at runtime — but the stated reason was wrong and the mechanism is bootstrap's, not
+Python's.
+
+Acceptance is a specific sequence, not a claim: copy the release root to a temporary directory
+outside the repository, remove the repository from the environment, launch under the embedded
+interpreter configuration, and assert the health endpoint responds and one report renders. The
+2b plan owns the exact invocation; what this document fixes is that all three change sites and
+the assertion exist.
 
 ## The oracle invariant
 
@@ -482,13 +562,27 @@ invalidated by an intentional change inside the same slice.
 
 The gate asserts more than "each golden matches." It asserts the **V1→V2 diff is exactly the
 declared field substitution and nothing else** — `attendee_id` removed, `output_id` inserted
-at that index, in the five collections named in the tiering section. That is stronger than
-either golden alone, because it catches a move-induced change hiding inside an intentional
-one, which is the specific way a refactor smuggles a regression past a gate.
+at that index, across the **four transformed row collections** (`scouts[]`, `classes[]`,
+`requirements[]`, `errors[]`); the top-level object is unchanged, which is what `ART-SCHEMA-006`
+already pins. That is stronger than either golden alone, because it catches a move-induced
+change hiding inside an intentional one, which is the specific way a refactor smuggles a
+regression past a gate.
 
-Required scope for both: every field of every row in all four report collections with its
-Python type; the full text of each rendered email body and subject; and the per-scout mapping
-from display name to its rows and files.
+**Required scope — exact values, not shapes.** An earlier draft asked for "every field with its
+Python type," which would pass while every cell held the wrong content. Both goldens record:
+
+- the **full canonical value** of every cell in all four collections, not merely field names
+  and types;
+- rows keyed by `output_id` (or by position within the null-identity group), **not by display
+  name** — keying on name collapses two same-named attendees into one entry, which is the exact
+  corruption D3 exists to prevent and which a golden must therefore be able to see;
+- the complete text of every rendered email body and subject, byte for byte;
+- the per-scout mapping from `output_id` to its rows and its output files.
+
+The generating fixture must contain, at minimum: two attendees sharing a display name with
+different upstream IDs; one attendee with zero classes; one with a partial failure (some
+classes acquired, one error); and one pre-identity failure carrying `output_id: null`. A golden
+built only from clean single-attendee data proves almost nothing about this refactor.
 
 **What a golden is and is not.** It records what the code *does*, not what it *should* do. The
 catalog is the correctness oracle because its expectations were hand-computed from the source;
@@ -512,12 +606,39 @@ and PDF adapters meet real upstream shapes. Gate 2a runs the authentic lane with
 `--require-corpus`; a skip is not a pass.
 
 **Property tests.** The parent spec's testing strategy puts Hypothesis on parsers and state
-transitions, and Phase B is where both appear. Two are required rather than optional:
-round-tripping the DTO boundary (`to_row(from_mapping(x))` reproduces `x` for every
-generated payload shape, including the 26 requirement-number shapes), and totality of the
-run-state transition table in 2b (every state/event pair either has a defined transition or
-fails closed — no pair falls through). These complement the catalog; they do not substitute
-for any case in it.
+transitions, and Phase B is where both appear. Two are required rather than optional.
+
+The first is the DTO round trip, stated in the **correct direction**:
+`from_mapping(to_row(dto)) == dto` for every generated DTO. An earlier draft specified
+`to_row(from_mapping(x)) == x` over arbitrary mappings, which is not merely hard but false by
+construction — `from_mapping` coerces types, resolves header aliases, drops unknown keys, and
+supplies defaults for absent ones, so the mapping it started from is not recoverable. Starting
+from a DTO makes the property true and still exercises both directions. The DTO generator must
+cover all 26 requirement-number shapes; a generator that only emits well-formed numbers tests
+nothing the catalog does not already cover.
+
+The second is totality of the run-state transition table in 2b: every state/event pair either
+has a defined transition or fails closed, with no pair falling through.
+
+These complement the catalog; they do not substitute for any case in it.
+
+### Where the DTO boundary lives
+
+`core/models.py` holds record shapes and no serialization logic, so `from_mapping` and `to_row`
+cannot live on the records — an earlier draft's shim example called `RequirementRow.from_mapping`
+without ever saying what `RequirementRow` was or where it lived.
+
+They live in `core/output_schemas.py` as **module-level functions over the record types**, not
+methods:
+
+```python
+def requirement_from_mapping(data: Mapping[str, object]) -> RequirementRecord: ...
+def requirement_to_row(record: RequirementRecord, *, shareable: bool) -> dict[str, object]: ...
+```
+
+Free functions keep `models.py` dependency-free and let the operational and shareable
+projections be one parameter apart rather than two parallel method hierarchies. The shim
+template below is written against these names.
 
 ### Compatibility shims
 
@@ -588,8 +709,8 @@ from scoutmb.core.inference.numbering import requirement_path   # noqa: F401
 
 # Form 2 — adapting shim: parse, delegate, serialize. Nothing else.
 def annotate_requirement_statuses(requirements):
-    rows = tuple(RequirementRow.from_mapping(item) for item in requirements)
-    return [row.to_dict() for row in annotate(rows)]
+    rows = tuple(requirement_from_mapping(item) for item in requirements)
+    return [requirement_to_row(row, shareable=False) for row in annotate(rows)]
 ```
 
 A module passes when every top-level statement is an import, a module-level binding of an
@@ -707,6 +828,29 @@ Filename stems already consume a passed-in `output_id`, so this is a threading c
 change to `attendee_filename_stem`. Because the UUID is random, existing `ART-NAME-*`
 expectations already normalize it and are unaffected.
 
+#### Attempts with no identity
+
+Identity is not always available, and the schema must say what happens when it is not.
+`process_scout` constructs its `ScoutResult` from the scout's name and QR URL **before** the
+attendee ID exists — the ID is read from the schedule request's post data, several statements
+later. If navigation or the schedule response fails, the `except` clause records the error and
+returns a result whose `attendee_id` is still empty. That is preserved behavior: a failed
+attempt still appears in `errors.csv` and in the report's `errors[]`.
+
+`AttendeeId.parse("")` raises `MissingAttendeeId`, so `RunIdentity` cannot mint an `output_id`
+for such a row, and a schema that requires one in every `scouts[]` and `errors[]` entry is
+unsatisfiable as written.
+
+The contract: an attempt with no resolved identity carries `output_id: null`, never a
+placeholder string, never a fabricated UUID, and never an omitted key. `null` is chosen so the
+report JS distinguishes "this row has no identity" from "this row belongs to scout X" without
+string comparison, and so two unidentified attempts never collide into one apparent scout.
+Rows with `output_id: null` are grouped by nothing — each is its own entry.
+
+Both goldens must include a pre-identity failure attempt, and the end-to-end identity
+assertion in Gate 2a covers the null case explicitly. This is the path most likely to be
+missed, because every successful-run test has an identity by construction.
+
 #### Encoding and line terminators
 
 Pinned as part of the schema, because the current behavior survives on an interaction that a
@@ -795,22 +939,30 @@ owner, not part of the move.
 
 - Both runners green for every execution key in the input, PDF, requirement, and artifact
   domains — legacy runners against the shims, package runners against `scoutmb`.
-- Golden V1 and V2 both match: exact report-row field sets and types, exact email bodies and
-  subjects, per-scout name-to-rows correspondence. The **V1→V2 diff equals exactly** the
-  declared `attendee_id`→`output_id` substitution in the five projected collections, with no
-  other field, type, or ordering change.
+- Golden V1 and V2 both match on **exact cell values**, keyed by `output_id`, over the fixture
+  containing two same-named attendees, a zero-class attendee, a partial failure, and a
+  pre-identity failure. The **V1→V2 diff equals exactly** the declared
+  `attendee_id`→`output_id` substitution across the four transformed collections, with no other
+  field, value, type, or ordering change.
 - Exactly one `RunIdentity` exists per run: acquisition, the HTML report, and email rendering
   all report the same `output_id` for the same attendee, asserted end to end rather than per
-  writer.
+  writer. An attempt that failed before identity resolution carries `output_id: null` in every
+  surface, and two such attempts never merge.
+- Optional-dependency isolation proven by a `python -I` subprocess in an extras-free
+  environment importing every enumerated leaf module of `core`/`ports`/`features`, plus a
+  separate assertion that the PDF and acquisition entry points raise `CapabilityUnavailable`.
 - The `preserve`-case digest matches its stored value; no `expected_by_context` edited except
   `ART-NAME-007`; every added case accompanied by a reviewed `phase_a.json` bump.
 - The discriminating duplicate-requirement-number case exists, its two candidate rows carry
   different descriptions, and it observes `description` — so it can actually distinguish
   positional from last-wins ancestor resolution.
 - Dependency-rule test green over the **transitive** first-party import graph, with the
-  allowed-edge table enforced, adapter imports confined to `interfaces/<name>/composition.py`,
-  dynamic imports absent from `core`/`ports`/`features`, no first-party `sys.path` mutation
-  anywhere, and **no `__file__` token anywhere under `src/scoutmb/`**.
+  allowed-edge table (including same-layer edges) enforced, adapter imports confined to
+  `interfaces/<name>/composition.py`, the enumerated dynamic-import forms absent from
+  `core`/`ports`/`features`, no first-party `sys.path` mutation anywhere, and **no `__file__`
+  token anywhere under `src/scoutmb/`** by lexical scan.
+- `importlib.resources.files("scoutmb.resources")` proven to read a template from both an
+  installed wheel and the copied release root, with `resources/__init__.py` present in each.
 - CSV artifacts round-trip as `utf-8-sig` with `\r\n` terminators through a `newline=""`
   handle; `scouts.json` and `report.html` are BOM-free `utf-8`.
 - Coverage: package areas meet their D10 floors; the `include` pattern reaches every
@@ -848,9 +1000,12 @@ Everything in Gate 2a, plus:
 - All three console scripts run `--help` and their stage-equivalent argv from outside the
   repository, matching the flat scripts they replace on stdout, stderr, and exit code.
 - Flat modules retired and `tests/harnesses/legacy.py` removed with them.
-- `source_sync` carries `src/scoutmb` into the release-root layout named above, and the
-  acceptance sequence passes: copy the root outside the repository, remove the repository,
-  launch, health endpoint responds, one report renders.
+- All three release-root change sites landed — `source_sync` allowlist, `build.spec` `datas`,
+  and the `.pth` dependency recorded — and the acceptance sequence passes: copy the root
+  outside the repository, remove the repository, launch under the embedded interpreter
+  configuration, health endpoint responds, one report renders.
+- Async shutdown: cancelling during a blocking adapter operation leaves no pending task after
+  lifespan exit, including work dispatched through `asyncio.to_thread`.
 - **NO-GO:** restore the relevant compatibility adapter as the composed default, return the
   defect to its task, rerun the gate.
 
