@@ -1146,7 +1146,7 @@ dev = [
     { name = "pytest-socket", specifier = ">=0.7,<1" },
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "ruff", specifier = ">=0.8,<1" },
-    { name = "uv", specifier = ">=0.11.32" },
+    { name = "uv", specifier = ">=0.11.32,<1" },
 ]
 
 [[package]]
