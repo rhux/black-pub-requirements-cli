@@ -71,6 +71,9 @@ class RunIdentity:
         return existing
 
 
+# NOTE: scoutmb.core.models holds the package copies of these four shapes, proven
+# field-identical by tests/parity/test_models_parity.py. ClassRecord/RequirementRecord become
+# aliases in Slice 2a Task 14; ScoutResult in Slice 2b, once process_scout stops mutating it.
 @dataclass(slots=True)
 class ScoutInput:
     name: str
