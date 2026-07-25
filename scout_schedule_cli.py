@@ -949,12 +949,19 @@ li {{ margin-bottom: .5rem; }}
 """
 
 
-def write_email_reports(output_dir: Path, scouts: list[dict[str, Any]]) -> Path:
+def write_email_reports(
+    output_dir: Path,
+    scouts: list[dict[str, Any]],
+    *,
+    run_identity: RunIdentity | None = None,
+) -> Path:
     """Write per-scout missing-requirement emails plus a combined mail-merge CSV."""
     emails_dir = output_dir / "emails"
     emails_dir.mkdir(parents=True, exist_ok=True)
     missing = build_missing_requirements(scouts)
-    run_identity = RunIdentity()
+    # One identity per run. A fresh instance here would mint UUIDs unrelated to the ones the
+    # rest of the run already used for this attendee's raw/ files.
+    run_identity = run_identity or RunIdentity()
 
     fieldnames = [
         "scout_name", "attendee_id", "status", "merit_badge_count",
@@ -1688,7 +1695,9 @@ def write_outputs(
     generate_html: bool = True,
     html_name: str = "report.html",
     generate_email_report: bool = False,
+    run_identity: RunIdentity | None = None,
 ) -> None:
+    run_identity = run_identity or RunIdentity()
     output_dir.mkdir(parents=True, exist_ok=True)
     run_id = output_dir.name
     classes = [item for result in results for item in result.classes]
@@ -1744,7 +1753,11 @@ def write_outputs(
             output_dir / safe_html_name, results, generated_at_local, generated_at_iso, run_id=run_id
         )
 
-    email_report_dir = write_email_reports(output_dir, nested).name if generate_email_report else None
+    email_report_dir = (
+        write_email_reports(output_dir, nested, run_identity=run_identity).name
+        if generate_email_report
+        else None
+    )
 
     summary = {
         "scouts_processed": len(results),
@@ -1831,6 +1844,7 @@ async def async_main(
         generate_html=not args.no_html,
         html_name=args.html_name,
         generate_email_report=getattr(args, "email_report", False),
+        run_identity=run_identity,
     )
     print(f"Results written to: {args.output.resolve()}")
     return 1 if any(result.errors for result in results) else 0
