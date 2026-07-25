@@ -26,9 +26,9 @@ ALLOWED: dict[str, set[str]] = {
     },
     "features": {"features", "core", "ports", "config", "errors"},
     "adapters": {"adapters", "core", "ports", "config", "errors", "network_policy"},
-    "runtime": {"core", "ports", "config", "errors"},
+    "runtime": {"runtime", "core", "ports", "config", "errors"},
     "core": {"core", "errors"},
-    "ports": {"core", "errors"},
+    "ports": {"ports", "core", "errors"},
 }
 
 # Fully-qualified call targets, plus the BARE names an aliased import produces:
@@ -257,6 +257,38 @@ def test_no_first_party_sys_path_mutation_catches_aliased_import(
     monkeypatch.setattr(sys.modules[__name__], "PKG_ROOT", pkg_root)
     with pytest.raises(AssertionError, match=r"s\.path\.append"):
         test_no_first_party_sys_path_mutation()
+
+
+def test_same_layer_imports_within_ports_and_runtime_are_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`ALLOWED` must include a self-entry for every layer, mirroring `interfaces`/`features`/
+    `adapters`/`core`, which already list themselves. `ports` and `runtime` previously lacked
+    this self-entry, so a same-layer import -- e.g. `ports/ids.py` importing from
+    `ports/clock.py`, or one `runtime` module importing another -- was flagged as a false-positive
+    cross-layer violation even though same-layer imports are always architecturally legal.
+
+    This builds a synthetic package with exactly that shape in both layers and confirms the
+    dependency-rule test now passes against it instead of raising.
+    """
+    pkg_root = tmp_path / "scoutmb"
+    pkg_root.mkdir()
+    (pkg_root / "__init__.py").write_text("")
+
+    ports_dir = pkg_root / "ports"
+    ports_dir.mkdir()
+    (ports_dir / "__init__.py").write_text("")
+    (ports_dir / "clock.py").write_text("")
+    (ports_dir / "ids.py").write_text("from scoutmb.ports.clock import Clock\n")
+
+    runtime_dir = pkg_root / "runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "__init__.py").write_text("")
+    (runtime_dir / "a.py").write_text("")
+    (runtime_dir / "b.py").write_text("from scoutmb.runtime.a import X\n")
+
+    monkeypatch.setattr(sys.modules[__name__], "PKG_ROOT", pkg_root)
+    test_transitive_import_edges_are_allowed()
 
 
 def test_no_first_party_sys_path_mutation() -> None:
