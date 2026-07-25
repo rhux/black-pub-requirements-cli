@@ -33,8 +33,13 @@ Slice 1a established the Python project foundation: `pyproject.toml`, `uv.lock`,
 ruff, mypy, pytest, offline enforcement, privacy scanning, synthetic factories, and the
 first focused characterization tests now exist. It also fixed stable attendee identity,
 atomic single-file publication, data-root resolution, and copy-only migration in place.
-The legacy application is still primarily implemented by the flat modules above; Slice 1b
-must complete their behavior contract before Slice 2 moves them into the package.
+
+Slice 1b completed the behavior contract (Gate 1b GO): a 478-case typed catalog under
+`tests/matrix/` with hand-computed expected observations, domain runners driving the real
+legacy code, scale profiles, vertical flows, read-only authentic aggregates, per-area
+coverage enforcement, and a checked-in baseline. The legacy application is still
+implemented by the flat modules above; Slice 2 moves them into the package against that
+catalog.
 
 Source references in this specification are symbol based. Plans may include a line number
 only as a navigation aid and must pair it with the owning symbol because Slice 1a and later
@@ -163,7 +168,9 @@ Explicitly deferred by owner decision. Each is reopenable from its D-number.
   Names, digests, HMACs, and shortened IDs are not identity. Output identity is a full
   per-run UUIDv4.
 - **Shareable artifacts never contain the upstream attendee ID, QR token, or session
-  material.**
+  material.** Which artifacts are shareable is fixed by the Phase B spec's surface
+  tiering; operational-private working files are governed by data-root protection
+  (Slice 3), not by omission.
 - **Migration is copy-only, hash-verified, resumable, collision-safe, and never deletes
   the legacy source.**
 - **The launcher's audience is non-technical.** Double-click to run; never touch or
@@ -513,8 +520,16 @@ Staged across phases (a full workflow cannot pass before the package and tests e
 ## Execution phases and go/no-go gates
 
 The specification owns *why* and behavioral contracts; the plans own file-by-file
-execution. Work is delivered as **five plan files across four phases**: Slice 1 is split
-into 1a and 1b, followed by Slices 2–4. Later plans are refined after the prior gate runs.
+execution. Work is delivered as **six plan files across four phases**: Slice 1 is split
+into 1a and 1b and Slice 2 into 2a and 2b, followed by Slices 3–4. Later plans are refined
+after the prior gate runs.
+
+Phase B's contracts are large enough to warrant their own document. They live in
+`docs/superpowers/specs/2026-07-24-phase-b-package-boundaries-design.md`, which owns the
+package layout, the 2a/2b seam rule, the compatibility-shim and oracle invariants, the
+dual-runner parity contract, test-asset migration, artifact surface tiering, and the
+Gate 2a / Gate 2 criteria. That document holds contracts only; task ordering stays in the
+plans, per D24.
 
 - **Slice 1a — Foundation & In-Place Correctness.** Packaging, lock, CI, offline
   enforcement, fixture/privacy foundations, and the surgical in-place fixes that protect
@@ -523,10 +538,14 @@ into 1a and 1b, followed by Slices 2–4. Later plans are refined after the prio
 - **Slice 1b — Full Phase A Characterization.** The reusable matrix catalog, focused and
   variable/production-scale synthetic data, local browser and vertical flows, read-only
   authentic-corpus augmentation, and pre-refactor baselines. **Gate 1b** unblocks Slice 2.
-- **Slice 2 — Package Boundaries & Core (Phase B).** Hexagonal restructure, typed core,
-  input/PDF adapters, ScoutingEvent gateway (port + drift + breaker + checkpoints),
-  run-state machine + job supervisor, structural web boundary, entrypoint parity, clean
-  distributions. **Gate 2.**
+- **Slice 2a — Core & Content (Phase B).** Package skeleton, typed core and identity,
+  inference decomposition, input and PDF adapters, versioned output schemas, template
+  extraction, artifact surface tiering, and the test-asset migration pattern. Nothing that
+  touches Playwright or FastAPI. **Gate 2a.**
+- **Slice 2b — Runtime & Interfaces (Phase B).** ScoutingEvent gateway (port + drift +
+  breaker + checkpoints), acquisition service, run-state machine + job supervisor,
+  structural web boundary, entrypoint composition, launcher bridge, clean distributions,
+  and retirement of the flat modules. **Gate 2.**
 - **Slice 3 — Storage, Migration Hardening & Transactional Releases (Phase C).**
   Data-root management (permissions + explicit delete), migration hardening + split-brain
   marker, versioned durable state, transactional A/B install + readiness + rollback.
@@ -600,6 +619,8 @@ Locked unless a later review supersedes.
 | Default tests or browser subprocess leak data | Synthetic-only fixtures, socket guard, network policy, guarded browser contexts, egress-denied CI |
 | Output fails halfway | Render-first, same-dir temp, fsync, atomic replace; prior bytes preserved |
 | `id()` inference bookkeeping breaks on dataclasses | Re-express ancestor walk over node indices; pin selection behavior first |
+| Index re-expression silently changes ancestor selection | `build_missing_requirements` resolves ancestors through a last-wins `(attendee, class, number)` map while the tree is index-based; duplicate numbers in one group make them disagree. Characterize duplicates before re-expressing (Slice 2a) |
+| Phase A gate machinery decays as code moves | Boundaries carry both legacy and package names; coverage areas are added, not rewritten, at D10 floors; branch exclusions move with their code; a shimmed module's floor is replaced by a no-business-logic assertion |
 | Update corrupts code/state the old release can't read | Immutable code + versioned state generations, N/N-1 window, readiness, atomic pointer, N→N+1→N rollback |
 | Circuit breaker without deadline budgets | Trips on consecutive-failure count; deadline budgets are a documented vNext addition |
 | macOS installer needs native runner | macOS CI runner in Slice 4; notarization deferred (D23) |
@@ -630,6 +651,10 @@ Locked unless a later review supersedes.
 
 ## Open questions
 
-None block plan generation. POSTPONED items are deferred, not unresolved. Suspected legacy
-inference defects (`Note.` grafting, empty rows) remain characterized behavior until a
-separate fix is proposed.
+None block plan generation. POSTPONED items are deferred, not unresolved.
+
+The two suspected legacy inference defects are now **resolved as keep-as-is**. Slice 1b
+characterized `Note.` grafting (`REQ-NOTE-001`, `REQ-NOTE-002`) and the 31 empty-number
+requirement rows (`REQ-EMPTY-001`, `REQ-EMPTY-002`) against the real functions. Slice 2
+preserves both exactly; changing either is a separate proposal with its own specification,
+not a side effect of the restructure.
