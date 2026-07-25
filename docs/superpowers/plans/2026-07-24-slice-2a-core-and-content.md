@@ -189,15 +189,15 @@ Replace the `[project.scripts]` block:
 
 ```toml
 [project.scripts]
-troop349 = "scoutmb.interfaces.desktop:main"
 troop349-pdf = "scoutmb.interfaces.cli.pdf:main"
-troop349-schedule = "scoutmb.interfaces.cli.schedule:main"
 ```
 
-> `troop349` and `troop349-schedule` name modules Slice 2b creates. They are declared now so
-> the contract is visible in one place; the wheel test in this task only exercises
-> `troop349-pdf`, which Task 18 makes real. A console script whose module is missing fails at
-> invocation, not at install, so this does not break the build.
+> **Only the script whose module will exist by the end of 2a.** `troop349` and
+> `troop349-schedule` are declared in Slice 2b, when `interfaces/desktop` and
+> `interfaces/cli/schedule` are written. Declaring them now would make a clean wheel install
+> two executables that fail on invocation — the install succeeds, so nothing catches it until
+> a user runs one. The three-script contract is recorded in the Phase B spec; `pyproject.toml`
+> follows the code, not the plan.
 
 Replace the wheel/build blocks:
 
@@ -717,10 +717,21 @@ def test_no_dynamic_imports_in_core_ports_features() -> None:
         if _layer(path) not in DYNAMIC_BANNED_LAYERS:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        aliases = {
+            alias.asname or alias.name: alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 name = ast.unparse(node.func)
-                if name in BANNED_DYNAMIC:
+                # `import importlib as il` then `il.import_module(...)` unparses as
+                # "il.import_module", which a fixed dotted-name list never matches. Resolve
+                # the alias back to its real module first.
+                head, _, tail = name.partition(".")
+                resolved = f"{aliases[head]}.{tail}" if tail and head in aliases else name
+                if resolved in BANNED_DYNAMIC or name in BANNED_DYNAMIC:
                     offenders.append(f"{path}:{node.lineno} {name}")
             # Importing the callable is as much a violation as calling it, and is what an
             # aliased `from importlib import import_module` looks like at the import site.
@@ -2534,9 +2545,11 @@ legacy module become aliases of the package shapes.
 - Test: `tests/contracts/test_dto_versions.py`, `tests/unit/test_output_schemas.py`
 
 **Acceptance Criteria:**
-- [ ] `requirement_from_mapping` reproduces the legacy construction **field for field**:
+- [ ] `requirement_from_mapping` parses the **record shape**, not the upstream payload:
       `str(x or "")` with **no strip** except `present_days`, and `truthy()` (not `bool()`)
-      for every flag — verified against `scout_schedule_cli.py:607-621`
+      for flags — matching `scout_schedule_cli.py:607-621` for the fields they share
+- [ ] The docstring states that upstream-key mapping and `clean_html_description` belong to
+      2b's gateway, so nobody adds a second cleaning pass here
 - [ ] `*_to_row(record, shareable=False)` reproduces `asdict` field order
 - [ ] Property: `requirement_from_mapping(requirement_to_row(dto)) == dto` for all 26 shapes
 - [ ] `SCHEMA_VERSION` present; an unknown version fails closed with a typed error
@@ -2710,12 +2723,17 @@ def _flag(value: Any) -> bool:
 
 
 def requirement_from_mapping(data: Mapping[str, Any]) -> RequirementRecord:
-    """Mirror of the legacy RequirementRecord construction, field for field.
+    """Parse a RECORD-SHAPED mapping (the output of to_row / asdict) back into a record.
 
-    Used on two paths: the Task 14 shim (input is asdict output, already well-typed) and, in
-    Slice 2b, the gateway boundary (input is raw upstream payload). It must be correct for
-    the raw path or 2b inherits a coercion bug, so the coercions match the legacy source at
-    scout_schedule_cli.py:607-621 rather than the shim's easier case.
+    Scope matters. This is NOT the upstream-payload parser: the legacy construction at
+    scout_schedule_cli.py:607-621 reads UPPERCASE ScoutingEvent keys and runs
+    `clean_html_description` over REQ_DESCR, and reproducing that here would double-clean an
+    already-clean description on the shim path.
+
+    Slice 2b's gateway owns `requirement_from_upstream_payload`, which maps the upstream keys,
+    applies clean_html_description, and then delegates here. The coercions below still match
+    the legacy ones field for field so that the shared half stays honest -- `str(x or "")` with
+    no strip except present_days, and truthy() for flags.
     """
     return RequirementRecord(
         scout_name=_text(data.get("scout_name")),
@@ -2904,20 +2922,19 @@ def _materialize(spec: InputSpec, context_id: str, root: Path) -> Path:
 
 
 def _invoke(spec: InputSpec, path: Path) -> InputObservation:
-    """Mirror LegacyInputRunner._invoke, but against the package."""
+    """Mirror LegacyInputRunner._invoke for the PARSER entries only.
+
+    `load_inputs` is deliberately absent: it is orchestration, and the IngestService that owns
+    it does not exist until Task 17, which extends this file. Importing the service at module
+    or function top here would fail collection for every case, not just the load_inputs ones.
+    """
     from scoutmb.adapters.files import tabular
-    from scoutmb.adapters.files.tabular import TabularAttendeeSource
-    from scoutmb.features.ingest.service import IngestService
 
     entries = {
         "load_csv": lambda: tabular.load_csv(path),
         "load_xlsx": lambda: tabular.load_xlsx(path, spec.sheet_arg),
         "load_json": lambda: tabular.load_json(path),
         "load_text": lambda: tabular.load_text(path),
-        "load_inputs": lambda: IngestService(
-            sources=(TabularAttendeeSource(sheet_name=spec.sheet_arg),),
-            include_adults=spec.include_adults,
-        ).load(path),
     }
     try:
         result = entries[spec.entry]()
@@ -2931,12 +2948,18 @@ def _invoke(spec: InputSpec, path: Path) -> InputObservation:
 
 
 @pytest.mark.parametrize(("case", "context_id"), execution_params(INPUT_CASES))
-def test_package_input_matches_expectations(case, context_id: str, tmp_path: Path) -> None:
+def test_package_parsers_match_expectations(case, context_id: str, tmp_path: Path) -> None:
     if context_id not in _FILE_CONTEXTS:
         pytest.skip(f"{context_id} is a legacy-module import probe, not a package context")
+    if case.input.entry == "load_inputs":
+        pytest.skip("orchestration entry; covered in Task 17 once IngestService exists")
     path = _materialize(case.input, context_id, tmp_path)
     assert _invoke(case.input, path) == case.expected_legacy
 ```
+
+> Task 17 removes the `load_inputs` skip and adds the service-backed branch. Splitting it this
+> way keeps each task's suite green at its own commit, which the linear-chain assumption in an
+> earlier draft quietly violated.
 
 > The `subprocess` context probes what importing `scout_schedule_cli` pulls in under a blocked
 > dependency profile. That is a property of the legacy module, not of the package, so it is
@@ -3060,14 +3083,26 @@ no OpenCV, PyMuPDF, or Playwright.
 
 **Files:**
 - Create: `src/scoutmb/adapters/pdf/extract.py`
-- Modify: `pdf_to_scouts.py` (module-scope `cv2`/`fitz`/`numpy` → adapter)
 - Test: `tests/packaging/test_core_imports.py`
+
+> **`pdf_to_scouts.py` keeps its module-scope `cv2` / `fitz` / `numpy` imports.**
+> `tests/characterization/test_phase_a_gap_closure.py:702` calls
+> `pdf_to_scouts.cv2.QRCodeDetector()` and `:703` calls `pdf_to_scouts.decode_variants(...)`.
+> Those tests are frozen, so removing the module attribute breaks the suite in this task. It is
+> also not required: the optional-dependency contract scopes to `core`, `ports`, and
+> `features` inside `src/scoutmb`. `pdf_to_scouts.py` is a legacy **interface** module, and
+> interfaces may import adapters and their dependencies. An earlier draft said "module-scope
+> imports → adapter" without checking who depended on them.
 
 **Acceptance Criteria:**
 - [ ] Importing every leaf module of `core`/`ports`/`features` loads no `cv2`, `fitz`, or
-      `playwright` — proven with the **meta-path blocker**, not an environment variable
-- [ ] Requesting the PDF capability with the stack blocked raises `CapabilityUnavailable`
+      `playwright` — proven **twice**: with a meta-path blocker (proves nothing is attempted)
+      and from a **bare wheel venv with no extras** (proves the shipped artifact is installable
+      and importable without them)
+- [ ] Requesting the PDF capability raises `CapabilityUnavailable` through the **public**
+      adapter entry point, not only the private `_import_pdf_stack`
 - [ ] Leaf modules enumerated by walking the package, never a hand-kept list
+- [ ] `pdf_to_scouts.cv2` and `pdf_to_scouts.decode_variants` still resolve
 - [ ] All 46 `PDF-*` cases green
 
 **Verify:** `uv run pytest tests/packaging/test_core_imports.py tests/characterization/test_pdf_matrix.py -q` → PASS
@@ -3174,7 +3209,77 @@ def test_core_layers_never_import_the_heavy_stacks() -> None:
     )
 
 
-def test_pdf_capability_fails_closed_when_the_stack_is_blocked() -> None:
+def test_bare_wheel_install_imports_every_core_leaf(tmp_path: Path) -> None:
+    """The blocker proves nothing is ATTEMPTED; this proves the shipped wheel is INSTALLABLE
+    and importable with no extras at all. Neither implies the other."""
+    dist = tmp_path / "dist"
+    subprocess.run(["uv", "build", "--wheel", "--out-dir", str(dist)],
+                   cwd=REPO_ROOT, check=True, capture_output=True)
+    wheel = next(dist.glob("*.whl"))
+    venv = tmp_path / "venv"
+    subprocess.run(["uv", "venv", str(venv)], check=True, capture_output=True)
+    python = venv / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+    subprocess.run(["uv", "pip", "install", "--python", str(python), str(wheel)],
+                   check=True, capture_output=True)
+
+    modules = _leaf_modules()
+    code = "".join(f"import {name}\n" for name in modules) + "print('ok')"
+    result = subprocess.run([str(python), "-c", code], cwd=tmp_path,
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
+def test_pdf_capability_fails_closed_through_the_public_entry_point(tmp_path: Path) -> None:
+    """Call what a caller calls. Exercising only the private _import_pdf_stack would pass even
+    if the public function swallowed the error and returned a degraded result."""
+    from scoutmb.adapters.pdf import extract
+    from scoutmb.errors import CapabilityUnavailable
+
+    probe = tmp_path / "page.pdf"
+    probe.write_bytes(b"%PDF-1.4\n")
+
+    # Block at the meta-path level so a REAL ImportError is what the guard converts.
+    code = f"""
+import json, sys
+sys.path.insert(0, {str(SRC)!r})
+
+
+class _Blocker:
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in {{"cv2", "fitz", "numpy"}}:
+            raise ImportError("blocked")
+        return None
+
+
+sys.meta_path.insert(0, _Blocker())
+from scoutmb.adapters.pdf.extract import decode_embedded_qr
+from scoutmb.errors import CapabilityUnavailable
+try:
+    decode_embedded_qr({str(probe)!r})
+    out = {{"raised": None}}
+except CapabilityUnavailable as exc:
+    out = {{"raised": "CapabilityUnavailable", "message": str(exc)}}
+except Exception as exc:
+    out = {{"raised": type(exc).__name__, "message": str(exc)}}
+sys.stdout.write(json.dumps(out))
+"""
+    completed = subprocess.run([sys.executable, "-I", "-c", code],
+                               capture_output=True, text=True, check=False)
+    payload = json.loads(completed.stdout)
+    assert payload["raised"] == "CapabilityUnavailable", payload
+    assert "scoutmb[pdf]" in payload["message"]
+
+
+def test_legacy_pdf_module_attributes_still_resolve() -> None:
+    """Frozen tests reach pdf_to_scouts.cv2 and .decode_variants; this task must not break them."""
+    import pdf_to_scouts
+
+    assert hasattr(pdf_to_scouts, "cv2")
+    assert callable(pdf_to_scouts.decode_variants)
+
+
+def test_private_stack_guard_also_fails_closed() -> None:
     """Blocking the real import is stronger than monkeypatching the error path: it proves the
     guard converts a REAL ImportError, not a stub."""
     probe = """
@@ -3287,6 +3392,19 @@ shim over it.
 - [ ] All `IN-FILTER-*`, `IN-DEDUP-*`, and `IN-ERROR-*` cases green
 
 **Verify:** `uv run pytest tests/unit/test_ingest_service.py tests/parity/test_input_adapter_parity.py tests/characterization/test_input_matrix.py tests/architecture -q` → PASS
+
+**Also in this task:** remove the `load_inputs` skip Task 15 left in
+`tests/parity/test_input_adapter_parity.py` and add the service branch to `_invoke`:
+
+```python
+        "load_inputs": lambda: IngestService(
+            sources=(TabularAttendeeSource(sheet_name=spec.sheet_arg),),
+            include_adults=spec.include_adults,
+        ).load(path),
+```
+
+with `from scoutmb.adapters.files.tabular import TabularAttendeeSource` and
+`from scoutmb.features.ingest.service import IngestService` added to `_invoke`.
 
 **Recovery:** Restore `load_inputs`'s original body from git; the service becomes unreferenced.
 
@@ -3503,6 +3621,9 @@ git commit -m "refactor: move ingest policy into the feature; adapters now only 
 
 **Acceptance Criteria:**
 - [ ] Nothing under `src/scoutmb` imports `pdf_to_scouts`
+- [ ] The shim re-exports **every** symbol the frozen suite touches — confirm with
+      `rg -n 'pdf_to_scouts\.[a-z_]+' tests/` before writing it, including `decode_variants`,
+      `add_quiet_zone`, `page_regions`, `choose_qr_value`, and the `cv2`/`np` module bindings
 - [ ] `troop349-pdf --help` matches `python pdf_to_scouts.py --help` except the program name
 - [ ] Same options, defaults, exit codes, stdout **and stderr**
 - [ ] The CLI runs from a directory outside the repository, from an installed wheel
@@ -3642,11 +3763,22 @@ in Slice 2b together with its runners.
 
 from __future__ import annotations
 
+# Re-export EVERY symbol the frozen characterization suite touches. Verified with:
+#   rg -n 'pdf_to_scouts\.[a-z_]+' tests/
+# tests/characterization/test_phase_a_gap_closure.py reaches decode_variants, add_quiet_zone
+# and the cv2 MODULE OBJECT (pdf_to_scouts.cv2.QRCodeDetector()), so the module binding is part
+# of the surface, not an implementation detail.
+import cv2  # noqa: F401 - legacy public surface: tests call pdf_to_scouts.cv2.QRCodeDetector()
+import numpy as np  # noqa: F401 - same
 from scoutmb.adapters.pdf.pages import (  # noqa: F401 - legacy public surface
+    add_quiet_zone,
+    choose_qr_value,
     decode_embedded_qr,
     decode_rendered_qr,
+    decode_variants,
     extract_page_identity,
     normalize_obvious_case,
+    page_regions,
 )
 from scoutmb.features.ingest.pdf_extract import (  # noqa: F401
     expand_pdf_inputs,
@@ -3737,37 +3869,35 @@ def _class(scout: str, attendee: str) -> ClassRecord:
     )
 
 
+# Sentinels go ONLY in the fields the shareable projection actually removes or never carries.
+# An earlier draft also seeded `description`, `requirement_id`, and an error string -- but the
+# shareable schema PRESERVES those fields verbatim, and the V1->V2 rule requires every
+# non-identity value to be unchanged. So "no sentinel reaches report.html" would have been
+# unsatisfiable without violating the schema: the test and the contract contradicted.
+#
+# In 2a the record shape holds exactly two forbidden values: the upstream attendee ID and the
+# QR bearer token. Session material and raw payload fragments live in gateway state that does
+# not exist until 2b; their sentinels belong to 2b's gateway fixture, not here.
+SENTINEL_UPSTREAM_ID = "zzsentinel-upstream-id-should-never-leak"
+SENTINEL_QR_TOKEN = "zzsentinel-qr-bearer-token-should-never-leak"
+
+
 def sentinel_results() -> list[ScoutResult]:
-    """The golden fixture with a DISTINCT sentinel in every forbidden position.
+    """The golden fixture plus one attendee carrying a sentinel in each forbidden field.
 
-    The privacy assertions are only meaningful if the values they forbid are actually present
-    upstream: asserting that a string the fixture never contained is absent from the output is
-    a test that cannot fail. Each sentinel occupies the field an adapter would leak it through.
+    A privacy assertion is only meaningful if the value it forbids is actually present
+    upstream: asserting the absence of a string the fixture never contained is a test that
+    cannot fail.
     """
-    upstream = "zzsentinel-upstream-id-should-never-leak"
-    qr = "zzsentinel-qr-bearer-token-should-never-leak"
-    session = "zzsentinel-session-cookie-should-never-leak"
-    payload = "zzsentinel-raw-payload-fragment-should-never-leak"
-    abs_path = "/zzsentinel/absolute/path/should/never/leak"
-
     name = "Sentinel Subject"
     return [
         ScoutResult(
             name=name,
-            qr_url=f"https://scoutingevent.com/mobile/checkin?t={qr}",
-            attendee_id=upstream,
-            classes=(_class(name, upstream),),
-            requirements=(
-                RequirementRecord(
-                    scout_name=name, attendee_id=upstream, class_number="26MB1",
-                    class_p4_id="2000001", merit_badge_name="Chess", requirement_id=payload,
-                    requirement_type_id="1", requirement_number="1",
-                    description=f"See {abs_path} and cookie {session}.",
-                    completed_requirement=False, completed_class=False,
-                    requirement_on_event=True, present_days="MoTuWeTh",
-                ),
-            ),
-            errors=(f"failed reading {abs_path}",),
+            qr_url=f"https://scoutingevent.com/mobile/checkin?t={SENTINEL_QR_TOKEN}",
+            attendee_id=SENTINEL_UPSTREAM_ID,
+            classes=(_class(name, SENTINEL_UPSTREAM_ID),),
+            requirements=(_requirement(name, SENTINEL_UPSTREAM_ID, "1"),),
+            errors=("requirement fetch failed",),
         ),
         *golden_results(),
     ]
@@ -3874,11 +4004,12 @@ def _normalize(value: object, uuid_map: dict[str, str]) -> object:
 def build(kind: str) -> dict[str, object]:
     """Render the fixture through the CURRENT implementation and normalize.
 
-    `kind` is metadata only -- it records which projection the current code produces, it does
-    not select one. That is deliberate: after Task 23 the implementation emits the shareable
-    projection, and build("v1") must then report the shareable shape so the V1 golden's
-    comparison FAILS loudly rather than silently regenerating. Task 23 re-points the V1 test
-    at a stored-vs-stored comparison for exactly this reason.
+    `kind` LABELS the output; it does not select a projection -- the running implementation
+    decides that. Calling build("v1") after Task 23 therefore produces shareable data tagged
+    "v1", which is deliberate: the V1 golden comparison must FAIL loudly rather than silently
+    regenerate. To make that impossible to trip over by accident, the writer refuses to
+    overwrite a golden whose stored `kind` differs from the one requested; use --force to
+    re-baseline intentionally.
     """
     import scout_schedule_cli as legacy
 
@@ -3912,9 +4043,20 @@ def main() -> int:
     kind = sys.argv[1] if len(sys.argv) > 1 else "v1"
     target = REPO_ROOT / "tests" / "goldens" / f"{kind}_{'operational' if kind == 'v1' else 'shareable'}.json"
     payload = json.dumps(build(kind), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    if target.exists() and target.read_text(encoding="utf-8") == payload:
-        print(f"{target.name}: unchanged")
-        return 0
+
+    if target.exists():
+        stored = json.loads(target.read_text(encoding="utf-8"))
+        if stored["kind"] != kind and "--force" not in sys.argv:
+            print(
+                f"refusing to overwrite {target.name}: it holds kind={stored['kind']!r} and the "
+                f"running implementation now produces kind={kind!r}. V1 is a fixed reference "
+                "point for the V1->V2 diff; pass --force only to deliberately re-baseline."
+            )
+            return 1
+        if target.read_text(encoding="utf-8") == payload:
+            print(f"{target.name}: unchanged")
+            return 0
+
     target.write_text(payload, encoding="utf-8")
     print(f"{target.name}: written — REVIEW THE DIFF before committing")
     return 0
@@ -4184,12 +4326,12 @@ def test_no_report_token_survives_rendering() -> None:
 
 
 def test_script_close_and_line_separators_cannot_break_out() -> None:
-    hostile = {"scouts": [{"name": "</script><script>alert(1)</script>  "}],
+    hostile = {"scouts": [{"name": "</script><script>alert(1)</script>"}],
                "classes": [], "requirements": [], "errors": []}
     html = render_report(hostile)
     assert "</script><script>" not in html
-    assert " " not in html
-    assert " " not in html
+    assert "" not in html
+    assert "" not in html
 
 
 def test_rendered_payload_round_trips(tmp_path: Path) -> None:
@@ -4320,7 +4462,16 @@ from tests.goldens.fixture import golden_results
 
 
 _UUID32 = re.compile(r"[0-9a-f]{32}")
-_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^\"<]*")
+# Match ONLY the two timestamp grammars write_outputs emits:
+#   local: "2026-07-24 09:00:00 UTC"   (time.strftime("%Y-%m-%d %H:%M:%S %Z"))
+#   iso:   "2026-07-24T09:00:00+00:00" (datetime.isoformat(timespec="seconds"))
+# An open-ended tail like [^"<]* would swallow whatever text follows a timestamp and could
+# mask a real regression sitting right after it.
+_TIMESTAMP = re.compile(
+    r"\d{4}-\d{2}-\d{2}"
+    r"(?:T\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2}|Z)"      # ISO with offset
+    r"| \d{2}:\d{2}:\d{2}(?: [A-Z]{2,5})?)"              # local with optional tz abbrev
+)
 
 
 def _mask_timestamps(text: str) -> str:
@@ -4349,7 +4500,7 @@ def _normalized_tree(root: Path) -> dict[str, str]:
 
 def test_write_outputs_is_byte_identical_through_the_service(tmp_path: Path) -> None:
     import scout_schedule_cli as legacy
-    from scoutmb.features.reporting.service import ReportingService
+    from scoutmb.interfaces.cli.composition import build_reporting_service
 
     fixed_local, fixed_iso = "2026-07-24 09:00:00 UTC", "2026-07-24T09:00:00+00:00"
 
@@ -4359,7 +4510,7 @@ def test_write_outputs_is_byte_identical_through_the_service(tmp_path: Path) -> 
 
     via = tmp_path / "via"
     identity_b = legacy.RunIdentity()
-    ReportingService().publish(
+    build_reporting_service().publish(
         via, golden_results(), generate_email_report=True, run_identity=identity_b,
         generated_at_local=fixed_local, generated_at_iso=fixed_iso,
     )
@@ -4424,11 +4575,23 @@ timestamps, and the run identity as parameters. Every write goes through `self.s
 through a direct `atomic_write_text` call — that is what the architecture test checks.
 
 ```python
+# src/scoutmb/ports/artifact_sink.py -- append
+class ReportRenderer(Protocol):
+    """Turns the report data mapping into a complete HTML document.
+
+    Satisfied by adapters/html/report.render_report. A Protocol rather than a callable alias
+    so the parameter name and return type are part of the contract.
+    """
+
+    def __call__(self, report_data: dict[str, Any]) -> str: ...
+```
+
+```python
 # src/scoutmb/features/reporting/service.py
 @dataclass(frozen=True, slots=True)
 class ReportingService:
     sink: ArtifactSink
-    renderer: ReportRenderer  # Protocol satisfied by adapters/html/report.render_report
+    renderer: ReportRenderer
 
     def publish(
         self,
@@ -4491,9 +4654,12 @@ git commit -m "refactor: move output composition into a reporting feature over a
 - [ ] Four transformed collections; the top-level object unchanged (`ART-SCHEMA-006` holds)
 - [ ] `output_id` occupies the index `attendee_id` held — deletion plus insertion, no reorder
 - [ ] Unresolved attempts carry `output_id: null`, never a placeholder, and never merge
-- [ ] Exact field-set equality per collection, asserted on the **rendered file's parsed JSON**
-- [ ] A distinct sentinel in every forbidden position: upstream ID, QR token, session material,
-      raw payload fragment, absolute path
+- [ ] Exact field-set equality for **all four** transformed collections, asserted on the
+      rendered file's parsed JSON (a subset check passes when a leaked field is added)
+- [ ] A distinct sentinel in each forbidden field the 2a record shape can carry — the upstream
+      attendee ID and the QR token. Session and raw-payload sentinels belong to 2b's gateway
+      fixture; seeding them in a preserved field like `description` would contradict the
+      shareable schema, which keeps that field verbatim
 - [ ] **V1→V2 diff equals exactly the substitution** and nothing else
 - [ ] CSVs unchanged — `ART-SCHEMA-002/003/004/007` all still green
 
@@ -4526,13 +4692,11 @@ import pytest
 
 from scoutmb.core.models import ClassRecord, RequirementRecord
 
-SENTINELS = {
-    "upstream_id": "zzsentinel-upstream-id-should-never-leak",
-    "qr_token": "zzsentinel-qr-bearer-token-should-never-leak",
-    "session": "zzsentinel-session-cookie-should-never-leak",
-    "payload": "zzsentinel-raw-payload-fragment-should-never-leak",
-    "abs_path": "/zzsentinel/absolute/path/should/never/leak",
-}
+# Only the two the 2a record shape can actually carry; see tests/goldens/fixture.py for why
+# session/raw-payload sentinels are 2b's, not ours.
+from tests.goldens.fixture import SENTINEL_QR_TOKEN, SENTINEL_UPSTREAM_ID
+
+SENTINELS = {"upstream_id": SENTINEL_UPSTREAM_ID, "qr_token": SENTINEL_QR_TOKEN}
 
 _EXPECTED_CLASS = [f.name for f in fields(ClassRecord) if f.name != "attendee_id"] + ["output_id"]
 _EXPECTED_REQ = [f.name for f in fields(RequirementRecord) if f.name != "attendee_id"] + ["output_id"]
@@ -4561,11 +4725,33 @@ def test_class_rows_have_exactly_the_shareable_field_set(rendered: dict) -> None
         assert sorted(row) == sorted(_EXPECTED_CLASS)
 
 
+_EXPECTED_SCOUT = ["name", "output_id", "class_count", "requirement_count", "error_count"]
+_EXPECTED_ERROR = ["scout_name", "output_id", "error"]
+# annotate_requirement_statuses adds these display-only keys to requirement rows.
+_INFERENCE_KEYS = {
+    "requirement_path", "parent_requirement_number", "calculated_status",
+    "calculated_status_reason", "completed_subrequirements", "total_subrequirements",
+    "choice_required_count",
+}
+
+
+def test_scout_rows_have_exactly_the_shareable_field_set(rendered: dict) -> None:
+    for row in rendered["scouts"]:
+        assert list(row) == _EXPECTED_SCOUT
+
+
+def test_error_rows_have_exactly_the_shareable_field_set(rendered: dict) -> None:
+    for row in rendered["errors"]:
+        assert list(row) == _EXPECTED_ERROR
+
+
 def test_requirement_rows_have_exactly_the_shareable_field_set(rendered: dict) -> None:
+    """Exact, not a subset: a subset check passes when a leaked field is ADDED, which is the
+    only direction that matters here."""
     for row in rendered["requirements"]:
-        # Inference adds display-only keys; the identity fields are what is pinned here.
-        assert "attendee_id" not in row
-        assert "output_id" in row
+        assert set(row) - _INFERENCE_KEYS == set(_EXPECTED_REQ), sorted(
+            set(row) - _INFERENCE_KEYS ^ set(_EXPECTED_REQ)
+        )
 
 
 def test_no_sentinel_reaches_the_shareable_report(rendered: dict) -> None:
@@ -4581,15 +4767,6 @@ def test_unresolved_attempt_carries_null_output_id(rendered: dict) -> None:
     unreached = [s for s in rendered["scouts"] if s["name"] == "Morgan Unreached"]
     assert len(unreached) == 1
     assert unreached[0]["output_id"] is None
-
-
-def test_requirement_rows_have_exactly_the_shareable_identity_fields(rendered: dict) -> None:
-    """Inference adds display-only keys, so assert the identity fields exactly and require the
-    rest to be a superset of the record shape -- not a bare 'attendee_id not in row'."""
-    for row in rendered["requirements"]:
-        assert "attendee_id" not in row
-        assert "output_id" in row
-        assert set(_EXPECTED_REQ) <= set(row), sorted(set(_EXPECTED_REQ) - set(row))
 
 
 def test_two_unresolved_attempts_do_not_merge(tmp_path: Path) -> None:
@@ -4706,6 +4883,10 @@ cannot hide inside the intentional change."
 - [ ] Legacy areas whose module is now pure delegation replaced by the no-business-logic check
 - [ ] All 16 `BranchExclusion` entries still resolve — none stale
 - [ ] `preserve`-case digest checked in; CI fails on an unexplained change
+- [ ] The digest is **process-stable**: canonical JSON with sorted sets and mappings, never
+      `repr()` — `repr(frozenset)` iterates in hash order and PEP 456 randomizes string hashing
+      per process, so a repr digest reports drift at random
+- [ ] `tools/check_case_digest.py` run twice in separate processes yields identical output
 
 **Verify:** `uv run pytest tests/matrix -q && uv run python tools/check_phase_a_coverage.py --check` → PASS
 
@@ -4731,9 +4912,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -4763,21 +4946,40 @@ def _case_tuples() -> list[tuple[str, tuple[object, ...]]]:
     ]
 
 
-def _canonical(case: object) -> str:
-    """Stable text for whichever expectation field this domain uses.
+def _canonicalize(value: object) -> object:
+    """Recursively convert to a JSON-safe, order-stable structure.
 
-    repr() of a frozen dataclass is deterministic within a version; dict ordering inside
-    expected_by_context is insertion order, which is stable in the source. Sorting the field
-    names keeps the digest independent of which fields a domain happens to define.
+    NOT repr(). `repr(frozenset)` iterates in hash order, and string hashing is randomized per
+    process (PEP 456), so a repr-based digest changes between CI runs and reports oracle drift
+    that did not happen. Verified: three interpreters printed three different orderings for the
+    same frozenset. Sets are sorted, mappings are key-sorted, dataclasses become dicts, and
+    tuples and lists are distinguished by a tag so a shape change is still detected.
     """
-    parts = [
-        f"{field}={getattr(case, field)!r}"
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {"__dc__": type(value).__name__,
+                **{f.name: _canonicalize(getattr(value, f.name)) for f in dataclasses.fields(value)}}
+    if isinstance(value, Mapping):
+        return {"__map__": [[_canonicalize(k), _canonicalize(v)] for k, v in sorted(value.items(), key=lambda kv: repr(kv[0]))]}
+    if isinstance(value, (set, frozenset)):
+        return {"__set__": sorted((_canonicalize(v) for v in value), key=repr)}
+    if isinstance(value, tuple):
+        return {"__tuple__": [_canonicalize(v) for v in value]}
+    if isinstance(value, list):
+        return [_canonicalize(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return {"__repr__": repr(value)}
+
+
+def _canonical(case: object) -> str:
+    payload = {
+        field: _canonicalize(getattr(case, field))
         for field in sorted(_EXPECTATION_FIELDS)
         if hasattr(case, field)
-    ]
-    if not parts:
+    }
+    if not payload:
         raise RuntimeError(f"no expectation field on {type(case).__name__}; update the provider")
-    return "|".join(parts)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
 def compute() -> dict[str, str]:
@@ -4846,12 +5048,39 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_preserve_case_expectations_are_unchanged() -> None:
-    result = subprocess.run(
-        [sys.executable, "tools/check_case_digest.py"],
-        cwd=REPO_ROOT, capture_output=True, text=True,
+def _run(*args: str, seed: str | None = None) -> subprocess.CompletedProcess[str]:
+    env = None
+    if seed is not None:
+        import os
+
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+    return subprocess.run(
+        [sys.executable, "tools/check_case_digest.py", *args],
+        cwd=REPO_ROOT, capture_output=True, text=True, env=env,
     )
+
+
+def test_preserve_case_expectations_are_unchanged() -> None:
+    result = _run()
     assert result.returncode == 0, result.stdout
+
+
+def test_digest_is_stable_across_hash_seeds() -> None:
+    """The guard against the repr() trap: differing PYTHONHASHSEED must not change the digest.
+
+    Without canonical serialization this fails intermittently in CI and looks like real
+    oracle drift, which is the worst possible failure mode for this particular gate.
+    """
+    first = _run("--print", seed="0")
+    second = _run("--print", seed="12345")
+    assert first.stdout == second.stdout != ""
+```
+
+Add the `--print` flag to the tool so the test can compare output without writing:
+
+```python
+    parser.add_argument("--print", dest="show", action="store_true",
+                        help="write the computed digests to stdout and exit")
 ```
 
 - [ ] **Step 3: Dual-name the moved boundaries.** For each `BoundarySpec` whose
