@@ -20,7 +20,6 @@ import random
 import re
 import sys
 import time
-import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -30,45 +29,19 @@ from urllib.parse import parse_qs
 from openpyxl import load_workbook
 from playwright.async_api import Browser, BrowserContext, Page, Response, async_playwright
 
+from scoutmb.core.identity import (  # noqa: F401 - re-exported for the legacy public surface
+    AttendeeId,
+    MissingAttendeeId,
+    RunIdentity,
+    attendee_filename_stem,
+    safe_slug,
+)
+
 AJAX_URL = "https://scoutingevent.com/mobile/inc/ajax_mobile.php"
 DEAD_ASSET_HOSTS = {
     "mike.dev.admin.247scouting.com",
     "mike.dev.scoutingevent.com",
 }
-
-
-class MissingAttendeeId(RuntimeError):
-    """An attendee record arrived without the ID we use as identity."""
-
-    def __init__(self, scout_name: str = "") -> None:
-        self.scout_name = scout_name
-        super().__init__(f"No attendee_id for {scout_name or 'an unnamed attendee'}")
-
-
-@dataclass(frozen=True, slots=True)
-class AttendeeId:
-    value: str
-
-    @classmethod
-    def parse(cls, raw: str, scout_name: str = "") -> "AttendeeId":
-        cleaned = str(raw or "").strip()
-        if not cleaned:
-            raise MissingAttendeeId(scout_name)
-        return cls(cleaned)
-
-
-@dataclass(slots=True)
-class RunIdentity:
-    """Assigns a UUIDv4 per attendee for one run. Stable within the run instance."""
-
-    _by_attendee: dict[str, str] = field(default_factory=dict)
-
-    def output_id(self, attendee: AttendeeId) -> str:
-        existing = self._by_attendee.get(attendee.value)
-        if existing is None:
-            existing = str(uuid.uuid4())
-            self._by_attendee[attendee.value] = existing
-        return existing
 
 
 # NOTE: scoutmb.core.models holds the package copies of these four shapes, proven
@@ -633,19 +606,6 @@ async def process_scout(
         await context.close()
 
     return result
-
-
-def safe_slug(value: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", value.strip()).strip("-").lower()
-    return slug or "unknown-scout"
-
-
-def attendee_filename_stem(scout_name: str, output_id: str) -> str:
-    """Readable, collision-free filename stem: name slug + the FULL per-run output UUID
-    (hyphens stripped). The full UUID — never a truncation — guarantees distinct attendees
-    get distinct filenames. Never the raw attendee_id (a bearer token that must not appear
-    in a shareable filename)."""
-    return f"{safe_slug(scout_name)}-{str(output_id).replace('-', '')}"
 
 
 def atomic_write_text(path: Path, content: str, encoding: str = "utf-8-sig") -> None:
