@@ -41,6 +41,7 @@ from scoutmb.core.inference.numbering import (  # noqa: F401 - legacy public sur
     choice_requirement_count,
     requirement_path,
 )
+from scoutmb.core.inference.tree import build_group_tree
 
 AJAX_URL = "https://scoutingevent.com/mobile/inc/ajax_mobile.php"
 DEAD_ASSET_HOSTS = {
@@ -669,45 +670,18 @@ def annotate_requirement_statuses(requirements: list[dict[str, Any]]) -> list[di
         grouped.setdefault((_attendee_key_for(item), str(item.get("class_p4_id") or "")), []).append(item)
 
     for group in grouped.values():
-        current_top_level: str | None = None
-        paths: list[tuple[str, ...]] = []
-        for item in group:
-            path, current_top_level = requirement_path(str(item.get("requirement_number") or ""), current_top_level)
-            paths.append(path)
+        tree = build_group_tree(
+            tuple(str(item.get("requirement_number") or "") for item in group),
+            tuple(str(item.get("requirement_type_id") or "") for item in group),
+        )
+        for item, path in zip(group, tree.paths, strict=True):
             item["requirement_path"] = list(path)
-
-        children: list[list[int]] = [[] for _ in group]
-        prior_path_indexes: dict[tuple[str, ...], int] = {}
-        header_stack: list[tuple[int, int]] = []
-
-        for index, (item, path) in enumerate(zip(group, paths)):
-            parent_index: int | None = None
-            if len(path) > 1:
-                for depth in range(len(path) - 1, 0, -1):
-                    candidate = path[:depth]
-                    if candidate in prior_path_indexes:
-                        parent_index = prior_path_indexes[candidate]
-                        break
-
-            # Fallback for malformed numbering: use the nearest prior header with
-            # a shallower inferred path. This preserves ordering without making
-            # assumptions across unrelated top-level requirements.
-            if parent_index is None and len(path) > 1:
-                for candidate_index, candidate_depth in reversed(header_stack):
-                    if candidate_depth < len(path):
-                        parent_index = candidate_index
-                        break
-
+        children = [list(group_children) for group_children in tree.children]
+        for index, parent_index in enumerate(tree.parent_index):
             if parent_index is not None:
-                children[parent_index].append(index)
-                item["parent_requirement_number"] = group[parent_index].get("requirement_number")
-
-            if path:
-                prior_path_indexes[path] = index
-            if str(item.get("requirement_type_id") or "") == "3":
-                while header_stack and header_stack[-1][1] >= len(path):
-                    header_stack.pop()
-                header_stack.append((index, len(path)))
+                group[index]["parent_requirement_number"] = group[parent_index].get(
+                    "requirement_number"
+                )
 
         cache: dict[int, tuple[str, str]] = {}
 
