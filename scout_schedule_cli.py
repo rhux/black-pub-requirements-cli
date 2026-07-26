@@ -23,10 +23,18 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Iterable
+from typing import Any, Awaitable, Callable
 from urllib.parse import parse_qs
 
-from openpyxl import load_workbook
+from scoutmb.adapters.files.tabular import (  # noqa: F401 - legacy public surface
+    first_matching_key,
+    load_csv,
+    load_json,
+    load_text,
+    load_xlsx,
+    norm_header,
+)
+
 from playwright.async_api import Browser, BrowserContext, Page, Response, async_playwright
 
 from scoutmb.core.identity import (  # noqa: F401 - re-exported for the legacy public surface
@@ -167,18 +175,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def norm_header(value: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
-
-
-def first_matching_key(headers: dict[str, int], candidates: Iterable[str]) -> int | None:
-    for candidate in candidates:
-        key = norm_header(candidate)
-        if key in headers:
-            return headers[key]
-    return None
-
-
 def load_inputs(path: Path, sheet_name: str, include_adults: bool) -> list[ScoutInput]:
     suffix = path.suffix.lower()
     if suffix == ".xlsx":
@@ -208,98 +204,6 @@ def load_inputs(path: Path, sheet_name: str, include_adults: bool) -> list[Scout
     if not filtered:
         raise ValueError(f"No ScoutingEvent QR URLs found in {path}")
     return filtered
-
-
-def load_xlsx(path: Path, sheet_name: str) -> list[ScoutInput]:
-    workbook = load_workbook(path, read_only=True, data_only=True)
-    if sheet_name in workbook.sheetnames:
-        sheet = workbook[sheet_name]
-    elif "Scouts Only" in workbook.sheetnames:
-        sheet = workbook["Scouts Only"]
-    else:
-        sheet = workbook[workbook.sheetnames[0]]
-
-    rows = list(sheet.iter_rows(values_only=True))
-    if not rows:
-        return []
-    headers = {norm_header(value): index for index, value in enumerate(rows[0])}
-    name_index = first_matching_key(headers, ["Attendee Name", "Name", "Scout Name"])
-    url_index = first_matching_key(headers, ["QR Code Contents", "URL", "QR URL", "Link"])
-    type_index = first_matching_key(headers, ["Registrant Type", "Type"])
-    if url_index is None:
-        raise ValueError(f"Could not find a URL column in XLSX sheet {sheet.title!r}")
-
-    result: list[ScoutInput] = []
-    for row in rows[1:]:
-        url = str(row[url_index] or "")
-        name = str(row[name_index] or "") if name_index is not None else ""
-        registrant_type = str(row[type_index] or "") if type_index is not None else ""
-        result.append(ScoutInput(name=name, url=url, registrant_type=registrant_type))
-    return result
-
-
-def load_csv(path: Path) -> list[ScoutInput]:
-    with path.open("r", encoding="utf-8-sig", newline="") as stream:
-        reader = csv.DictReader(stream)
-        if reader.fieldnames:
-            header_map = {norm_header(name): name for name in reader.fieldnames}
-            url_key = next(
-                (header_map[norm_header(name)] for name in ["QR Code Contents", "URL", "QR URL", "Link"] if norm_header(name) in header_map),
-                None,
-            )
-            name_key = next(
-                (header_map[norm_header(name)] for name in ["Attendee Name", "Name", "Scout Name"] if norm_header(name) in header_map),
-                None,
-            )
-            type_key = next(
-                (header_map[norm_header(name)] for name in ["Registrant Type", "Type"] if norm_header(name) in header_map),
-                None,
-            )
-            if url_key:
-                return [
-                    ScoutInput(
-                        name=(row.get(name_key, "") if name_key else "") or "",
-                        url=(row.get(url_key, "") or ""),
-                        registrant_type=(row.get(type_key, "") if type_key else "") or "",
-                    )
-                    for row in reader
-                ]
-
-    # Fall back to one URL per line if the CSV does not have recognizable headers.
-    return load_text(path)
-
-
-def load_json(path: Path) -> list[ScoutInput]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(payload, dict):
-        payload = payload.get("scouts") or payload.get("data") or [payload]
-    result: list[ScoutInput] = []
-    for item in payload:
-        if isinstance(item, str):
-            result.append(ScoutInput(name="", url=item))
-        elif isinstance(item, dict):
-            result.append(
-                ScoutInput(
-                    name=str(item.get("name") or item.get("attendee_name") or ""),
-                    url=str(item.get("url") or item.get("qr_url") or item.get("qr_code_contents") or ""),
-                    registrant_type=str(item.get("registrant_type") or item.get("type") or ""),
-                )
-            )
-    return result
-
-
-def load_text(path: Path) -> list[ScoutInput]:
-    result: list[ScoutInput] = []
-    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "," in line and "https://" in line:
-            name, url = line.split(",", 1)
-            result.append(ScoutInput(name=name.strip(), url=url.strip()))
-        else:
-            result.append(ScoutInput(name="", url=line))
-    return result
 
 
 def form_values(post_data: str | None) -> dict[str, str]:
