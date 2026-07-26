@@ -44,6 +44,7 @@ from scoutmb.core.inference.numbering import (  # noqa: F401 - legacy public sur
 from scoutmb.core.inference.missing import group_missing_requirements
 from scoutmb.core.inference.status import calculate_statuses
 from scoutmb.core.inference.tree import build_group_tree
+from scoutmb.core.models import ClassRecord, RequirementRecord  # noqa: F401 - legacy surface
 
 AJAX_URL = "https://scoutingevent.com/mobile/inc/ajax_mobile.php"
 DEAD_ASSET_HOSTS = {
@@ -53,47 +54,14 @@ DEAD_ASSET_HOSTS = {
 
 
 # NOTE: scoutmb.core.models holds the package copies of these four shapes, proven
-# field-identical by tests/parity/test_models_parity.py. ClassRecord/RequirementRecord become
-# aliases in Slice 2a Task 14; ScoutResult in Slice 2b, once process_scout stops mutating it.
+# field-identical by tests/parity/test_models_parity.py. ClassRecord/RequirementRecord are
+# aliases of the package shapes (imported above) as of Slice 2a Task 14; ScoutResult stays
+# legacy-defined until Slice 2b, once process_scout stops mutating it.
 @dataclass(slots=True)
 class ScoutInput:
     name: str
     url: str
     registrant_type: str = ""
-
-
-@dataclass(slots=True)
-class ClassRecord:
-    scout_name: str
-    attendee_id: str
-    class_number: str
-    class_p4_id: str
-    class_name: str
-    days: str
-    period_name: str
-    start_time: str
-    start_time_24h: str
-    location: str
-    has_requirements: bool
-    class_completed: bool
-    raw_class_name: str
-
-
-@dataclass(slots=True)
-class RequirementRecord:
-    scout_name: str
-    attendee_id: str
-    class_number: str
-    class_p4_id: str
-    merit_badge_name: str
-    requirement_id: str
-    requirement_type_id: str
-    requirement_number: str
-    description: str
-    completed_requirement: bool
-    completed_class: bool
-    requirement_on_event: bool
-    present_days: str
 
 
 @dataclass(slots=True)
