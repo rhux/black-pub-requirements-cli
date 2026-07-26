@@ -41,6 +41,7 @@ from scoutmb.core.inference.numbering import (  # noqa: F401 - legacy public sur
     choice_requirement_count,
     requirement_path,
 )
+from scoutmb.core.inference.missing import group_missing_requirements
 from scoutmb.core.inference.status import calculate_statuses
 from scoutmb.core.inference.tree import build_group_tree
 
@@ -713,68 +714,11 @@ def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[s
     """
     flattened = [dict(req) for scout in scouts for req in scout.get("requirements", [])]
     annotated = annotate_requirement_statuses(flattened)
-
-    by_key = {
-        (_attendee_key_for(item), str(item.get("class_p4_id") or ""), str(item.get("requirement_number") or "")): item
-        for item in annotated
-    }
-
-    def is_not_used(item: dict[str, Any]) -> bool:
-        return "(not used)" in clean_html_description(str(item.get("description") or "")).lower()
-
-    def is_actionable_leaf(item: dict[str, Any]) -> bool:
-        return (
-            item.get("calculated_status") == "incomplete"
-            and "total_subrequirements" not in item
-            and str(item.get("requirement_type_id") or "") != "3"
-            and not is_not_used(item)
-        )
-
-    selected: dict[int, bool] = {}  # id(item) -> is_leaf
-    for item in annotated:
-        if not is_actionable_leaf(item):
-            continue
-        current = item
-        is_leaf = True
-        while current is not None and id(current) not in selected:
-            selected[id(current)] = is_leaf
-            is_leaf = False
-            parent_number = current.get("parent_requirement_number")
-            if parent_number is None:
-                break
-            parent_key = (
-                _attendee_key_for(current),
-                str(current.get("class_p4_id") or ""),
-                str(parent_number),
-            )
-            parent = by_key.get(parent_key)
-            if parent is None or parent.get("calculated_status") in {"complete", "complete_check"}:
-                break
-            current = parent
-
-    grouped: dict[str, dict[str, Any]] = {}
-    for item in annotated:
-        if id(item) not in selected:
-            continue
-        if is_not_used(item):
-            continue
-
-        description = clean_html_description(str(item.get("description") or ""))
-        entry = {
-            "requirement_number": str(item.get("requirement_number") or ""),
-            "description": description,
-            "is_prereq": "(pre-req)" in description.lower(),
-            "is_leaf": selected[id(item)],
-            "depth": max(len(item.get("requirement_path") or []) - 1, 0),
-        }
-        attendee_key = _attendee_key_for(item)
-        badge_name = str(item.get("merit_badge_name") or "")
-        bucket = grouped.setdefault(
-            attendee_key, {"display_name": str(item.get("scout_name") or ""), "badges": {}}
-        )
-        bucket["badges"].setdefault(badge_name, []).append(entry)
-
-    return grouped
+    return group_missing_requirements(
+        annotated,
+        attendee_key_of=_attendee_key_for,
+        clean_description=clean_html_description,
+    )
 
 
 def email_subject(scout_name: str) -> str:

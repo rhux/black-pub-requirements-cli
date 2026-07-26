@@ -48,3 +48,24 @@ def test_legacy_selection(case: RequirementCase, context_id: str) -> None:
 
     grouped = legacy.build_missing_requirements(_scouts_payload(case))
     assert observe_selection(grouped, case) == case.expected_by_context[context_id]
+
+
+@pytest.mark.parametrize(("case", "context_id"), execution_params(REQUIREMENT_DUP_CASES))
+def test_package_selection_matches_legacy(case: RequirementCase, context_id: str) -> None:
+    """The whole point of REQ-DUP-002: a naive index substitution answers this differently."""
+    import scout_schedule_cli as legacy
+
+    from scoutmb.core.inference.missing import group_missing_requirements
+
+    annotated = legacy.annotate_requirement_statuses(
+        [dict(r) for scout in _scouts_payload(case) for r in scout["requirements"]]
+    )
+    package_grouped = group_missing_requirements(
+        annotated,
+        attendee_key_of=legacy._attendee_key_for,
+        clean_description=legacy.clean_html_description,
+    )
+    legacy_grouped = legacy.build_missing_requirements(_scouts_payload(case))
+
+    assert observe_selection(package_grouped, case) == observe_selection(legacy_grouped, case)
+    assert observe_selection(package_grouped, case) == case.expected_by_context[context_id]
