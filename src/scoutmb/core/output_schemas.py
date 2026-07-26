@@ -25,9 +25,12 @@ class UnsupportedSchemaVersion(ScoutmbError):
 
 
 def check_schema_version(version: int) -> None:
-    if version not in _SUPPORTED_VERSIONS:
+    # `type(version) is int` (not isinstance, not ==) is deliberate: bool is an int subclass
+    # (isinstance(True, int) is True) and 1.0 == 1, so either check would let a bool or float
+    # masquerade as schema version 1 and defeat "fail closed".
+    if type(version) is not int or version not in _SUPPORTED_VERSIONS:
         raise UnsupportedSchemaVersion(
-            f"Schema version {version} is not supported (this build reads "
+            f"Schema version {version!r} is not supported (this build reads "
             f"{sorted(_SUPPORTED_VERSIONS)})."
         )
 
@@ -85,6 +88,20 @@ def requirement_from_mapping(data: Mapping[str, Any]) -> RequirementRecord:
 
 
 def requirement_to_row(record: RequirementRecord, *, shareable: bool) -> dict[str, Any]:
+    """Project a RequirementRecord into a plain dict, in declaration-field order.
+
+    ``shareable=True`` is NOT YET IMPLEMENTED: Task 23 wires the real field-dropping
+    projection for report.html / email bodies (redacting PII bearer tokens like
+    ``attendee_id``/``qr_url``-adjacent fields). Until then, passing ``shareable=True`` raises
+    ``NotImplementedError`` rather than silently returning the full operational row -- a loud
+    failure is safer than a silent privacy leak for any caller that assumes redaction already
+    happens here.
+    """
+    if shareable:
+        raise NotImplementedError(
+            "requirement_to_row(shareable=True) is not implemented yet -- Task 23 wires the "
+            "real field-dropping projection. Call with shareable=False until then."
+        )
     row = {field.name: getattr(record, field.name) for field in fields(RequirementRecord)}
     return _project(row, _shareable=shareable)
 
@@ -110,6 +127,20 @@ def class_from_mapping(data: Mapping[str, Any]) -> ClassRecord:
 
 
 def class_to_row(record: ClassRecord, *, shareable: bool) -> dict[str, Any]:
+    """Project a ClassRecord into a plain dict, in declaration-field order.
+
+    ``shareable=True`` is NOT YET IMPLEMENTED: Task 23 wires the real field-dropping
+    projection for report.html / email bodies (redacting PII bearer tokens like
+    ``attendee_id``/``qr_url``-adjacent fields). Until then, passing ``shareable=True`` raises
+    ``NotImplementedError`` rather than silently returning the full operational row -- a loud
+    failure is safer than a silent privacy leak for any caller that assumes redaction already
+    happens here.
+    """
+    if shareable:
+        raise NotImplementedError(
+            "class_to_row(shareable=True) is not implemented yet -- Task 23 wires the "
+            "real field-dropping projection. Call with shareable=False until then."
+        )
     row = {field.name: getattr(record, field.name) for field in fields(ClassRecord)}
     return _project(row, _shareable=shareable)
 
