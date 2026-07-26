@@ -14,6 +14,14 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+# NOTE: keep this at module scope, not function-local. scout_schedule_cli.py imports
+# this module at module scope for its legacy re-export (see the comment there next to
+# the `from scoutmb.adapters.files.tabular import ...` block), so an eager, module-scope
+# import here reproduces the pre-existing eager-import behavior that the frozen
+# IN-IMPORT-003/004 catalog cases (tests/matrix/cases/input_cases.py) depend on --
+# specifically that openpyxl is already in sys.modules by the time playwright's
+# ImportError fires under the acquisition/all profiles. Moving this inside load_xlsx
+# would silently change those cases' expected output.
 from openpyxl import load_workbook
 
 from scoutmb.core.models import ScoutInput
