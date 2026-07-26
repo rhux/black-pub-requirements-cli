@@ -18,10 +18,12 @@ from typing import Any
 # this module at module scope for its legacy re-export (see the comment there next to
 # the `from scoutmb.adapters.files.tabular import ...` block), so an eager, module-scope
 # import here reproduces the pre-existing eager-import behavior that the frozen
-# IN-IMPORT-003/004 catalog cases (tests/matrix/cases/input_cases.py) depend on --
+# IN-IMPORT-003 catalog case (tests/matrix/cases/input_cases.py) depends on --
 # specifically that openpyxl is already in sys.modules by the time playwright's
-# ImportError fires under the acquisition/all profiles. Moving this inside load_xlsx
-# would silently change those cases' expected output.
+# ImportError fires under the acquisition profile. Moving this inside load_xlsx
+# would silently change that case's expected output.
+# (IN-IMPORT-004's all profile blocks openpyxl too, so it fails on its own
+# import before order/placement matters -- unaffected by this note.)
 from openpyxl import load_workbook
 
 from scoutmb.core.models import ScoutInput

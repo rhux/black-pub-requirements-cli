@@ -27,10 +27,12 @@ from typing import Any, Awaitable, Callable
 from urllib.parse import parse_qs
 
 # NOTE: this import must stay BEFORE the playwright import below. The frozen
-# IN-IMPORT-003/004 catalog cases (tests/matrix/cases/input_cases.py) observe which
+# IN-IMPORT-003 catalog case (tests/matrix/cases/input_cases.py) observes which
 # modules are in sys.modules when playwright's ImportError fires under the
-# acquisition/all profiles -- openpyxl needs to already be imported by then.
-# Reordering this will silently change those cases' expected output.
+# acquisition profile -- openpyxl needs to already be imported by then.
+# Reordering this will silently change that case's expected output.
+# (IN-IMPORT-004's all profile blocks openpyxl too, so it fails on its own
+# import before order/placement matters -- unaffected by this note.)
 from scoutmb.adapters.files.tabular import (  # noqa: F401 - legacy public surface
     first_matching_key,
     load_csv,
