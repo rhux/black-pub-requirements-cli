@@ -4,12 +4,14 @@ The heavy wheels are imported INSIDE _import_pdf_stack, never at module scope: f
 chooses between this adapter and the tabular one, so a module-scope import here would make a
 core-only import impossible.
 
-Two ``decode_embedded_qr``-shaped things exist in this codebase and that is deliberate, not an
-oversight: ``pdf_to_scouts.decode_embedded_qr(document, page, detector)`` is the legacy
-interface's own function, unchanged, operating on objects the caller already opened. The
-``decode_embedded_qr`` defined here takes only a path -- it is the guarded public entry point
-this task's isolation test exercises, and the shape a future adapter consumer (features/ingest)
-will actually call.
+One implementation, two entry points: ``decode_embedded_qr_from_page(document, page, detector)``
+holds the candidate-filter/sort/decode logic and operates on objects a caller already opened --
+it is re-exported back into ``pdf_to_scouts.py`` AS ``decode_embedded_qr`` so the frozen
+characterization suite (``test_phase_a_gap_closure.py``, ``test_pdf_matrix.py``) keeps calling
+the exact same logic through the exact same name. ``decode_embedded_qr(pdf_path)`` defined below
+is the guarded public entry point that takes only a path -- it opens the document itself and
+delegates to ``decode_embedded_qr_from_page`` per page. It is the shape a future adapter
+consumer (features/ingest) will actually call.
 """
 
 from __future__ import annotations
@@ -21,8 +23,8 @@ from scoutmb.errors import CapabilityUnavailable
 
 _PDF_DISTRIBUTIONS = ("PyMuPDF", "opencv-python-headless", "numpy")
 
-# Duplicated from pdf_to_scouts.SCOUTINGEVENT_PREFIX (not imported -- that would make this
-# adapter depend on the legacy interface module, inverting the dependency direction).
+# Single source of truth -- pdf_to_scouts.py imports this rather than keeping its own copy, so
+# the two modules cannot desync.
 SCOUTINGEVENT_PREFIX = "https://scoutingevent.com/mobile/"
 
 
@@ -174,49 +176,74 @@ def decode_rendered_qr(
     return "", "", last_render
 
 
+def decode_embedded_qr_from_page(
+    document: Any,
+    page: Any,
+    detector: Any,
+) -> tuple[str, str]:
+    """Decode the first QR value found among one page's embedded images.
+
+    This is the legacy ``pdf_to_scouts.decode_embedded_qr(document, page, detector)`` body,
+    unchanged, moved here and re-exported back into ``pdf_to_scouts.py`` under its original name
+    -- the frozen characterization suite (``test_phase_a_gap_closure.py``, ``test_pdf_matrix.py``)
+    keeps calling the exact same logic through the exact same name. It operates on an
+    already-opened ``fitz.Document``/``fitz.Page`` and a caller-supplied
+    ``cv2.QRCodeDetector``; callers who only have a path should use ``decode_embedded_qr(pdf_path)``
+    below, which opens the document itself and delegates here per page.
+    """
+    cv2, _, np = _import_pdf_stack()
+    candidates: list[tuple[int, int, int]] = []
+    seen_xrefs: set[int] = set()
+
+    for image_info in page.get_images(full=True):
+        xref = int(image_info[0])
+        width = int(image_info[2])
+        height = int(image_info[3])
+        if xref in seen_xrefs:
+            continue
+        seen_xrefs.add(xref)
+
+        # QR codes are normally square. Allow some tolerance for unusual encoders.
+        if min(width, height) < 70 or max(width, height) > 2500:
+            continue
+        if abs(width - height) > max(12, int(max(width, height) * 0.12)):
+            continue
+        candidates.append((xref, width, height))
+
+    # Smaller, square monochrome images are usually the QR rather than page artwork.
+    candidates.sort(key=lambda item: (abs(item[1] - item[2]), item[1] * item[2]))
+
+    for xref, _, _ in candidates:
+        try:
+            extracted = document.extract_image(xref)
+            raw = np.frombuffer(extracted["image"], dtype=np.uint8)
+            image = cv2.imdecode(raw, cv2.IMREAD_UNCHANGED)
+        except (KeyError, ValueError, cv2.error):
+            continue
+
+        values = decode_variants(image, detector)
+        selected = choose_qr_value(values)
+        if selected:
+            return selected, f"embedded-image:xref-{xref}"
+
+    return "", ""
+
+
 def decode_embedded_qr(pdf_path: Any) -> str:
     """Decode the first QR value found among a PDF's embedded page images.
 
     The public capability-gated entry point: callers pass only a path, never an already-opened
     fitz.Document/Page or cv2.QRCodeDetector. ``_import_pdf_stack()`` runs before anything else
     touches the file, so a missing wheel surfaces as CapabilityUnavailable, not a bare
-    ImportError deep inside PyMuPDF or OpenCV.
+    ImportError deep inside PyMuPDF or OpenCV. Opens the document itself and delegates the
+    per-page candidate-filter/sort/decode logic to ``decode_embedded_qr_from_page``.
     """
-    cv2, fitz, np = _import_pdf_stack()
+    cv2, fitz, _np = _import_pdf_stack()
     detector = cv2.QRCodeDetector()
     with fitz.open(pdf_path) as document:
         for page in document:
-            candidates: list[tuple[int, int, int]] = []
-            seen_xrefs: set[int] = set()
-
-            for image_info in page.get_images(full=True):
-                xref = int(image_info[0])
-                width = int(image_info[2])
-                height = int(image_info[3])
-                if xref in seen_xrefs:
-                    continue
-                seen_xrefs.add(xref)
-
-                # QR codes are normally square. Allow some tolerance for unusual encoders.
-                if min(width, height) < 70 or max(width, height) > 2500:
-                    continue
-                if abs(width - height) > max(12, int(max(width, height) * 0.12)):
-                    continue
-                candidates.append((xref, width, height))
-
-            # Smaller, square monochrome images are usually the QR rather than page artwork.
-            candidates.sort(key=lambda item: (abs(item[1] - item[2]), item[1] * item[2]))
-
-            for xref, _, _ in candidates:
-                try:
-                    extracted = document.extract_image(xref)
-                    raw = np.frombuffer(extracted["image"], dtype=np.uint8)
-                    image = cv2.imdecode(raw, cv2.IMREAD_UNCHANGED)
-                except (KeyError, ValueError, cv2.error):
-                    continue
-
-                selected = choose_qr_value(decode_variants(image, detector))
-                if selected:
-                    return selected
+            value, _method = decode_embedded_qr_from_page(document, page, detector)
+            if value:
+                return value
 
     return ""

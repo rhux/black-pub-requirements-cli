@@ -22,18 +22,21 @@ import fitz  # PyMuPDF
 import numpy as np
 
 # Re-exported so pdf_to_scouts.add_quiet_zone / .decode_variants / .choose_qr_value /
-# .page_regions / .render_page / .decode_rendered_qr keep resolving as module attributes (the
-# frozen characterization suite reaches several of these directly, e.g.
-# tests/characterization/test_phase_a_gap_closure.py:702-703). The actual implementations now
-# live in scoutmb/adapters/pdf/extract.py, gated behind CapabilityUnavailable -- this module
-# keeps its own eager module-scope cv2/fitz/numpy imports above, so nothing about when those
-# wheels get imported changes for this interface. decode_embedded_qr is NOT re-exported here:
-# this module's own decode_embedded_qr(document, page, detector) below operates on
-# already-opened objects and is a different, incompatible shape from the adapter's guarded
-# decode_embedded_qr(pdf_path) public entry point.
+# .page_regions / .render_page / .decode_rendered_qr / .decode_embedded_qr / .SCOUTINGEVENT_PREFIX
+# keep resolving as module attributes (the frozen characterization suite reaches several of these
+# directly, e.g. tests/characterization/test_phase_a_gap_closure.py:702-703). The actual
+# implementations now live in scoutmb/adapters/pdf/extract.py, gated behind
+# CapabilityUnavailable -- this module keeps its own eager module-scope cv2/fitz/numpy imports
+# above, so nothing about when those wheels get imported changes for this interface.
+# decode_embedded_qr here is the adapter's decode_embedded_qr_from_page(document, page,
+# detector), re-exported under its original name: it operates on already-opened objects, the
+# exact shape extract_pdf below and the frozen 3-arg call sites need. It is a different function
+# from the adapter's own decode_embedded_qr(pdf_path), the guarded single-arg public entry point.
 from scoutmb.adapters.pdf.extract import (  # noqa: E402 - see note above
+    SCOUTINGEVENT_PREFIX,
     add_quiet_zone,
     choose_qr_value,
+    decode_embedded_qr_from_page as decode_embedded_qr,
     decode_rendered_qr,
     decode_variants,
     page_regions,
@@ -41,7 +44,6 @@ from scoutmb.adapters.pdf.extract import (  # noqa: E402 - see note above
 )
 
 DEFAULT_ADULT_TYPES = {"adult", "part-time adult"}
-SCOUTINGEVENT_PREFIX = "https://scoutingevent.com/mobile/"
 
 
 @dataclass(slots=True)
@@ -225,48 +227,6 @@ def normalize_obvious_case(name: str) -> str:
         return token
 
     return re.sub(r"[A-Za-z]+(?:['’-][A-Za-z]+)*", normalize_token, name)
-
-
-def decode_embedded_qr(
-    document: fitz.Document,
-    page: fitz.Page,
-    detector: cv2.QRCodeDetector,
-) -> tuple[str, str]:
-    candidates: list[tuple[int, int, int]] = []
-    seen_xrefs: set[int] = set()
-
-    for image_info in page.get_images(full=True):
-        xref = int(image_info[0])
-        width = int(image_info[2])
-        height = int(image_info[3])
-        if xref in seen_xrefs:
-            continue
-        seen_xrefs.add(xref)
-
-        # QR codes are normally square. Allow some tolerance for unusual encoders.
-        if min(width, height) < 70 or max(width, height) > 2500:
-            continue
-        if abs(width - height) > max(12, int(max(width, height) * 0.12)):
-            continue
-        candidates.append((xref, width, height))
-
-    # Smaller, square monochrome images are usually the QR rather than page artwork.
-    candidates.sort(key=lambda item: (abs(item[1] - item[2]), item[1] * item[2]))
-
-    for xref, _, _ in candidates:
-        try:
-            extracted = document.extract_image(xref)
-            raw = np.frombuffer(extracted["image"], dtype=np.uint8)
-            image = cv2.imdecode(raw, cv2.IMREAD_UNCHANGED)
-        except (KeyError, ValueError, cv2.error):
-            continue
-
-        values = decode_variants(image, detector)
-        selected = choose_qr_value(values)
-        if selected:
-            return selected, f"embedded-image:xref-{xref}"
-
-    return "", ""
 
 
 def extract_pdf(
