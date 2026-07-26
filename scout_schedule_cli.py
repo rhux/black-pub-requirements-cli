@@ -41,6 +41,7 @@ from scoutmb.core.inference.numbering import (  # noqa: F401 - legacy public sur
     choice_requirement_count,
     requirement_path,
 )
+from scoutmb.core.inference.status import calculate_statuses
 from scoutmb.core.inference.tree import build_group_tree
 
 AJAX_URL = "https://scoutingevent.com/mobile/inc/ajax_mobile.php"
@@ -676,62 +677,25 @@ def annotate_requirement_statuses(requirements: list[dict[str, Any]]) -> list[di
         )
         for item, path in zip(group, tree.paths, strict=True):
             item["requirement_path"] = list(path)
-        children = [list(group_children) for group_children in tree.children]
         for index, parent_index in enumerate(tree.parent_index):
             if parent_index is not None:
                 group[index]["parent_requirement_number"] = group[parent_index].get(
                     "requirement_number"
                 )
 
-        cache: dict[int, tuple[str, str]] = {}
-
-        def calculate(index: int) -> tuple[str, str]:
-            if index in cache:
-                return cache[index]
-
-            item = group[index]
-            direct_children = children[index]
-            if bool(item.get("completed_requirement")):
-                result = ("complete", "Marked complete by ScoutingEvent.")
-            elif direct_children:
-                child_results = [calculate(child_index) for child_index in direct_children]
-                satisfied = [status in {"complete", "complete_check"} for status, _ in child_results]
-                satisfied_count = sum(satisfied)
-                total_count = len(direct_children)
-                choice_count = choice_requirement_count(str(item.get("description") or ""))
-
-                item["completed_subrequirements"] = satisfied_count
-                item["total_subrequirements"] = total_count
-                item["choice_required_count"] = choice_count
-
-                if total_count and satisfied_count == total_count:
-                    if any(status == "complete_check" for status, _ in child_results):
-                        result = (
-                            "complete_check",
-                            f"All {total_count} subrequirements appear satisfied, but at least one was inferred from a choice requirement.",
-                        )
-                    else:
-                        result = ("complete", f"All {total_count} subrequirements are complete.")
-                elif choice_count is not None and satisfied_count >= choice_count:
-                    result = (
-                        "complete_check",
-                        f"{satisfied_count} of {total_count} subrequirements appear complete; this meets the stated choice of {choice_count}, but should be verified.",
-                    )
-                else:
-                    result = (
-                        "incomplete",
-                        f"{satisfied_count} of {total_count} subrequirements are complete.",
-                    )
-            else:
-                result = ("incomplete", "Not marked complete by ScoutingEvent.")
-
-            cache[index] = result
-            return result
-
-        for index, item in enumerate(group):
-            status, reason = calculate(index)
-            item["calculated_status"] = status
-            item["calculated_status_reason"] = reason
+        statuses = calculate_statuses(
+            tree=tree,
+            completed=tuple(bool(item.get("completed_requirement")) for item in group),
+            descriptions=tuple(str(item.get("description") or "") for item in group),
+        )
+        for item, row_status in zip(group, statuses, strict=True):
+            item["calculated_status"] = row_status.status
+            item["calculated_status_reason"] = row_status.reason
+            # Presence, not value: is_actionable_leaf gates on `"total_subrequirements" not in item`.
+            if row_status.total_subrequirements is not None:
+                item["completed_subrequirements"] = row_status.completed_subrequirements
+                item["total_subrequirements"] = row_status.total_subrequirements
+                item["choice_required_count"] = row_status.choice_required_count
 
     return annotated
 
