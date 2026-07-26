@@ -21,6 +21,24 @@ import cv2
 import fitz  # PyMuPDF
 import numpy as np
 
+# Re-exported so pdf_to_scouts.add_quiet_zone / .decode_variants / .choose_qr_value /
+# .page_regions / .render_page / .decode_rendered_qr keep resolving as module attributes (the
+# frozen characterization suite reaches several of these directly, e.g.
+# tests/characterization/test_phase_a_gap_closure.py:702-703). The actual implementations now
+# live in scoutmb/adapters/pdf/extract.py, gated behind CapabilityUnavailable -- this module
+# keeps its own eager module-scope cv2/fitz/numpy imports above, so nothing about when those
+# wheels get imported changes for this interface. decode_embedded_qr is NOT re-exported here:
+# this module's own decode_embedded_qr(document, page, detector) below operates on
+# already-opened objects and is a different, incompatible shape from the adapter's guarded
+# decode_embedded_qr(pdf_path) public entry point.
+from scoutmb.adapters.pdf.extract import (  # noqa: E402 - see note above
+    add_quiet_zone,
+    choose_qr_value,
+    decode_rendered_qr,
+    decode_variants,
+    page_regions,
+    render_page,
+)
 
 DEFAULT_ADULT_TYPES = {"adult", "part-time adult"}
 SCOUTINGEVENT_PREFIX = "https://scoutingevent.com/mobile/"
@@ -209,92 +227,6 @@ def normalize_obvious_case(name: str) -> str:
     return re.sub(r"[A-Za-z]+(?:['’-][A-Za-z]+)*", normalize_token, name)
 
 
-def add_quiet_zone(image: np.ndarray, border: int | None = None) -> np.ndarray:
-    if image.ndim == 3:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    border_size = border if border is not None else max(12, min(image.shape[:2]) // 8)
-    return cv2.copyMakeBorder(
-        image,
-        border_size,
-        border_size,
-        border_size,
-        border_size,
-        cv2.BORDER_CONSTANT,
-        value=255,
-    )
-
-
-def decode_variants(image: np.ndarray, detector: cv2.QRCodeDetector) -> list[str]:
-    if image is None or image.size == 0:
-        return []
-
-    if image.ndim == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = image
-
-    gray = np.ascontiguousarray(gray)
-    variants: list[np.ndarray] = [gray]
-
-    try:
-        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        variants.append(otsu)
-    except cv2.error:
-        pass
-
-    decoded: list[str] = []
-    seen: set[str] = set()
-
-    for variant in variants:
-        with_border = add_quiet_zone(variant)
-        for scale in (1, 2, 4, 6):
-            candidate = (
-                with_border
-                if scale == 1
-                else cv2.resize(
-                    with_border,
-                    None,
-                    fx=scale,
-                    fy=scale,
-                    interpolation=cv2.INTER_NEAREST,
-                )
-            )
-
-            try:
-                value, _, _ = detector.detectAndDecode(candidate)
-                if value and value not in seen:
-                    decoded.append(value)
-                    seen.add(value)
-            except cv2.error:
-                pass
-
-            # Detect multiple symbols where supported. This also helps on rendered full pages.
-            try:
-                ok, values, _, _ = detector.detectAndDecodeMulti(candidate)
-                if ok:
-                    for value in values:
-                        if value and value not in seen:
-                            decoded.append(value)
-                            seen.add(value)
-            except (cv2.error, ValueError):
-                pass
-
-            if decoded:
-                return decoded
-
-    return decoded
-
-
-def choose_qr_value(values: Iterable[str]) -> str:
-    candidates = [value.strip() for value in values if value and value.strip()]
-    if not candidates:
-        return ""
-    for value in candidates:
-        if value.startswith(SCOUTINGEVENT_PREFIX):
-            return value
-    return candidates[0]
-
-
 def decode_embedded_qr(
     document: fitz.Document,
     page: fitz.Page,
@@ -335,50 +267,6 @@ def decode_embedded_qr(
             return selected, f"embedded-image:xref-{xref}"
 
     return "", ""
-
-
-def page_regions(image: np.ndarray) -> list[tuple[str, np.ndarray]]:
-    height, width = image.shape[:2]
-    regions: list[tuple[str, np.ndarray]] = [("full-page", image)]
-
-    # Schedules typically place the QR in the upper-right, but include every quadrant.
-    regions.extend(
-        [
-            ("upper-right", image[0 : int(height * 0.45), int(width * 0.55) : width]),
-            ("upper-left", image[0 : int(height * 0.45), 0 : int(width * 0.45)]),
-            ("lower-right", image[int(height * 0.50) : height, int(width * 0.50) : width]),
-            ("lower-left", image[int(height * 0.50) : height, 0 : int(width * 0.50)]),
-        ]
-    )
-    return regions
-
-
-def render_page(page: fitz.Page, dpi: int) -> np.ndarray:
-    pixmap = page.get_pixmap(dpi=dpi, alpha=False)
-    image = np.frombuffer(pixmap.samples, dtype=np.uint8)
-    image = image.reshape(pixmap.height, pixmap.width, pixmap.n)
-    if pixmap.n == 4:
-        return cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
-    if pixmap.n == 3:
-        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    return image
-
-
-def decode_rendered_qr(
-    page: fitz.Page,
-    detector: cv2.QRCodeDetector,
-    dpis: Sequence[int],
-) -> tuple[str, str, np.ndarray | None]:
-    last_render: np.ndarray | None = None
-    for dpi in dpis:
-        image = render_page(page, dpi)
-        last_render = image
-        for region_name, region in page_regions(image):
-            values = decode_variants(region, detector)
-            selected = choose_qr_value(values)
-            if selected:
-                return selected, f"rendered:{dpi}dpi:{region_name}", image
-    return "", "", last_render
 
 
 def extract_pdf(
