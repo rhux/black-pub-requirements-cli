@@ -18,7 +18,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _normalize_usage(text: str) -> str:
-    return re.sub(r"(usage:\s*)\S+", r"\1PROG", text).strip()
+    """Collapse whitespace runs to a single space, then blank out the prog name.
+
+    argparse wraps the usage synopsis to fit the terminal width, and the wrap points shift with
+    prog's length. Task 18 review finding #3 replaced a single hardcoded prog= (which happened
+    to make both invocations wrap identically, masking that pdf_to_scouts.py showed the wrong
+    name) with one derived from actual invocation -- so troop349-pdf (12 chars) and
+    pdf_to_scouts.py (16 chars) now legitimately wrap the same synopsis at different points. The
+    wrapped CONTENT is identical either way, only the line breaks/indentation differ, so
+    whitespace is not part of what this test enforces -- only the sequence of words is.
+    """
+    collapsed = re.sub(r"\s+", " ", text)
+    return re.sub(r"(usage:\s*)\S+", r"\1PROG", collapsed).strip()
 
 
 @pytest.fixture(scope="module")

@@ -12,6 +12,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Shared by scoutmb.adapters.pdf.extract and scoutmb.features.ingest.pdf_extract -- both
+# layers need the exact same literal (one filters candidate QR values, the other filters
+# retained CSV rows), and Task 16 already fixed one drift incident from these two modules
+# each keeping their own copy. Hoisted here, alongside ExtractedAttendee/ExtractionError, for
+# the same cross-layer-sharing reason: neither adapters nor features may import the other, but
+# both may import core.
+SCOUTINGEVENT_PREFIX = "https://scoutingevent.com/mobile/"
+
 
 @dataclass(slots=True)
 class ScoutInput:

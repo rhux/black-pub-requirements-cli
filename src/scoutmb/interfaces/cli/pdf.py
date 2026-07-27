@@ -15,9 +15,8 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from scoutmb.core.models import ExtractedAttendee, ExtractionError
+from scoutmb.core.models import SCOUTINGEVENT_PREFIX, ExtractedAttendee, ExtractionError
 from scoutmb.features.ingest.pdf_extract import (
-    SCOUTINGEVENT_PREFIX,
     expand_pdf_inputs,
     write_attendees_csv,
     write_errors_csv,
@@ -29,13 +28,14 @@ DEFAULT_ADULT_TYPES = {"adult", "part-time adult"}
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        # Pinned rather than left to argparse's sys.argv[0]-basename default: the console
-        # script (troop349-pdf, 12 chars) and the legacy shim (pdf_to_scouts.py, 16 chars)
-        # would otherwise wrap the usage synopsis at different points -- prog length changes
-        # where argparse breaks lines -- which is exactly what
-        # tests/compat/test_legacy_entrypoints.py's usage-parity check would catch as a
-        # mismatch beyond just the program name.
-        prog="troop349-pdf",
+        # Derived from how the script was actually invoked, not hardcoded: this module backs
+        # BOTH the troop349-pdf console script and the legacy pdf_to_scouts.py shim, and each
+        # must show its own name in --help, matching pre-Task-18 behavior for the legacy path.
+        # A hardcoded prog= here previously clobbered pdf_to_scouts.py's own usage output with
+        # "troop349-pdf" (Task 18 review finding #3). Path(...).name mirrors argparse's own
+        # default (os.path.basename(sys.argv[0])) -- spelled out explicitly rather than omitted
+        # so the intent survives a future edit.
+        prog=Path(sys.argv[0]).name,
         description=(
             "Extract attendee names and QR-code contents from one or more class-schedule PDFs "
             "and create a CSV compatible with scout_schedule_cli.py."

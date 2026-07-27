@@ -19,13 +19,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from scoutmb.core.models import SCOUTINGEVENT_PREFIX
 from scoutmb.errors import CapabilityUnavailable
 
 _PDF_DISTRIBUTIONS = ("PyMuPDF", "opencv-python-headless", "numpy")
-
-# Single source of truth -- pdf_to_scouts.py imports this rather than keeping its own copy, so
-# the two modules cannot desync.
-SCOUTINGEVENT_PREFIX = "https://scoutingevent.com/mobile/"
 
 
 def _import_pdf_stack() -> tuple[Any, Any, Any]:

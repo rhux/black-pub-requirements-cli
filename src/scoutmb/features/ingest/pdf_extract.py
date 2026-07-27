@@ -6,9 +6,12 @@ already-open-object decode functions), and features may not depend on adapters
 (tests/architecture's dependency-rule graph). What belongs here is genuinely adapter-independent:
 file discovery and CSV-writing policy.
 
-SCOUTINGEVENT_PREFIX below deliberately duplicates the literal already defined in
-scoutmb.adapters.pdf.extract (rather than importing it), for the same reason
-scoutmb.features.ingest.service.QR_URL_PREFIX does: this layer cannot import that one.
+This module no longer defines its own SCOUTINGEVENT_PREFIX -- it moved to scoutmb.core.models,
+which scoutmb.adapters.pdf.extract and scoutmb.interfaces.cli.pdf now both import directly.
+Keeping two independently-typed copies (one here, one in the adapter) was exactly the drift
+Task 16 fixed once already; see Task 18 review finding #2. scoutmb.features.ingest.service's
+QR_URL_PREFIX is a separate constant for a separate purpose (URL validation policy for the
+tabular source) and is left as-is.
 """
 
 from __future__ import annotations
@@ -21,8 +24,6 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from scoutmb.core.models import ExtractedAttendee, ExtractionError
-
-SCOUTINGEVENT_PREFIX = "https://scoutingevent.com/mobile/"
 
 
 def expand_pdf_inputs(values: Iterable[str], recursive: bool) -> list[Path]:
