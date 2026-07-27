@@ -33,19 +33,20 @@ def _materialize(spec: InputSpec, context_id: str, root: Path) -> Path:
 
 
 def _invoke(spec: InputSpec, path: Path) -> InputObservation:
-    """Mirror LegacyInputRunner._invoke for the PARSER entries only.
-
-    `load_inputs` is deliberately absent: it is orchestration, and the IngestService that owns
-    it does not exist until Task 17, which extends this file. Importing the service at module
-    or function top here would fail collection for every case, not just the load_inputs ones.
-    """
+    """Mirror LegacyInputRunner._invoke, now including the load_inputs orchestration entry."""
     from scoutmb.adapters.files import tabular
+    from scoutmb.adapters.files.tabular import TabularAttendeeSource
+    from scoutmb.features.ingest.service import IngestService
 
     entries = {
         "load_csv": lambda: tabular.load_csv(path),
         "load_xlsx": lambda: tabular.load_xlsx(path, spec.sheet_arg),
         "load_json": lambda: tabular.load_json(path),
         "load_text": lambda: tabular.load_text(path),
+        "load_inputs": lambda: IngestService(
+            sources=(TabularAttendeeSource(sheet_name=spec.sheet_arg),),
+            include_adults=spec.include_adults,
+        ).load(path),
     }
     try:
         result = entries[spec.entry]()
@@ -60,7 +61,5 @@ def _invoke(spec: InputSpec, path: Path) -> InputObservation:
 def test_package_parsers_match_expectations(case, context_id: str, tmp_path: Path) -> None:
     if context_id not in _FILE_CONTEXTS:
         pytest.skip(f"{context_id} is a legacy-module import probe, not a package context")
-    if case.input.entry == "load_inputs":
-        pytest.skip("orchestration entry; covered in Task 17 once IngestService exists")
     path = _materialize(case.input, context_id, tmp_path)
     assert _invoke(case.input, path) == case.expected_legacy

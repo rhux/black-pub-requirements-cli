@@ -183,34 +183,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_inputs(path: Path, sheet_name: str, include_adults: bool) -> list[ScoutInput]:
-    suffix = path.suffix.lower()
-    if suffix == ".xlsx":
-        scouts = load_xlsx(path, sheet_name)
-    elif suffix == ".csv":
-        scouts = load_csv(path)
-    elif suffix == ".json":
-        scouts = load_json(path)
-    else:
-        scouts = load_text(path)
+    from scoutmb.adapters.files.tabular import TabularAttendeeSource
+    from scoutmb.features.ingest.service import IngestService
 
-    filtered: list[ScoutInput] = []
-    seen: set[str] = set()
-    for scout in scouts:
-        scout.url = scout.url.strip()
-        scout.name = scout.name.strip()
-        scout.registrant_type = scout.registrant_type.strip()
-        if not scout.url.startswith("https://scoutingevent.com/mobile/"):
-            continue
-        if not include_adults and scout.registrant_type.lower() in {"adult", "part-time adult"}:
-            continue
-        if scout.url in seen:
-            continue
-        seen.add(scout.url)
-        filtered.append(scout)
-
-    if not filtered:
-        raise ValueError(f"No ScoutingEvent QR URLs found in {path}")
-    return filtered
+    service = IngestService(
+        sources=(TabularAttendeeSource(sheet_name=sheet_name),), include_adults=include_adults
+    )
+    return service.load(path)
 
 
 def form_values(post_data: str | None) -> dict[str, str]:
