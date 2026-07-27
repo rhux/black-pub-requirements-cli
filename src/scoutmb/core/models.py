@@ -69,3 +69,29 @@ class ScoutResult:
     classes: tuple[ClassRecord, ...] = field(default_factory=tuple)
     requirements: tuple[RequirementRecord, ...] = field(default_factory=tuple)
     errors: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(slots=True)
+class ExtractedAttendee:
+    """Stage-1 (PDF) extraction record. Shared by adapters/pdf/pages.py (which builds these)
+    and features/ingest/pdf_extract.py (which writes them out) -- neither layer may import the
+    other, so the shape they both need lives here in core, not in either of them."""
+
+    attendee_name: str
+    name_as_printed: str
+    registrant_type: str
+    qr_data: str
+    source_pdf: str
+    pdf_page: int
+    qr_decode_method: str
+
+
+@dataclass(slots=True)
+class ExtractionError:
+    """Stage-1 (PDF) extraction error record. See ExtractedAttendee for why this lives here."""
+
+    source_pdf: str
+    pdf_page: int
+    attendee_name: str
+    registrant_type: str
+    error: str
