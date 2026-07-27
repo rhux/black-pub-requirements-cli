@@ -76,3 +76,25 @@ def test_no_supporting_source_fails_closed() -> None:
     with pytest.raises(NoSupportedSource) as caught:
         _service([]).load(Path("in.pdf"))
     assert isinstance(caught.value, ScoutmbError)
+
+
+def test_non_canonical_suffix_falls_through_to_text_parsing(tmp_path: Path) -> None:
+    """Regression: legacy load_inputs fell through to line-delimited text parsing for ANY
+    unrecognized suffix (the else-branch was unconditional). TabularAttendeeSource.supports()
+    must accept files like `.dat`/`.tsv` and let load() apply that same text fallback --
+    narrowing supports() to a fixed suffix set made IngestService raise NoSupportedSource
+    instead, a real behavior regression caught by spec review of Task 17.
+
+    This exercises the real TabularAttendeeSource through IngestService (the actual
+    load_inputs orchestration path), not load_text() directly -- the bug was specifically in
+    the supports() gate IngestService checks before ever calling load().
+    """
+    from scoutmb.adapters.files.tabular import TabularAttendeeSource
+
+    path = tmp_path / "attendees.dat"
+    path.write_text(f"Avery,{URL_A}\n", encoding="utf-8")
+
+    service = IngestService(sources=(TabularAttendeeSource(),))
+    loaded = service.load(path)
+
+    assert loaded == [ScoutInput(name="Avery", url=URL_A)]

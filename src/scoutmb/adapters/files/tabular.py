@@ -30,15 +30,21 @@ from scoutmb.core.models import ScoutInput
 
 
 class TabularAttendeeSource:
-    """AttendeeSource over the four file formats. Dispatches on suffix; parses; returns."""
+    """AttendeeSource over the four file formats, plus a text fallback for anything else.
 
-    _SUFFIXES = frozenset({".xlsx", ".csv", ".json", ".txt", ""})
+    supports() always returns True: load() below has an unconditional else-branch that
+    treats any suffix other than .xlsx/.csv/.json as line-delimited text, matching the
+    legacy load_inputs's unconditional `else: return load_text(path)`. supports() must
+    mirror that -- narrowing it to a fixed suffix set (as an earlier draft did) silently
+    made IngestService reject files (e.g. .dat, .tsv) that load() itself already knows
+    how to parse.
+    """
 
     def __init__(self, *, sheet_name: str = "Scouts Only") -> None:
         self.sheet_name = sheet_name
 
-    def supports(self, path: Path) -> bool:
-        return path.suffix.lower() in self._SUFFIXES
+    def supports(self, path: Path) -> bool:  # noqa: ARG002 -- part of the AttendeeSource protocol
+        return True
 
     def load(self, path: Path) -> list[ScoutInput]:
         suffix = path.suffix.lower()
