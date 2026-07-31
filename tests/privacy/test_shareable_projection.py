@@ -122,3 +122,64 @@ def test_two_unresolved_attempts_do_not_merge(tmp_path: Path) -> None:
     assert len(rows) == 2
     assert all(row["output_id"] is None for row in rows)
     assert {row["name"] for row in rows} == {"A Unreached", "B Unreached"}
+
+
+def test_two_blank_identity_attendees_with_requirements_fail_loudly(tmp_path: Path) -> None:
+    """The real merge-risk path, not the `scouts` summary list.
+
+    test_two_unresolved_attempts_do_not_merge (above) only proves two blank-identity
+    ScoutResults stay two rows in the `scouts` summary -- that list is built via unconditional
+    `.append()` in ReportingService._report_data and was never at risk of merging regardless of
+    identity. The actual risk lives in _annotate_requirement_statuses/_build_missing_requirements,
+    which group requirement rows by _attendee_key_for's `f"name:{scout_name}"` fallback when both
+    output_id and attendee_id are blank. Two same-named blank-identity ScoutResults that EACH
+    carry real RequirementRecords exercise that exact fallback: without the invariant assertion
+    in ReportingService.publish, their requirement data would silently merge into one inferred
+    structure in report.html with no exception and no warning. This proves it fails loudly
+    instead.
+    """
+    import scout_schedule_cli as legacy
+
+    from scoutmb.core.models import RequirementRecord, ScoutResult
+
+    def _requirement(number: str) -> RequirementRecord:
+        return RequirementRecord(
+            scout_name="Same Name",
+            attendee_id="",
+            class_number="26MB1",
+            class_p4_id="2000001",
+            merit_badge_name="Chess",
+            requirement_id=f"r-{number}",
+            requirement_type_id="1",
+            requirement_number=number,
+            description=f"Requirement {number} description.",
+            completed_requirement=False,
+            completed_class=False,
+            requirement_on_event=True,
+            present_days="MoTuWeTh",
+        )
+
+    results = [
+        ScoutResult(
+            name="Same Name",
+            qr_url="https://x.invalid/a",
+            attendee_id="",
+            requirements=(_requirement("1"),),
+            errors=("t",),
+        ),
+        ScoutResult(
+            name="Same Name",
+            qr_url="https://x.invalid/b",
+            attendee_id="",
+            requirements=(_requirement("2"),),
+            errors=("t",),
+        ),
+    ]
+
+    with pytest.raises(AssertionError, match="blank attendee_id"):
+        legacy.write_outputs(
+            tmp_path, results, generate_html=True, run_identity=legacy.RunIdentity()
+        )
+
+    # Nothing partially written: the assertion fires before any file is created.
+    assert not (tmp_path / "report.html").exists()

@@ -45,6 +45,14 @@ def _attendee_key_for(item: dict[str, Any]) -> str:
     merging them would silently corrupt both. Mirrors scout_schedule_cli._attendee_key_for's
     attendee_id-or-name fallback, extended with output_id so it also works on shareable rows
     where attendee_id has already been projected away.
+
+    The name-based fallback is only safe because of an invariant enforced elsewhere, not here:
+    scout_schedule_cli.process_scout always sets attendee_id before populating
+    classes/requirements, so a blank-identity ScoutResult is assumed to always carry empty
+    collections -- two same-named blank-identity attendees can then never actually reach this
+    function carrying real requirement data to collide over. `publish` below asserts that
+    invariant (`_assert_blank_identity_has_no_records`) before any result reaches this
+    grouping, since nothing in this function itself can tell two same-named collisions apart.
     """
     identity = item.get("output_id")
     if identity is None:
@@ -53,6 +61,32 @@ def _attendee_key_for(item: dict[str, Any]) -> str:
     if identity:
         return identity
     return f"name:{str(item.get('scout_name') or '')}"
+
+
+def _assert_blank_identity_has_no_records(results: Sequence[ScoutResult]) -> None:
+    """Fail loudly if a blank-identity ScoutResult carries class/requirement data.
+
+    `_attendee_key_for`'s `f"name:{scout_name}"` fallback is only safe because
+    scout_schedule_cli.process_scout always sets attendee_id BEFORE populating
+    classes/requirements (a ScoutResult that failed before identity resolution is assumed to
+    always have empty collections). That invariant lives in a different file and nothing here
+    enforces it -- if it were ever violated, two different same-named attendees with blank
+    identity would silently merge into one inferred requirement structure in report.html/the
+    missing-requirement emails, with no exception and no warning. Matches this codebase's
+    "loud failure over silent leak" philosophy elsewhere (e.g. tools/gen_golden.py's unseeded-
+    UUID assertion, scoutmb.errors.CapabilityUnavailable).
+    """
+    for result in results:
+        if str(result.attendee_id or "").strip():
+            continue
+        if result.classes or result.requirements:
+            raise AssertionError(
+                f"ScoutResult for {result.name!r} has a blank attendee_id but "
+                f"{len(result.classes)} class record(s) and {len(result.requirements)} "
+                "requirement record(s). _attendee_key_for's name-based fallback would group "
+                "this with any other blank-identity attendee sharing the same name, silently "
+                "merging their data -- refusing to publish instead."
+            )
 
 
 def _resolve_output_id(attendee_id: str, scout_name: str, run_identity: RunIdentity) -> str | None:
@@ -222,6 +256,7 @@ class ReportingService:
         html_name: str = "report.html",
         generate_email_report: bool = False,
     ) -> None:
+        _assert_blank_identity_has_no_records(results)
         output_dir.mkdir(parents=True, exist_ok=True)
         run_id = output_dir.name
         classes = [item for result in results for item in result.classes]
