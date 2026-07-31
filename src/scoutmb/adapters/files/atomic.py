@@ -38,3 +38,13 @@ def write_csv(path: Path, records: list[Any], fieldnames: list[str]) -> None:
     for record in records:
         writer.writerow(asdict(record))
     atomic_write_text(path, buffer.getvalue())
+
+
+class AtomicFileSink:
+    """ArtifactSink over atomic_write_text / write_csv."""
+
+    def publish_text(self, path: Path, content: str, *, encoding: str = "utf-8-sig") -> None:
+        atomic_write_text(path, content, encoding=encoding)
+
+    def publish_rows(self, path: Path, rows: list[Any], fieldnames: list[str]) -> None:
+        write_csv(path, rows, fieldnames)

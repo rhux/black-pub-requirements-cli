@@ -11,10 +11,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
 
+from scoutmb.adapters.files.atomic import AtomicFileSink
 from scoutmb.adapters.files.tabular import TabularAttendeeSource
+from scoutmb.adapters.html.report import render_report
 from scoutmb.adapters.pdf.pages import extract_pdf as _extract_pdf
 from scoutmb.core.models import ExtractedAttendee, ExtractionError
 from scoutmb.features.ingest.service import IngestService
+from scoutmb.features.reporting.service import ReportingService
 
 
 def build_ingest_service(
@@ -23,6 +26,10 @@ def build_ingest_service(
     return IngestService(
         sources=(TabularAttendeeSource(sheet_name=sheet_name),), include_adults=include_adults
     )
+
+
+def build_reporting_service() -> ReportingService:
+    return ReportingService(sink=AtomicFileSink(), renderer=render_report)
 
 
 class PdfExtractor(Protocol):

@@ -730,79 +730,30 @@ def write_outputs(
     generate_email_report: bool = False,
     run_identity: RunIdentity | None = None,
 ) -> None:
+    """Form-2 shim: compute the two wall-clock timestamps, then delegate the actual record
+    composition and file writes to ReportingService.publish (features/reporting/service.py),
+    built through the composition root. write_html_report/write_email_reports and their
+    helpers stay defined below, unchanged and still directly tested -- ReportingService owns
+    its own equivalent logic since it (a package module) cannot import back from this script.
+    """
+    # One identity per run. A fresh instance here would mint UUIDs unrelated to the ones the
+    # rest of the run already used for this attendee's raw/ files.
     run_identity = run_identity or RunIdentity()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    run_id = output_dir.name
-    classes = [item for result in results for item in result.classes]
-    requirements = [item for result in results for item in result.requirements]
     generated_at_local = time.strftime("%Y-%m-%d %H:%M:%S %Z")
     generated_at_iso = datetime.now().astimezone().isoformat(timespec="seconds")
 
-    nested = []
-    for result in results:
-        nested.append(
-            {
-                "name": result.name,
-                "qr_url": result.qr_url,
-                "attendee_id": result.attendee_id,
-                "classes": [asdict(item) for item in result.classes],
-                "requirements": [asdict(item) for item in result.requirements],
-                "errors": result.errors,
-            }
-        )
-    atomic_write_text(
-        output_dir / "scouts.json",
-        json.dumps(nested, indent=2, ensure_ascii=False),
-        encoding="utf-8",
+    from scoutmb.interfaces.cli.composition import build_reporting_service
+
+    build_reporting_service().publish(
+        output_dir,
+        results,
+        generated_at_local=generated_at_local,
+        generated_at_iso=generated_at_iso,
+        run_identity=run_identity,
+        generate_html=generate_html,
+        html_name=html_name,
+        generate_email_report=generate_email_report,
     )
-
-    write_csv(
-        output_dir / "classes.csv",
-        classes,
-        [field.name for field in ClassRecord.__dataclass_fields__.values()],
-    )
-    write_csv(
-        output_dir / "requirements.csv",
-        requirements,
-        [field.name for field in RequirementRecord.__dataclass_fields__.values()],
-    )
-
-    error_rows = [
-        {"scout_name": result.name, "attendee_id": result.attendee_id, "error": error}
-        for result in results
-        for error in result.errors
-    ]
-    error_buffer = io.StringIO()
-    error_writer = csv.DictWriter(error_buffer, fieldnames=["scout_name", "attendee_id", "error"])
-    error_writer.writeheader()
-    error_writer.writerows(error_rows)
-    atomic_write_text(output_dir / "errors.csv", error_buffer.getvalue())
-
-    safe_html_name = Path(html_name).name or "report.html"
-    if not safe_html_name.lower().endswith(".html"):
-        safe_html_name += ".html"
-    if generate_html:
-        write_html_report(
-            output_dir / safe_html_name, results, generated_at_local, generated_at_iso, run_id=run_id
-        )
-
-    email_report_dir = (
-        write_email_reports(output_dir, nested, run_identity=run_identity).name
-        if generate_email_report
-        else None
-    )
-
-    summary = {
-        "scouts_processed": len(results),
-        "scouts_with_errors": sum(1 for result in results if result.errors),
-        "classes": len(classes),
-        "requirements": len(requirements),
-        "generated_at_local": generated_at_local,
-        "generated_at_iso": generated_at_iso,
-        "html_report": safe_html_name if generate_html else None,
-        "email_report_dir": email_report_dir,
-    }
-    atomic_write_text(output_dir / "summary.json", json.dumps(summary, indent=2), encoding="utf-8")
 
 
 async def async_main(
