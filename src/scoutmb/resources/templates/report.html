@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScoutingEvent Merit Badge / Schedule Report</title>
+<style>
+__REPORT_CSS__
+</style>
+</head>
+<body>
+<header>
+  <h1>ScoutingEvent Merit Badge / Schedule Report</h1>
+  <p id="generated-at"></p>
+  <div class="header-actions">
+    <button id="generate-emails-btn" type="button">Generate missing-requirement emails</button>
+    <button id="open-emails-folder-btn" type="button">Open emails folder</button>
+    <span id="email-status"></span>
+  </div>
+</header>
+<main>
+  <section class="summary-grid" id="summary"></section>
+
+  <section class="panel">
+    <div class="controls">
+      <div class="control">
+        <label for="search">Search</label>
+        <input id="search" type="search" placeholder="Scout, class, number, location…">
+      </div>
+      <div class="control">
+        <label for="scout-filter">Scout</label>
+        <select id="scout-filter"><option value="">All scouts</option></select>
+      </div>
+      <div class="control">
+        <label for="class-filter">Class</label>
+        <select id="class-filter"><option value="">All classes</option></select>
+      </div>
+      <div class="control">
+        <label for="block-filter">Block</label>
+        <select id="block-filter"><option value="">All blocks</option></select>
+      </div>
+      <div class="control">
+        <label for="day-filter">Day</label>
+        <select id="day-filter"><option value="">All days</option></select>
+      </div>
+      <div class="control">
+        <label for="location-filter">Location</label>
+        <select id="location-filter"><option value="">All locations</option></select>
+      </div>
+      <div class="control">
+        <label for="completion-filter">Completion</label>
+        <select id="completion-filter">
+          <option value="">All</option>
+          <option value="complete">Completed classes</option>
+          <option value="incomplete">Incomplete classes</option>
+        </select>
+      </div>
+      <div class="control checkbox-control" id="completed-requirements-control" hidden>
+        <label class="checkbox-label" for="show-completed-requirements">
+          <input id="show-completed-requirements" type="checkbox">
+          <span>Show completed requirements in incomplete classes</span>
+        </label>
+      </div>
+      <div class="control checkbox-control">
+        <label class="checkbox-label" for="prereq-filter">
+          <input id="prereq-filter" type="checkbox">
+          <span>Show only (pre-req) requirements</span>
+        </label>
+      </div>
+      <div class="control">
+        <label for="sort-select">Sort scout schedules</label>
+        <select id="sort-select">
+          <option value="time">Start time</option>
+          <option value="class">Class name</option>
+          <option value="block">Block</option>
+          <option value="location">Location</option>
+        </select>
+      </div>
+      <div class="control"><label>&nbsp;</label><button id="reset">Reset filters</button></div>
+    </div>
+  </section>
+
+  <nav class="tabs" aria-label="Report views">
+    <button class="active" data-view="scouts-view">By Scout</button>
+    <button data-view="classes-view">All Classes</button>
+    <button data-view="requirements-view">Requirements</button>
+  </nav>
+
+  <section id="scouts-view" class="view">
+    <p class="result-count" id="scout-count"></p>
+    <div id="scout-results"></div>
+  </section>
+
+  <section id="classes-view" class="view" hidden>
+    <p class="result-count" id="class-count"></p>
+    <div class="table-wrap">
+      <table id="classes-table">
+        <thead><tr>
+          <th data-key="scout_name">Scout</th>
+          <th data-key="start_time_24h">Time</th>
+          <th data-key="days">Days</th>
+          <th data-key="period_name">Block</th>
+          <th data-key="class_name">Class</th>
+          <th data-key="class_number">Class #</th>
+          <th data-key="location">Location</th>
+          <th data-key="class_completed">Status</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="requirements-view" class="view" hidden>
+    <p class="result-count" id="requirement-count"></p>
+    <div class="table-wrap">
+      <table id="requirements-table">
+        <thead><tr>
+          <th data-key="scout_name">Scout</th>
+          <th data-key="merit_badge_name">Class</th>
+          <th data-key="class_number">Class #</th>
+          <th data-key="requirement_number">Requirement</th>
+          <th data-key="description">Description</th>
+          <th data-key="present_days">Days</th>
+          <th data-key="completed_requirement">Complete</th>
+          <th data-key="requirement_on_event">At Event</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="errors"></section>
+</main>
+<script id="report-data" type="application/json">__REPORT_DATA__</script>
+<script>
+__REPORT_JS__
+</script>
+</body>
+</html>

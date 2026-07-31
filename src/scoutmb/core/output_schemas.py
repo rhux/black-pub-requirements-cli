@@ -9,6 +9,7 @@ stricter is the ACQ-REQ-004 behavior change and belongs to Slice 2b.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import fields
 from typing import Any
@@ -155,6 +156,18 @@ def scout_result_to_row(record: ScoutResult) -> dict[str, Any]:
         "requirements": [requirement_to_row(item, shareable=False) for item in record.requirements],
         "errors": list(record.errors),
     }
+
+
+def json_for_html(value: Any) -> str:
+    """Serialize JSON safely for embedding inside an HTML script element."""
+    return (
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
 
 
 def _project(row: dict[str, Any], *, _shareable: bool) -> dict[str, Any]:
