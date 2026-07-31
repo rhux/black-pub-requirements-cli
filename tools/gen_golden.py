@@ -45,8 +45,24 @@ def _normalize(value: object, uuid_map: dict[str, str]) -> object:
     if isinstance(value, str):
 
         def swap(match: re.Match[str]) -> str:
-            raw = match.group(0)
-            return uuid_map.setdefault(raw.replace("-", ""), f"OUTPUT_ID_{len(uuid_map):02d}")
+            raw = match.group(0).replace("-", "")
+            try:
+                return uuid_map[raw]
+            except KeyError:
+                # Every UUID this golden should ever see comes from the single RunIdentity
+                # `build()` constructs, and the fixture-order pre-seed loop below populates
+                # `uuid_map` with all of them BEFORE this function ever runs. Falling through
+                # here means some OTHER source produced a UUID-shaped value -- e.g. a second
+                # RunIdentity accidentally constructed somewhere (the exact bug Task 7 fixed).
+                # `setdefault`-ing a fresh ordinal in that case would silently assign it by
+                # first-regex-match order, reintroducing the coin-flip nondeterminism the
+                # fixture-order seeding exists to eliminate, just for a rarer trigger. Fail
+                # loudly and immediately instead.
+                raise AssertionError(
+                    f"unseeded UUID {raw!r} encountered while normalizing the golden. All "
+                    "UUIDs must be pre-seeded from fixture order before _normalize runs; an "
+                    "unseeded UUID means an unexpected source produced it."
+                ) from None
 
         return _UUID.sub(swap, value)
     if isinstance(value, dict):
@@ -61,15 +77,41 @@ def _normalize(value: object, uuid_map: dict[str, str]) -> object:
     return value
 
 
+def _content_shape(report_data: dict[str, object]) -> str | None:
+    """Fingerprint the row shape ACTUALLY PRESENT in report_data, independent of any label.
+
+    `kind` is just a string the caller passed to `build()` -- it is echoed back, never derived
+    from the content, so comparing a stored file's `kind` against the requested `kind` can
+    never catch a real mismatch (both sides trace back to the same CLI argument). This looks
+    at the one thing the V1->V2 substitution actually changes: whether a scouts row carries
+    `attendee_id` (V1, pre-Task 23) or `output_id` (V2, post-Task 23). Returns None when there
+    is no row to inspect -- callers must not treat that as a mismatch.
+    """
+    scouts = report_data.get("scouts") or []
+    if not scouts:
+        return None
+    first = scouts[0]
+    if not isinstance(first, dict):
+        return None
+    if "output_id" in first:
+        return "v2"
+    if "attendee_id" in first:
+        return "v1"
+    return None
+
+
 def build(kind: str) -> dict[str, object]:
     """Render the fixture through the CURRENT implementation and normalize.
 
     `kind` LABELS the output; it does not select a projection -- the running implementation
     decides that. Calling build("v1") after Task 23 therefore produces shareable data tagged
     "v1", which is deliberate: the V1 golden comparison must FAIL loudly rather than silently
-    regenerate. To make that impossible to trip over by accident, the writer refuses to
-    overwrite a golden whose stored `kind` differs from the one requested; use --force to
-    re-baseline intentionally.
+    regenerate. To make that impossible to trip over by accident, the writer compares an
+    actual content fingerprint (`_content_shape`: does the first scouts row carry
+    `attendee_id` or `output_id`?) of the freshly-built payload against the stored file's
+    fingerprint, refusing to overwrite when they disagree -- NOT the self-reported `kind`
+    label, which is always self-consistent and so can never catch a real reshape. Use --force
+    to re-baseline intentionally.
     """
     import scout_schedule_cli as legacy
     from tests.goldens.fixture import golden_results
@@ -107,10 +149,21 @@ def build(kind: str) -> dict[str, object]:
         output_id = identity.output_id(legacy.AttendeeId.parse(attendee_id, result.name))
         uuid_map.setdefault(output_id.replace("-", ""), f"OUTPUT_ID_{len(uuid_map):02d}")
 
+    # `emails` is a gen_golden-only construct (write_outputs has no equivalent single dict to
+    # preserve the "true build order" of), and its raw insertion order above is
+    # filesystem-sorted by the UNNORMALIZED, per-run-random UUID filename -- so, unlike
+    # report_data, that raw order is itself nondeterministic across runs. Previously
+    # sort_keys=True on the final json.dump masked this; now that the dump preserves real dict
+    # order (for report_data's benefit), `emails` needs an explicit, order-stable sort of its
+    # own -- done here, AFTER normalization, so it sorts on the deterministic OUTPUT_ID_NN
+    # placeholder rather than the random raw UUID.
+    normalized_emails = _normalize(emails, uuid_map)
+    assert isinstance(normalized_emails, dict)
+
     return {
         "kind": kind,
         "report_data": _normalize(embedded, uuid_map),
-        "emails": _normalize(emails, uuid_map),
+        "emails": dict(sorted(normalized_emails.items())),
     }
 
 
@@ -122,15 +175,28 @@ def main() -> int:
         / "goldens"
         / f"{kind}_{'operational' if kind == 'v1' else 'shareable'}.json"
     )
-    payload = json.dumps(build(kind), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    built = build(kind)
+    # No sort_keys: the stored JSON must reflect TRUE build-time key order (dict insertion
+    # order from write_outputs's dict construction), not an alphabetized re-canonicalization.
+    # A key-order regression should show up as a diff; alphabetizing on every write would
+    # erase it, and Task 23's positional key-order assertion depends on the real order too.
+    payload = json.dumps(built, indent=2, ensure_ascii=False) + "\n"
 
     if target.exists():
         stored = json.loads(target.read_text(encoding="utf-8"))
-        if stored["kind"] != kind and "--force" not in sys.argv:
+        stored_shape = _content_shape(stored.get("report_data", {}))
+        built_shape = _content_shape(built["report_data"])
+        if (
+            stored_shape is not None
+            and built_shape is not None
+            and stored_shape != built_shape
+            and "--force" not in sys.argv
+        ):
             print(
-                f"refusing to overwrite {target.name}: it holds kind={stored['kind']!r} and the "
-                f"running implementation now produces kind={kind!r}. V1 is a fixed reference "
-                "point for the V1->V2 diff; pass --force only to deliberately re-baseline."
+                f"refusing to overwrite {target.name}: its rows are shaped like {stored_shape!r} "
+                f"(attendee_id/output_id), but the running implementation now produces "
+                f"{built_shape!r}-shaped rows. V1 is a fixed reference point for the V1->V2 "
+                "diff; pass --force only to deliberately re-baseline."
             )
             return 1
         if target.read_text(encoding="utf-8") == payload:

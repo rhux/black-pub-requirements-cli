@@ -1,4 +1,188 @@
 {
+  "kind": "v1",
+  "report_data": {
+    "generated_at_local": "GENERATED_AT_LOCAL",
+    "generated_at_iso": "GENERATED_AT_ISO",
+    "run_id": "run",
+    "scouts": [
+      {
+        "name": "Jordan Sample",
+        "attendee_id": "90000001",
+        "class_count": 1,
+        "requirement_count": 2,
+        "error_count": 0
+      },
+      {
+        "name": "Jordan Sample",
+        "attendee_id": "90000002",
+        "class_count": 1,
+        "requirement_count": 1,
+        "error_count": 0
+      },
+      {
+        "name": "Riley Quiet",
+        "attendee_id": "90000003",
+        "class_count": 0,
+        "requirement_count": 0,
+        "error_count": 0
+      },
+      {
+        "name": "Casey Partial",
+        "attendee_id": "90000004",
+        "class_count": 1,
+        "requirement_count": 1,
+        "error_count": 1
+      },
+      {
+        "name": "Morgan Unreached",
+        "attendee_id": "",
+        "class_count": 0,
+        "requirement_count": 0,
+        "error_count": 1
+      }
+    ],
+    "classes": [
+      {
+        "scout_name": "Jordan Sample",
+        "attendee_id": "90000001",
+        "class_number": "26MB1",
+        "class_p4_id": "2000001",
+        "class_name": "Chess",
+        "days": "MoTuWeTh",
+        "period_name": "Period 1",
+        "start_time": "9:00 AM",
+        "start_time_24h": "09:00",
+        "location": "Pavilion",
+        "has_requirements": true,
+        "class_completed": false,
+        "raw_class_name": "MoTuWeTh - Chess"
+      },
+      {
+        "scout_name": "Jordan Sample",
+        "attendee_id": "90000002",
+        "class_number": "26MB1",
+        "class_p4_id": "2000001",
+        "class_name": "Chess",
+        "days": "MoTuWeTh",
+        "period_name": "Period 1",
+        "start_time": "9:00 AM",
+        "start_time_24h": "09:00",
+        "location": "Pavilion",
+        "has_requirements": true,
+        "class_completed": false,
+        "raw_class_name": "MoTuWeTh - Chess"
+      },
+      {
+        "scout_name": "Casey Partial",
+        "attendee_id": "90000004",
+        "class_number": "26MB1",
+        "class_p4_id": "2000001",
+        "class_name": "Chess",
+        "days": "MoTuWeTh",
+        "period_name": "Period 1",
+        "start_time": "9:00 AM",
+        "start_time_24h": "09:00",
+        "location": "Pavilion",
+        "has_requirements": true,
+        "class_completed": false,
+        "raw_class_name": "MoTuWeTh - Chess"
+      }
+    ],
+    "requirements": [
+      {
+        "scout_name": "Jordan Sample",
+        "attendee_id": "90000001",
+        "class_number": "26MB1",
+        "class_p4_id": "2000001",
+        "merit_badge_name": "Chess",
+        "requirement_id": "r-1",
+        "requirement_type_id": "1",
+        "requirement_number": "1",
+        "description": "Requirement 1 description.",
+        "completed_requirement": true,
+        "completed_class": false,
+        "requirement_on_event": true,
+        "present_days": "MoTuWeTh",
+        "requirement_path": [
+          "1"
+        ],
+        "calculated_status": "complete",
+        "calculated_status_reason": "Marked complete by ScoutingEvent."
+      },
+      {
+        "scout_name": "Jordan Sample",
+        "attendee_id": "90000001",
+        "class_number": "26MB1",
+        "class_p4_id": "2000001",
+        "merit_badge_name": "Chess",
+        "requirement_id": "r-2",
+        "requirement_type_id": "1",
+        "requirement_number": "2",
+        "description": "Requirement 2 description.",
+        "completed_requirement": false,
+        "completed_class": false,
+        "requirement_on_event": true,
+        "present_days": "MoTuWeTh",
+        "requirement_path": [
+          "2"
+        ],
+        "calculated_status": "incomplete",
+        "calculated_status_reason": "Not marked complete by ScoutingEvent."
+      },
+      {
+        "scout_name": "Jordan Sample",
+        "attendee_id": "90000002",
+        "class_number": "26MB1",
+        "class_p4_id": "2000001",
+        "merit_badge_name": "Chess",
+        "requirement_id": "r-1",
+        "requirement_type_id": "1",
+        "requirement_number": "1",
+        "description": "Requirement 1 description.",
+        "completed_requirement": false,
+        "completed_class": false,
+        "requirement_on_event": true,
+        "present_days": "MoTuWeTh",
+        "requirement_path": [
+          "1"
+        ],
+        "calculated_status": "incomplete",
+        "calculated_status_reason": "Not marked complete by ScoutingEvent."
+      },
+      {
+        "scout_name": "Casey Partial",
+        "attendee_id": "90000004",
+        "class_number": "26MB1",
+        "class_p4_id": "2000001",
+        "merit_badge_name": "Chess",
+        "requirement_id": "r-3",
+        "requirement_type_id": "1",
+        "requirement_number": "3",
+        "description": "Requirement 3 description.",
+        "completed_requirement": false,
+        "completed_class": false,
+        "requirement_on_event": true,
+        "present_days": "MoTuWeTh",
+        "requirement_path": [
+          "3"
+        ],
+        "calculated_status": "incomplete",
+        "calculated_status_reason": "Not marked complete by ScoutingEvent."
+      }
+    ],
+    "errors": [
+      {
+        "scout_name": "Casey Partial",
+        "attendee_id": "90000004",
+        "error": "requirement fetch failed for class 2000002"
+      },
+      {
+        "scout_name": "Morgan Unreached",
+        "attendee_id": "",
+        "error": "Timeout 45000ms exceeded."
+      }
+    ]
+  },
   "emails": {
     "casey-partial-OUTPUT_ID_03.html": "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Merit Badge Requirements Still Needed - Casey Partial</title>\n<style>\nbody { font-family: Arial, Helvetica, sans-serif; color: #17212b; max-width: 640px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; }\nh1 { font-size: 1.4rem; }\nh2 { font-size: 1.1rem; margin-top: 1.5rem; border-bottom: 2px solid #245b78; padding-bottom: .25rem; }\nul { padding-left: 1.25rem; }\nli { margin-bottom: .5rem; }\n.prereq { display: inline-block; font-size: .75rem; font-weight: bold; color: #8a4b08; background: #fff0d8; border-radius: 4px; padding: .05rem .4rem; }\n</style>\n</head>\n<body>\n<h1>Hi Casey Partial,</h1>\n<p>Here are the merit badge requirements you still need to complete:</p>\n<h2>Chess</h2><ul><li><strong>3.</strong> Requirement 3 description.</li></ul>\n<p>Please work with your merit badge counselor to complete these. Reach out if you have questions.</p>\n</body>\n</html>\n",
     "casey-partial-OUTPUT_ID_03.txt": "Hi Casey Partial,\n\nHere are the merit badge requirements you still need to complete:\n\nChess\n-----\n  3. Requirement 3 description.\n\nPlease work with your merit badge counselor to complete these. Reach out if you have questions.",
@@ -7,189 +191,5 @@
     "jordan-sample-OUTPUT_ID_01.html": "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Merit Badge Requirements Still Needed - Jordan Sample</title>\n<style>\nbody { font-family: Arial, Helvetica, sans-serif; color: #17212b; max-width: 640px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; }\nh1 { font-size: 1.4rem; }\nh2 { font-size: 1.1rem; margin-top: 1.5rem; border-bottom: 2px solid #245b78; padding-bottom: .25rem; }\nul { padding-left: 1.25rem; }\nli { margin-bottom: .5rem; }\n.prereq { display: inline-block; font-size: .75rem; font-weight: bold; color: #8a4b08; background: #fff0d8; border-radius: 4px; padding: .05rem .4rem; }\n</style>\n</head>\n<body>\n<h1>Hi Jordan Sample,</h1>\n<p>Here are the merit badge requirements you still need to complete:</p>\n<h2>Chess</h2><ul><li><strong>1.</strong> Requirement 1 description.</li></ul>\n<p>Please work with your merit badge counselor to complete these. Reach out if you have questions.</p>\n</body>\n</html>\n",
     "jordan-sample-OUTPUT_ID_01.txt": "Hi Jordan Sample,\n\nHere are the merit badge requirements you still need to complete:\n\nChess\n-----\n  1. Requirement 1 description.\n\nPlease work with your merit badge counselor to complete these. Reach out if you have questions.",
     "missing_requirements.csv": "scout_name,attendee_id,status,merit_badge_count,missing_requirement_count,subject,body_text,body_html\nJordan Sample,90000001,missing_requirements,1,1,Merit Badge Requirements Still Needed - Jordan Sample,\"Hi Jordan Sample,\n\nHere are the merit badge requirements you still need to complete:\n\nChess\n-----\n  2. Requirement 2 description.\n\nPlease work with your merit badge counselor to complete these. Reach out if you have questions.\",\"<!doctype html>\n<html lang=\"\"en\"\">\n<head>\n<meta charset=\"\"utf-8\"\">\n<title>Merit Badge Requirements Still Needed - Jordan Sample</title>\n<style>\nbody { font-family: Arial, Helvetica, sans-serif; color: #17212b; max-width: 640px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; }\nh1 { font-size: 1.4rem; }\nh2 { font-size: 1.1rem; margin-top: 1.5rem; border-bottom: 2px solid #245b78; padding-bottom: .25rem; }\nul { padding-left: 1.25rem; }\nli { margin-bottom: .5rem; }\n.prereq { display: inline-block; font-size: .75rem; font-weight: bold; color: #8a4b08; background: #fff0d8; border-radius: 4px; padding: .05rem .4rem; }\n</style>\n</head>\n<body>\n<h1>Hi Jordan Sample,</h1>\n<p>Here are the merit badge requirements you still need to complete:</p>\n<h2>Chess</h2><ul><li><strong>2.</strong> Requirement 2 description.</li></ul>\n<p>Please work with your merit badge counselor to complete these. Reach out if you have questions.</p>\n</body>\n</html>\n\"\nJordan Sample,90000002,missing_requirements,1,1,Merit Badge Requirements Still Needed - Jordan Sample,\"Hi Jordan Sample,\n\nHere are the merit badge requirements you still need to complete:\n\nChess\n-----\n  1. Requirement 1 description.\n\nPlease work with your merit badge counselor to complete these. Reach out if you have questions.\",\"<!doctype html>\n<html lang=\"\"en\"\">\n<head>\n<meta charset=\"\"utf-8\"\">\n<title>Merit Badge Requirements Still Needed - Jordan Sample</title>\n<style>\nbody { font-family: Arial, Helvetica, sans-serif; color: #17212b; max-width: 640px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; }\nh1 { font-size: 1.4rem; }\nh2 { font-size: 1.1rem; margin-top: 1.5rem; border-bottom: 2px solid #245b78; padding-bottom: .25rem; }\nul { padding-left: 1.25rem; }\nli { margin-bottom: .5rem; }\n.prereq { display: inline-block; font-size: .75rem; font-weight: bold; color: #8a4b08; background: #fff0d8; border-radius: 4px; padding: .05rem .4rem; }\n</style>\n</head>\n<body>\n<h1>Hi Jordan Sample,</h1>\n<p>Here are the merit badge requirements you still need to complete:</p>\n<h2>Chess</h2><ul><li><strong>1.</strong> Requirement 1 description.</li></ul>\n<p>Please work with your merit badge counselor to complete these. Reach out if you have questions.</p>\n</body>\n</html>\n\"\nRiley Quiet,90000003,all_complete,0,0,Merit Badge Requirements Still Needed - Riley Quiet,,\nCasey Partial,90000004,missing_requirements,1,1,Merit Badge Requirements Still Needed - Casey Partial,\"Hi Casey Partial,\n\nHere are the merit badge requirements you still need to complete:\n\nChess\n-----\n  3. Requirement 3 description.\n\nPlease work with your merit badge counselor to complete these. Reach out if you have questions.\",\"<!doctype html>\n<html lang=\"\"en\"\">\n<head>\n<meta charset=\"\"utf-8\"\">\n<title>Merit Badge Requirements Still Needed - Casey Partial</title>\n<style>\nbody { font-family: Arial, Helvetica, sans-serif; color: #17212b; max-width: 640px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; }\nh1 { font-size: 1.4rem; }\nh2 { font-size: 1.1rem; margin-top: 1.5rem; border-bottom: 2px solid #245b78; padding-bottom: .25rem; }\nul { padding-left: 1.25rem; }\nli { margin-bottom: .5rem; }\n.prereq { display: inline-block; font-size: .75rem; font-weight: bold; color: #8a4b08; background: #fff0d8; border-radius: 4px; padding: .05rem .4rem; }\n</style>\n</head>\n<body>\n<h1>Hi Casey Partial,</h1>\n<p>Here are the merit badge requirements you still need to complete:</p>\n<h2>Chess</h2><ul><li><strong>3.</strong> Requirement 3 description.</li></ul>\n<p>Please work with your merit badge counselor to complete these. Reach out if you have questions.</p>\n</body>\n</html>\n\"\nMorgan Unreached,,no_data_scraped,0,0,Merit Badge Requirements Still Needed - Morgan Unreached,,\n"
-  },
-  "kind": "v1",
-  "report_data": {
-    "classes": [
-      {
-        "attendee_id": "90000001",
-        "class_completed": false,
-        "class_name": "Chess",
-        "class_number": "26MB1",
-        "class_p4_id": "2000001",
-        "days": "MoTuWeTh",
-        "has_requirements": true,
-        "location": "Pavilion",
-        "period_name": "Period 1",
-        "raw_class_name": "MoTuWeTh - Chess",
-        "scout_name": "Jordan Sample",
-        "start_time": "9:00 AM",
-        "start_time_24h": "09:00"
-      },
-      {
-        "attendee_id": "90000002",
-        "class_completed": false,
-        "class_name": "Chess",
-        "class_number": "26MB1",
-        "class_p4_id": "2000001",
-        "days": "MoTuWeTh",
-        "has_requirements": true,
-        "location": "Pavilion",
-        "period_name": "Period 1",
-        "raw_class_name": "MoTuWeTh - Chess",
-        "scout_name": "Jordan Sample",
-        "start_time": "9:00 AM",
-        "start_time_24h": "09:00"
-      },
-      {
-        "attendee_id": "90000004",
-        "class_completed": false,
-        "class_name": "Chess",
-        "class_number": "26MB1",
-        "class_p4_id": "2000001",
-        "days": "MoTuWeTh",
-        "has_requirements": true,
-        "location": "Pavilion",
-        "period_name": "Period 1",
-        "raw_class_name": "MoTuWeTh - Chess",
-        "scout_name": "Casey Partial",
-        "start_time": "9:00 AM",
-        "start_time_24h": "09:00"
-      }
-    ],
-    "errors": [
-      {
-        "attendee_id": "90000004",
-        "error": "requirement fetch failed for class 2000002",
-        "scout_name": "Casey Partial"
-      },
-      {
-        "attendee_id": "",
-        "error": "Timeout 45000ms exceeded.",
-        "scout_name": "Morgan Unreached"
-      }
-    ],
-    "generated_at_iso": "GENERATED_AT_ISO",
-    "generated_at_local": "GENERATED_AT_LOCAL",
-    "requirements": [
-      {
-        "attendee_id": "90000001",
-        "calculated_status": "complete",
-        "calculated_status_reason": "Marked complete by ScoutingEvent.",
-        "class_number": "26MB1",
-        "class_p4_id": "2000001",
-        "completed_class": false,
-        "completed_requirement": true,
-        "description": "Requirement 1 description.",
-        "merit_badge_name": "Chess",
-        "present_days": "MoTuWeTh",
-        "requirement_id": "r-1",
-        "requirement_number": "1",
-        "requirement_on_event": true,
-        "requirement_path": [
-          "1"
-        ],
-        "requirement_type_id": "1",
-        "scout_name": "Jordan Sample"
-      },
-      {
-        "attendee_id": "90000001",
-        "calculated_status": "incomplete",
-        "calculated_status_reason": "Not marked complete by ScoutingEvent.",
-        "class_number": "26MB1",
-        "class_p4_id": "2000001",
-        "completed_class": false,
-        "completed_requirement": false,
-        "description": "Requirement 2 description.",
-        "merit_badge_name": "Chess",
-        "present_days": "MoTuWeTh",
-        "requirement_id": "r-2",
-        "requirement_number": "2",
-        "requirement_on_event": true,
-        "requirement_path": [
-          "2"
-        ],
-        "requirement_type_id": "1",
-        "scout_name": "Jordan Sample"
-      },
-      {
-        "attendee_id": "90000002",
-        "calculated_status": "incomplete",
-        "calculated_status_reason": "Not marked complete by ScoutingEvent.",
-        "class_number": "26MB1",
-        "class_p4_id": "2000001",
-        "completed_class": false,
-        "completed_requirement": false,
-        "description": "Requirement 1 description.",
-        "merit_badge_name": "Chess",
-        "present_days": "MoTuWeTh",
-        "requirement_id": "r-1",
-        "requirement_number": "1",
-        "requirement_on_event": true,
-        "requirement_path": [
-          "1"
-        ],
-        "requirement_type_id": "1",
-        "scout_name": "Jordan Sample"
-      },
-      {
-        "attendee_id": "90000004",
-        "calculated_status": "incomplete",
-        "calculated_status_reason": "Not marked complete by ScoutingEvent.",
-        "class_number": "26MB1",
-        "class_p4_id": "2000001",
-        "completed_class": false,
-        "completed_requirement": false,
-        "description": "Requirement 3 description.",
-        "merit_badge_name": "Chess",
-        "present_days": "MoTuWeTh",
-        "requirement_id": "r-3",
-        "requirement_number": "3",
-        "requirement_on_event": true,
-        "requirement_path": [
-          "3"
-        ],
-        "requirement_type_id": "1",
-        "scout_name": "Casey Partial"
-      }
-    ],
-    "run_id": "run",
-    "scouts": [
-      {
-        "attendee_id": "90000001",
-        "class_count": 1,
-        "error_count": 0,
-        "name": "Jordan Sample",
-        "requirement_count": 2
-      },
-      {
-        "attendee_id": "90000002",
-        "class_count": 1,
-        "error_count": 0,
-        "name": "Jordan Sample",
-        "requirement_count": 1
-      },
-      {
-        "attendee_id": "90000003",
-        "class_count": 0,
-        "error_count": 0,
-        "name": "Riley Quiet",
-        "requirement_count": 0
-      },
-      {
-        "attendee_id": "90000004",
-        "class_count": 1,
-        "error_count": 1,
-        "name": "Casey Partial",
-        "requirement_count": 1
-      },
-      {
-        "attendee_id": "",
-        "class_count": 0,
-        "error_count": 1,
-        "name": "Morgan Unreached",
-        "requirement_count": 0
-      }
-    ]
   }
 }
