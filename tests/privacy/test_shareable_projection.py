@@ -10,6 +10,7 @@ import json
 import re
 from dataclasses import fields
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -132,11 +133,12 @@ def test_two_blank_identity_attendees_with_requirements_fail_loudly(tmp_path: Pa
     `.append()` in ReportingService._report_data and was never at risk of merging regardless of
     identity. The actual risk lives in _annotate_requirement_statuses/_build_missing_requirements,
     which group requirement rows by _attendee_key_for's `f"name:{scout_name}"` fallback when both
-    output_id and attendee_id are blank. Two same-named blank-identity ScoutResults that EACH
-    carry real RequirementRecords exercise that exact fallback: without the invariant assertion
-    in ReportingService.publish, their requirement data would silently merge into one inferred
-    structure in report.html with no exception and no warning. This proves it fails loudly
-    instead.
+    output_id and attendee_id are blank. This test does NOT exercise that merge path directly --
+    ReportingService.publish's `_assert_blank_identity_has_no_records(results)` guard is the
+    first statement in `publish` and raises before _annotate_requirement_statuses/
+    _build_missing_requirements ever run, so this test only proves the guard fires and blocks
+    the write BEFORE those functions execute (and that nothing is partially written). It is a
+    regression test for the guard itself, not a demonstration of the merge it prevents.
     """
     import scout_schedule_cli as legacy
 
@@ -183,3 +185,60 @@ def test_two_blank_identity_attendees_with_requirements_fail_loudly(tmp_path: Pa
 
     # Nothing partially written: the assertion fires before any file is created.
     assert not (tmp_path / "report.html").exists()
+
+
+def test_two_blank_identity_scout_dicts_fail_loudly_via_legacy_write_email_reports(
+    tmp_path: Path,
+) -> None:
+    """Reproduces the actual live gap this round closes: ui/server.py's
+    `POST /api/runs/{run_id}/generate-emails` calls `scout_schedule_cli.write_email_reports`
+    directly with `scouts` loaded straight off disk from a prior run's scouts.json (which may
+    have been written by pre-fix code, or hand-edited) -- it never goes through
+    ReportingService.publish, so that guard never runs on this path. `write_email_reports` ->
+    `build_missing_requirements` operates on the nested dict shape (not ScoutResult objects),
+    so it needed its own guard (`_assert_blank_identity_scouts_have_no_records`) rather than
+    reusing `ReportingService.publish`'s. This test drives the REAL `write_email_reports`
+    directly (the same call ui/server.py makes) with two same-named blank-attendee_id scout
+    dicts that each carry a real requirement record, and proves it now fails loudly instead of
+    silently merging them under `_attendee_key_for`'s `f"name:{scout_name}"` fallback.
+    """
+    import scout_schedule_cli as legacy
+
+    def _scout(requirement_number: str) -> dict[str, Any]:
+        return {
+            "name": "Same Name",
+            "attendee_id": "",
+            "classes": [],
+            "requirements": [
+                {
+                    "scout_name": "Same Name",
+                    "attendee_id": "",
+                    "class_number": "26MB1",
+                    "class_p4_id": "2000001",
+                    "merit_badge_name": "Chess",
+                    "requirement_id": f"r-{requirement_number}",
+                    "requirement_type_id": "1",
+                    "requirement_number": requirement_number,
+                    "description": f"Requirement {requirement_number} description.",
+                    "completed_requirement": False,
+                    "completed_class": False,
+                    "requirement_on_event": True,
+                    "present_days": "MoTuWeTh",
+                }
+            ],
+            "errors": ["t"],
+        }
+
+    scouts = [_scout("1"), _scout("2")]
+
+    with pytest.raises(AssertionError, match="blank attendee_id"):
+        legacy.write_email_reports(tmp_path, scouts)
+
+    # No email content written: the guard fires inside build_missing_requirements, before any
+    # per-scout .txt/.html or the combined missing_requirements.csv is produced. (write_email_
+    # reports does create the empty `emails/` directory itself before calling
+    # build_missing_requirements -- that bare mkdir carries no scout data, so it is not the
+    # silent-merge risk this test guards against.)
+    assert not (tmp_path / "emails" / "missing_requirements.csv").exists()
+    assert list((tmp_path / "emails").glob("*.txt")) == []
+    assert list((tmp_path / "emails").glob("*.html")) == []

@@ -19,6 +19,7 @@ import random
 import re
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -476,6 +477,61 @@ async def process_scout(
     return result
 
 
+def _assert_blank_identity_results_have_no_records(results: Sequence[ScoutResult]) -> None:
+    """Fail loudly if a blank-identity ScoutResult carries class/requirement data.
+
+    Legacy-copy sibling of scoutmb.features.reporting.service._assert_blank_identity_has_no_
+    records, kept in lockstep by inspection per this module's docstring. `_attendee_key_for`'s
+    `f"name:{scout_name}"` fallback is only safe because process_scout always sets attendee_id
+    BEFORE populating classes/requirements (a ScoutResult that failed before identity
+    resolution is assumed to always have empty collections). If that invariant were ever
+    violated, two different same-named attendees with blank identity would silently merge
+    into one inferred requirement structure in report.html, with no exception and no warning.
+    Called by write_html_report, which -- unlike write_outputs -- does not route through
+    ReportingService.publish and so does not inherit its guard.
+    """
+    for result in results:
+        if str(result.attendee_id or "").strip():
+            continue
+        if result.classes or result.requirements:
+            raise AssertionError(
+                f"ScoutResult for {result.name!r} has a blank attendee_id but "
+                f"{len(result.classes)} class record(s) and {len(result.requirements)} "
+                "requirement record(s). _attendee_key_for's name-based fallback would group "
+                "this with any other blank-identity attendee sharing the same name, silently "
+                "merging their data -- refusing to write the report instead."
+            )
+
+
+def _assert_blank_identity_scouts_have_no_records(scouts: list[dict[str, Any]]) -> None:
+    """Fail loudly if a blank-identity scout dict carries class/requirement data.
+
+    Dict-shape sibling of `_assert_blank_identity_results_have_no_records`, for the nested
+    `scouts.json` shape (`{name, attendee_id, classes, requirements, errors}`) that
+    build_missing_requirements/write_email_reports consume. This is the guard that actually
+    closes the live gap: ui/server.py's `POST /api/runs/{run_id}/generate-emails` calls
+    write_email_reports directly with scouts loaded straight off disk from a prior run's
+    scouts.json (possibly written by pre-fix code, or hand-edited), never going through
+    ReportingService.publish and so never hitting its guard. Without this check,
+    `_attendee_key_for`'s name-based fallback would silently merge two same-named
+    blank-identity scouts' requirement data with no exception and no warning.
+    """
+    for scout in scouts:
+        attendee_id = str(scout.get("attendee_id") or "").strip()
+        if attendee_id:
+            continue
+        classes = scout.get("classes") or []
+        requirements = scout.get("requirements") or []
+        if classes or requirements:
+            raise AssertionError(
+                f"Scout {scout.get('name')!r} has a blank attendee_id but "
+                f"{len(classes)} class record(s) and {len(requirements)} requirement "
+                "record(s). _attendee_key_for's name-based fallback would group this with any "
+                "other blank-identity scout sharing the same name, silently merging their "
+                "data -- refusing to build missing-requirement groupings instead."
+            )
+
+
 def _attendee_key_for(item: dict[str, Any]) -> str:
     """Grouping identity: the attendee ID, never the display name. Two attendees can
     share a name; merging them silently corrupts both.
@@ -546,6 +602,7 @@ def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[s
     "3" when "3b"/"3c" are missing) are included too for context -- a scout
     seeing "3b" in isolation has no idea what "3" actually asked for.
     """
+    _assert_blank_identity_scouts_have_no_records(scouts)
     flattened = [dict(req) for scout in scouts for req in scout.get("requirements", [])]
     annotated = annotate_requirement_statuses(flattened)
     return group_missing_requirements(
@@ -689,6 +746,7 @@ def write_html_report(
     generated_at_iso: str,
     run_id: str = "",
 ) -> None:
+    _assert_blank_identity_results_have_no_records(results)
     classes = [asdict(item) for result in results for item in result.classes]
     requirements = annotate_requirement_statuses(
         [asdict(item) for result in results for item in result.requirements]
