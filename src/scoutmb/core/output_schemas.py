@@ -88,23 +88,19 @@ def requirement_from_mapping(data: Mapping[str, Any]) -> RequirementRecord:
     )
 
 
-def requirement_to_row(record: RequirementRecord, *, shareable: bool) -> dict[str, Any]:
+def requirement_to_row(
+    record: RequirementRecord, *, shareable: bool, output_id: str | None = None
+) -> dict[str, Any]:
     """Project a RequirementRecord into a plain dict, in declaration-field order.
 
-    ``shareable=True`` is NOT YET IMPLEMENTED: Task 23 wires the real field-dropping
-    projection for report.html / email bodies (redacting PII bearer tokens like
-    ``attendee_id``/``qr_url``-adjacent fields). Until then, passing ``shareable=True`` raises
-    ``NotImplementedError`` rather than silently returning the full operational row -- a loud
-    failure is safer than a silent privacy leak for any caller that assumes redaction already
-    happens here.
+    ``shareable=True`` drops ``attendee_id`` (the upstream bearer token) and substitutes
+    ``output_id`` IN PLACE of it -- same index, so the row is a deletion plus an insertion,
+    never a reordering. ``output_id`` is ``None`` for an attempt that failed before identity
+    resolution; callers must pass the per-run output id resolved via ``RunIdentity``, never a
+    placeholder string. Ignored when ``shareable=False``.
     """
-    if shareable:
-        raise NotImplementedError(
-            "requirement_to_row(shareable=True) is not implemented yet -- Task 23 wires the "
-            "real field-dropping projection. Call with shareable=False until then."
-        )
     row = {field.name: getattr(record, field.name) for field in fields(RequirementRecord)}
-    return _project(row, _shareable=shareable)
+    return _project(row, shareable=shareable, output_id=output_id)
 
 
 def class_from_mapping(data: Mapping[str, Any]) -> ClassRecord:
@@ -127,23 +123,19 @@ def class_from_mapping(data: Mapping[str, Any]) -> ClassRecord:
     )
 
 
-def class_to_row(record: ClassRecord, *, shareable: bool) -> dict[str, Any]:
+def class_to_row(
+    record: ClassRecord, *, shareable: bool, output_id: str | None = None
+) -> dict[str, Any]:
     """Project a ClassRecord into a plain dict, in declaration-field order.
 
-    ``shareable=True`` is NOT YET IMPLEMENTED: Task 23 wires the real field-dropping
-    projection for report.html / email bodies (redacting PII bearer tokens like
-    ``attendee_id``/``qr_url``-adjacent fields). Until then, passing ``shareable=True`` raises
-    ``NotImplementedError`` rather than silently returning the full operational row -- a loud
-    failure is safer than a silent privacy leak for any caller that assumes redaction already
-    happens here.
+    ``shareable=True`` drops ``attendee_id`` (the upstream bearer token) and substitutes
+    ``output_id`` IN PLACE of it -- same index, so the row is a deletion plus an insertion,
+    never a reordering. ``output_id`` is ``None`` for an attempt that failed before identity
+    resolution; callers must pass the per-run output id resolved via ``RunIdentity``, never a
+    placeholder string. Ignored when ``shareable=False``.
     """
-    if shareable:
-        raise NotImplementedError(
-            "class_to_row(shareable=True) is not implemented yet -- Task 23 wires the "
-            "real field-dropping projection. Call with shareable=False until then."
-        )
     row = {field.name: getattr(record, field.name) for field in fields(ClassRecord)}
-    return _project(row, _shareable=shareable)
+    return _project(row, shareable=shareable, output_id=output_id)
 
 
 def scout_result_to_row(record: ScoutResult) -> dict[str, Any]:
@@ -170,14 +162,22 @@ def json_for_html(value: Any) -> str:
     )
 
 
-def _project(row: dict[str, Any], *, _shareable: bool) -> dict[str, Any]:
-    """Normalize collection types; the shareable substitution lands in Task 23.
+def _project(
+    row: dict[str, Any], *, shareable: bool, output_id: str | None = None
+) -> dict[str, Any]:
+    """Normalize collections; substitute identity when the projection is shareable.
 
     asdict preserves tuples, so anything sequence-shaped is normalized here rather than left
     for json.dumps to paper over -- a CSV cell would otherwise receive a tuple repr.
 
-    ``_shareable`` is accepted but not yet acted on -- Task 23 wires the field-dropping
-    projection for report.html / email bodies. Keeping the parameter here now means the
-    call sites (`*_to_row`) never need to change signature when that lands.
+    attendee_id is REPLACED IN PLACE by output_id -- same index, so the shareable row is a
+    deletion plus an insertion, never a reordering. output_id is None for an attempt that
+    failed before identity resolution; never a placeholder string, never an omitted key.
     """
-    return {key: list(value) if isinstance(value, tuple) else value for key, value in row.items()}
+    projected: dict[str, Any] = {}
+    for key, value in row.items():
+        if shareable and key == "attendee_id":
+            projected["output_id"] = output_id
+            continue
+        projected[key] = list(value) if isinstance(value, tuple) else value
+    return projected

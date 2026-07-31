@@ -40,3 +40,36 @@ def test_same_named_attendees_stay_separate_in_the_golden() -> None:
     scouts = [s for s in stored["report_data"]["scouts"] if s["name"] == "Jordan Sample"]
     assert len(scouts) == 2, scouts
     assert scouts[0] != scouts[1]
+
+
+_TRANSFORMED = ("scouts", "classes", "requirements", "errors")
+
+
+def test_v1_to_v2_diff_is_exactly_the_declared_substitution() -> None:
+    """Catches a move-induced change hiding inside an intentional one.
+
+    The only permitted difference between the two goldens is attendee_id -> output_id in the
+    four transformed collections. Any other changed key, value, type, or ordering fails.
+    """
+    v1 = json.loads((GOLDENS / "v1_operational.json").read_text(encoding="utf-8"))
+    v2 = json.loads((GOLDENS / "v2_shareable.json").read_text(encoding="utf-8"))
+
+    assert v1["emails"] == v2["emails"], (
+        "email bodies already carried no identity; they must not change"
+    )
+
+    top_v1 = {k: v for k, v in v1["report_data"].items() if k not in _TRANSFORMED}
+    top_v2 = {k: v for k, v in v2["report_data"].items() if k not in _TRANSFORMED}
+    assert top_v1 == top_v2, "the top-level object is unchanged (ART-SCHEMA-006)"
+
+    for collection in _TRANSFORMED:
+        rows_v1 = v1["report_data"][collection]
+        rows_v2 = v2["report_data"][collection]
+        assert len(rows_v1) == len(rows_v2), collection
+        for before, after in zip(rows_v1, rows_v2, strict=True):
+            expected_keys = ["output_id" if key == "attendee_id" else key for key in before]
+            assert list(after) == expected_keys, f"{collection}: key set or order changed"
+            for key in before:
+                if key == "attendee_id":
+                    continue
+                assert after[key] == before[key], f"{collection}.{key} changed with the projection"

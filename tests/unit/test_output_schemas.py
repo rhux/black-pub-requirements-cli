@@ -113,27 +113,55 @@ def test_serializer_normalizes_tuples_to_lists() -> None:
     assert isinstance(row["errors"], list)
 
 
-def test_requirement_to_row_shareable_true_raises_not_implemented() -> None:
-    """shareable=True is not yet wired (Task 23 does the real field-dropping); until then it
-    must raise loudly rather than silently return the full operational row."""
-    with pytest.raises(NotImplementedError):
-        requirement_to_row(_dto("3b"), shareable=True)
+def test_requirement_to_row_shareable_true_substitutes_output_id_in_place() -> None:
+    """attendee_id is replaced BY output_id at the same index -- a deletion plus an insertion,
+    never a reordering (Task 23)."""
+    from dataclasses import fields
+
+    row = requirement_to_row(_dto("3b"), shareable=True, output_id="the-output-id")
+    assert "attendee_id" not in row
+    assert row["output_id"] == "the-output-id"
+    expected_keys = [
+        "output_id" if f.name == "attendee_id" else f.name for f in fields(RequirementRecord)
+    ]
+    assert list(row) == expected_keys
+
+
+def test_requirement_to_row_shareable_true_defaults_output_id_to_none() -> None:
+    """An attempt that failed before identity resolution carries output_id: None, never an
+    omitted key and never a placeholder string."""
+    row = requirement_to_row(_dto("3b"), shareable=True)
+    assert row["output_id"] is None
 
 
 def test_requirement_to_row_shareable_false_still_works() -> None:
     row = requirement_to_row(_dto("3b"), shareable=False)
     assert row["requirement_number"] == "3b"
+    assert row["attendee_id"] == "90000001"
 
 
-def test_class_to_row_shareable_true_raises_not_implemented() -> None:
-    """Mirror of the RequirementRecord guard: shareable=True must fail loudly, not silently."""
-    with pytest.raises(NotImplementedError):
-        class_to_row(_class_dto(), shareable=True)
+def test_class_to_row_shareable_true_substitutes_output_id_in_place() -> None:
+    """Mirror of the RequirementRecord case: attendee_id is replaced by output_id in place."""
+    from dataclasses import fields
+
+    row = class_to_row(_class_dto(), shareable=True, output_id="the-output-id")
+    assert "attendee_id" not in row
+    assert row["output_id"] == "the-output-id"
+    expected_keys = [
+        "output_id" if f.name == "attendee_id" else f.name for f in fields(ClassRecord)
+    ]
+    assert list(row) == expected_keys
+
+
+def test_class_to_row_shareable_true_defaults_output_id_to_none() -> None:
+    row = class_to_row(_class_dto(), shareable=True)
+    assert row["output_id"] is None
 
 
 def test_class_to_row_shareable_false_still_works() -> None:
     row = class_to_row(_class_dto(), shareable=False)
     assert row["class_name"] == "Chess"
+    assert row["attendee_id"] == "90000001"
 
 
 def test_class_dto_round_trip() -> None:

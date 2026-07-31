@@ -8,7 +8,11 @@ from pathlib import Path
 
 from tests.goldens.fixture import golden_results
 
-_UUID32 = re.compile(r"[0-9a-f]{32}")
+# Matches a UUIDv4 with OR without its canonical dashes: email filenames embed the dashless
+# 32-hex form (attendee_filename_stem strips dashes), but report.html's embedded output_id
+# (Task 23) is the dashed str(uuid.uuid4()) form -- both must normalize to the same ordinal or
+# report.html's random per-run UUIDs would make this comparison spuriously fail on every run.
+_UUID32 = re.compile(r"[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}")
 # Match ONLY the two timestamp grammars write_outputs emits:
 #   local: "2026-07-24 09:00:00 UTC"   (time.strftime("%Y-%m-%d %H:%M:%S %Z"))
 #   iso:   "2026-07-24T09:00:00+00:00" (datetime.isoformat(timespec="seconds"))
@@ -23,6 +27,15 @@ _TIMESTAMP = re.compile(
 
 def _mask_timestamps(text: str) -> str:
     return _TIMESTAMP.sub("TIMESTAMP", text)
+
+
+def _mask_uuids(text: str) -> str:
+    """Map each distinct UUID encountered (dashed or dashless) to a stable ordinal, using a
+    mapping local to this one call. report.html now embeds output_id (Task 23) -- a fresh
+    random UUID every run -- so a raw comparison would fail even when nothing meaningful
+    changed."""
+    mapping: dict[str, str] = {}
+    return _UUID32.sub(lambda m: mapping.setdefault(m.group(0), f"UUID{len(mapping):02d}"), text)
 
 
 def _normalized_tree(root: Path) -> dict[str, str]:
@@ -101,7 +114,8 @@ def test_write_outputs_is_byte_identical_through_the_service(tmp_path: Path) -> 
     # comparison, which an earlier draft used here, asserts nothing at all.
     assert _normalized_tree(direct) == _normalized_tree(via)
 
-    # report.html embeds the two wall-clock timestamps, so compare it with those masked.
-    assert _mask_timestamps(
-        (direct / "report.html").read_text(encoding="utf-8")
-    ) == _mask_timestamps((via / "report.html").read_text(encoding="utf-8"))
+    # report.html embeds the two wall-clock timestamps and (Task 23) each attendee's output_id;
+    # mask both before comparing.
+    assert _mask_uuids(
+        _mask_timestamps((direct / "report.html").read_text(encoding="utf-8"))
+    ) == _mask_uuids(_mask_timestamps((via / "report.html").read_text(encoding="utf-8")))

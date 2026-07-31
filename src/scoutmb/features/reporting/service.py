@@ -29,22 +29,39 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from scoutmb.core.identity import AttendeeId, RunIdentity, attendee_filename_stem
+from scoutmb.core.identity import AttendeeId, MissingAttendeeId, RunIdentity, attendee_filename_stem
 from scoutmb.core.inference.missing import group_missing_requirements
 from scoutmb.core.inference.status import calculate_statuses
 from scoutmb.core.inference.tree import build_group_tree
 from scoutmb.core.models import ClassRecord, RequirementRecord, ScoutResult
+from scoutmb.core.output_schemas import class_to_row, requirement_to_row
 from scoutmb.ports.artifact_sink import ArtifactSink, ReportRenderer
 
 
 def _attendee_key_for(item: dict[str, Any]) -> str:
-    """Grouping identity: the attendee ID, never the display name -- two attendees can share
-    a name, and merging them would silently corrupt both. Mirrors
-    scout_schedule_cli._attendee_key_for exactly."""
-    attendee_id = str(item.get("attendee_id") or "").strip()
-    if attendee_id:
-        return attendee_id
+    """Grouping identity: prefers output_id (the shareable report's rows), falls back to
+    attendee_id (the operational `nested` rows this same helper also groups via
+    _build_missing_requirements), then display name -- two attendees can share a name, and
+    merging them would silently corrupt both. Mirrors scout_schedule_cli._attendee_key_for's
+    attendee_id-or-name fallback, extended with output_id so it also works on shareable rows
+    where attendee_id has already been projected away.
+    """
+    identity = item.get("output_id")
+    if identity is None:
+        identity = item.get("attendee_id")
+    identity = str(identity or "").strip()
+    if identity:
+        return identity
     return f"name:{str(item.get('scout_name') or '')}"
+
+
+def _resolve_output_id(attendee_id: str, scout_name: str, run_identity: RunIdentity) -> str | None:
+    """None for an attempt that failed before identity resolution (process_scout can build a
+    ScoutResult with attendee_id == "" before ever reading it); never a placeholder string."""
+    try:
+        return run_identity.output_id(AttendeeId.parse(attendee_id, scout_name))
+    except MissingAttendeeId:
+        return None
 
 
 def _annotate_requirement_statuses(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -255,7 +272,9 @@ class ReportingService:
         if not safe_html_name.lower().endswith(".html"):
             safe_html_name += ".html"
         if generate_html:
-            report_data = self._report_data(results, generated_at_local, generated_at_iso, run_id)
+            report_data = self._report_data(
+                results, generated_at_local, generated_at_iso, run_id, run_identity
+            )
             self.sink.publish_text(
                 output_dir / safe_html_name, self.renderer(report_data), encoding="utf-8"
             )
@@ -286,26 +305,41 @@ class ReportingService:
         generated_at_local: str,
         generated_at_iso: str,
         run_id: str,
+        run_identity: RunIdentity,
     ) -> dict[str, Any]:
-        classes = [asdict(item) for result in results for item in result.classes]
-        requirements = _annotate_requirement_statuses(
-            [asdict(item) for result in results for item in result.requirements]
-        )
-        errors = [
-            {"scout_name": result.name, "attendee_id": result.attendee_id, "error": error}
-            for result in results
-            for error in result.errors
-        ]
-        scouts = [
-            {
-                "name": result.name,
-                "attendee_id": result.attendee_id,
-                "class_count": len(result.classes),
-                "requirement_count": len(result.requirements),
-                "error_count": len(result.errors),
-            }
-            for result in results
-        ]
+        """report.html is the shareable surface: every row here carries output_id, never
+        attendee_id/qr_url. One output_id is resolved per ScoutResult (RunIdentity.output_id is
+        idempotent per attendee, so every class/requirement/error/scout row for the same
+        attendee gets the same value) and substituted in place via class_to_row/
+        requirement_to_row's shareable=True projection.
+        """
+        classes: list[dict[str, Any]] = []
+        requirements: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        scouts: list[dict[str, Any]] = []
+        for result in results:
+            output_id = _resolve_output_id(result.attendee_id, result.name, run_identity)
+            classes.extend(
+                class_to_row(item, shareable=True, output_id=output_id) for item in result.classes
+            )
+            requirements.extend(
+                requirement_to_row(item, shareable=True, output_id=output_id)
+                for item in result.requirements
+            )
+            errors.extend(
+                {"scout_name": result.name, "output_id": output_id, "error": error}
+                for error in result.errors
+            )
+            scouts.append(
+                {
+                    "name": result.name,
+                    "output_id": output_id,
+                    "class_count": len(result.classes),
+                    "requirement_count": len(result.requirements),
+                    "error_count": len(result.errors),
+                }
+            )
+        requirements = _annotate_requirement_statuses(requirements)
         return {
             "generated_at_local": generated_at_local,
             "generated_at_iso": generated_at_iso,
