@@ -15,7 +15,6 @@ import csv
 import html
 import io
 import json
-import os
 import random
 import re
 import sys
