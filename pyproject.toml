@@ -107,7 +107,17 @@ markers = [
     "intentional_change: locks a deliberately changed behavior owned by a later slice",
     "matrix_case: binds a test to one matrix execution key (case_id, context_id, lane)",
 ]
-addopts = "-m 'not live_service and not playwright' --strict-markers --strict-config"
+addopts = "-m 'not live_service and not playwright' --strict-markers --strict-config --cov-branch"
+# --cov-branch is required even though [tool.coverage.run] already sets `branch = true`: with
+# --cov, pytest-cov derives the COV_CORE_BRANCH env var it exports for subprocess coverage
+# combining from its OWN --cov-branch CLI flag (pytest_cov/engine.py's `self.cov_branch =
+# options.cov_branch`), NOT from the coverage config file. Without it, every subprocess-spawning
+# test (tests/compat/test_legacy_entrypoints.py, tests/packaging/test_core_imports.py, etc. --
+# any bare `subprocess.run([sys.executable, ...])` that inherits the parent env) auto-starts
+# statement-only coverage via pytest-cov's own site .pth hook, and `coverage combine` then
+# hard-crashes with "Can't combine statement coverage data with branch data" (an
+# INTERNALERROR, not a clean failure) the moment `--cov --cov-report=json` runs alongside any
+# such test. Harmless when --cov is not passed (Python confirms --cov-branch is then a no-op).
 asyncio_mode = "auto"
 xfail_strict = true
 

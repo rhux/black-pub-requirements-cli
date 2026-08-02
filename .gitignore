@@ -21,6 +21,7 @@ runs/
 .mypy_cache/
 htmlcov/
 .coverage
+coverage.json
 dist/
 build/
 *.egg-info/

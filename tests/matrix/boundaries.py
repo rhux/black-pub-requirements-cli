@@ -11,6 +11,10 @@ class BoundarySpec:
     qualified_name: str
     domain: Domain
     required_case_ids: frozenset[str]
+    # Task 24: the package-side seam that now carries the SAME behavior as ``qualified_name``
+    # (which stays pointed at the legacy flat module -- often a re-export shim as of 2a). Left
+    # "" for boundaries with no package-side counterpart yet.
+    package_qualified_name: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +116,7 @@ _INPUT_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "IN-EMPTY-002",
             }
         ),
+        package_qualified_name="scoutmb.adapters.files.tabular.TabularAttendeeSource.load",
     ),
     BoundarySpec(
         boundary_id="IN-B-LOAD-CSV",
@@ -129,6 +134,7 @@ _INPUT_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "IN-HEADER-004",
             }
         ),
+        package_qualified_name="scoutmb.adapters.files.tabular.load_csv",
     ),
     BoundarySpec(
         boundary_id="IN-B-LOAD-XLSX",
@@ -144,6 +150,7 @@ _INPUT_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "IN-XLSX-ERR-002",
             }
         ),
+        package_qualified_name="scoutmb.adapters.files.tabular.load_xlsx",
     ),
     BoundarySpec(
         boundary_id="IN-B-LOAD-JSON",
@@ -164,6 +171,7 @@ _INPUT_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "IN-JSON-006",
             }
         ),
+        package_qualified_name="scoutmb.adapters.files.tabular.load_json",
     ),
     BoundarySpec(
         boundary_id="IN-B-LOAD-TEXT",
@@ -178,6 +186,7 @@ _INPUT_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "IN-TEXT-004",
             }
         ),
+        package_qualified_name="scoutmb.adapters.files.tabular.load_text",
     ),
 )
 
@@ -358,6 +367,7 @@ _ACQUISITION_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "ACQ-IDENTITY-003",
             }
         ),
+        package_qualified_name="scoutmb.core.identity.RunIdentity.output_id",
     ),
     BoundarySpec(
         boundary_id="ACQ-B-EGRESS",
@@ -384,12 +394,14 @@ _REQUIREMENT_BOUNDARIES: tuple[BoundarySpec, ...] = (
         required_case_ids=frozenset(
             {"REQ-SHAPE-001", "REQ-EMPTY-001", "REQ-EMPTY-002", "REQ-NOTE-001", "REQ-NOTE-002"}
         ),
+        package_qualified_name="scoutmb.core.inference.numbering.requirement_path",
     ),
     BoundarySpec(
         boundary_id="REQ-B-CHOICE",
         qualified_name="scout_schedule_cli.choice_requirement_count",
         domain=Domain.REQUIREMENT,
         required_case_ids=frozenset({f"REQ-CHOICE-{i:03d}" for i in range(1, 31)}),
+        package_qualified_name="scoutmb.core.inference.numbering.choice_requirement_count",
     ),
     BoundarySpec(
         boundary_id="REQ-B-ANNOTATE",
@@ -413,12 +425,14 @@ _REQUIREMENT_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "REQ-IDENTITY-003",
             }
         ),
+        package_qualified_name="scoutmb.core.inference.status.calculate_statuses",
     ),
     BoundarySpec(
         boundary_id="REQ-B-MISSING",
         qualified_name="scout_schedule_cli.build_missing_requirements",
         domain=Domain.REQUIREMENT,
         required_case_ids=frozenset({"REQ-EXCLUDE-001", "REQ-EXCLUDE-002"}),
+        package_qualified_name="scoutmb.core.inference.missing.select_actionable",
     ),
     BoundarySpec(
         boundary_id="REQ-B-EMAIL-TEXT",
@@ -485,6 +499,7 @@ _ARTIFACT_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "ART-HTML-005",
             }
         ),
+        package_qualified_name="scoutmb.core.output_schemas.json_for_html",
     ),
     BoundarySpec(
         boundary_id="ART-B-FILENAME",
@@ -497,12 +512,14 @@ _ARTIFACT_BOUNDARIES: tuple[BoundarySpec, ...] = (
         qualified_name="scout_schedule_cli.write_csv",
         domain=Domain.ARTIFACT,
         required_case_ids=frozenset({f"ART-FORMULA-{i:03d}" for i in range(1, 7)}),
+        package_qualified_name="scoutmb.adapters.files.atomic.write_csv",
     ),
     BoundarySpec(
         boundary_id="ART-B-ATOMIC-WRITE",
         qualified_name="scout_schedule_cli.atomic_write_text",
         domain=Domain.ARTIFACT,
         required_case_ids=frozenset({f"ART-FAIL-{i:03d}" for i in range(1, 7)}),
+        package_qualified_name="scoutmb.adapters.files.atomic.atomic_write_text",
     ),
 )
 
@@ -516,6 +533,7 @@ _PLATFORM_BOUNDARIES: tuple[BoundarySpec, ...] = (
         required_case_ids=frozenset(
             {f"PLAT-WIN-{i:03d}" for i in range(1, 9)} | {f"PLAT-MAC-{i:03d}" for i in range(1, 6)}
         ),
+        package_qualified_name="scoutmb.core.identity.safe_slug",
     ),
 )
 
@@ -695,6 +713,51 @@ COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = (
         "bootstrap",
         ("bootstrap/paths.py", "bootstrap/marker.py", "bootstrap/source_sync.py"),
     ),
+    # Package-side coverage areas (Task 24): the scoutmb/ modules Tasks 1-23 moved real
+    # behavior into. Floors are D10: core/ports >=95% branch, adapters/features >=90% branch.
+    # ``files`` are exact coverage-JSON keys (tools/check_phase_a_coverage.py:79/:116), not
+    # globs -- see tests/matrix/test_coverage_areas.py for the tripwire that keeps this list
+    # honest as new package modules land. Empty __init__.py files are excluded: they have no
+    # statements, so coverage.py omits them from the report entirely.
+    CoverageAreaSpec(
+        area_id="pkg-core",
+        files=(
+            "src/scoutmb/core/models.py",
+            "src/scoutmb/core/identity.py",
+            "src/scoutmb/core/output_schemas.py",
+            "src/scoutmb/core/inference/numbering.py",
+            "src/scoutmb/core/inference/tree.py",
+            "src/scoutmb/core/inference/status.py",
+            "src/scoutmb/core/inference/missing.py",
+        ),
+    ),
+    CoverageAreaSpec(
+        area_id="pkg-ports",
+        files=(
+            "src/scoutmb/ports/clock.py",
+            "src/scoutmb/ports/ids.py",
+            "src/scoutmb/ports/attendee_source.py",
+            "src/scoutmb/ports/artifact_sink.py",
+        ),
+    ),
+    CoverageAreaSpec(
+        area_id="pkg-adapters",
+        files=(
+            "src/scoutmb/adapters/files/atomic.py",
+            "src/scoutmb/adapters/files/tabular.py",
+            "src/scoutmb/adapters/pdf/extract.py",
+            "src/scoutmb/adapters/pdf/pages.py",
+            "src/scoutmb/adapters/html/report.py",
+        ),
+    ),
+    CoverageAreaSpec(
+        area_id="pkg-features",
+        files=(
+            "src/scoutmb/features/ingest/service.py",
+            "src/scoutmb/features/ingest/pdf_extract.py",
+            "src/scoutmb/features/reporting/service.py",
+        ),
+    ),
 )
 
 # Reviewed, narrowly-scoped exclusions (Task 22, step 9). Every entry here was left uncovered
@@ -711,51 +774,45 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         exclusion_id="EXC-MAIN-GUARD-SCHEDULE-STMT",
         area_id="schedule",
         file="scout_schedule_cli.py",
-        line=1889,
+        line=908,
         branch_to=None,
         rationale=(
             '`raise SystemExit(main())` under `if __name__ == "__main__":` only runs when '
             "the module is executed as a script; pytest always imports it as a module, so "
             '__name__ is never "__main__" during the test suite.'
         ),
-        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
+        review_reference=(
+            "Task 22 step 9 review: entry-point guard, structurally unreachable under pytest. "
+            "Task 24 re-pin: line drifted from 1889 to 908 as Tasks 5-23 moved code out of "
+            "scout_schedule_cli.py into the package; re-verified against the current file."
+        ),
     ),
     BranchExclusion(
         exclusion_id="EXC-MAIN-GUARD-SCHEDULE-BRANCH",
         area_id="schedule",
         file="scout_schedule_cli.py",
-        line=1888,
-        branch_to=1889,
+        line=907,
+        branch_to=908,
         rationale=(
             'The `if __name__ == "__main__":` true-branch arc to its body is never taken '
             "for the same reason as EXC-MAIN-GUARD-SCHEDULE-STMT."
         ),
-        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-MAIN-GUARD-PDF-STMT",
-        area_id="pdf",
-        file="pdf_to_scouts.py",
-        line=600,
-        branch_to=None,
-        rationale=(
-            '`raise SystemExit(main())` under `if __name__ == "__main__":` only runs when '
-            "the module is executed as a script; pytest always imports it as a module."
+        review_reference=(
+            "Task 22 step 9 review: entry-point guard, structurally unreachable under pytest. "
+            "Task 24 re-pin: line drifted from 1888->1889 to 907->908 as Tasks 5-23 moved code "
+            "out of scout_schedule_cli.py into the package; re-verified against the current file."
         ),
-        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
     ),
-    BranchExclusion(
-        exclusion_id="EXC-MAIN-GUARD-PDF-BRANCH",
-        area_id="pdf",
-        file="pdf_to_scouts.py",
-        line=599,
-        branch_to=600,
-        rationale=(
-            'The `if __name__ == "__main__":` true-branch arc to its body is never taken '
-            "for the same reason as EXC-MAIN-GUARD-PDF-STMT."
-        ),
-        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
-    ),
+    # EXC-MAIN-GUARD-PDF-STMT / EXC-MAIN-GUARD-PDF-BRANCH removed (Task 24 re-pin review):
+    # pdf_to_scouts.py's `if __name__ == "__main__":` guard used to be structurally unreachable
+    # under pytest, like its schedule/desktop siblings below -- but fixing the pytest-cov
+    # subprocess-coverage-combining bug uncovered by this same re-pin (see pyproject.toml's
+    # `--cov-branch` addopts entry) revealed that tests/compat/test_legacy_entrypoints.py's
+    # `subprocess.run([sys.executable, "pdf_to_scouts.py", "--help"])` genuinely executes this
+    # module as `__main__` and previously had its coverage silently discarded by a crashed
+    # `coverage combine`. Verified directly against coverage.json: pdf_to_scouts.py is 11/11
+    # statements, 2/2 branches with no exclusion needed. Kept as a stale-exclusion tripwire
+    # example in the Task 24 report rather than re-added.
     BranchExclusion(
         exclusion_id="EXC-MAIN-GUARD-DESKTOP-STMT",
         area_id="desktop",
@@ -780,19 +837,24 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         ),
         review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
     ),
-    # --- pdf_to_scouts.expand_pdf_inputs's Windows-glob fallback: the `for match in matches:`
-    # loop only returns to its own top (rather than falling into the if/elif bodies) for a glob
-    # match that is NEITHER a file NOR a directory -- e.g. a broken symlink, or a path deleted
-    # between glob.glob() and the is_file()/is_dir() checks. Constructing that portably (broken
-    # symlinks need elevated privileges to create on Windows, which this project also targets)
-    # would trade a real, meaningful test for a platform-fragile one; a genuine TOCTOU race is
-    # not something a deterministic unit test should simulate by deleting the path mid-call.
+    # --- expand_pdf_inputs's Windows-glob fallback: the `for match in matches:` loop only
+    # returns to its own top (rather than falling into the if/elif bodies) for a glob match that
+    # is NEITHER a file NOR a directory -- e.g. a broken symlink, or a path deleted between
+    # glob.glob() and the is_file()/is_dir() checks. Constructing that portably (broken symlinks
+    # need elevated privileges to create on Windows, which this project also targets) would
+    # trade a real, meaningful test for a platform-fragile one; a genuine TOCTOU race is not
+    # something a deterministic unit test should simulate by deleting the path mid-call.
+    #
+    # Task 24 re-pin: the real implementation moved from pdf_to_scouts.py:157-161 into
+    # scoutmb.features.ingest.pdf_extract.expand_pdf_inputs (Task 18); pdf_to_scouts.py itself
+    # is now a 59-line re-export shim with no such loop, so the old file/line no longer resolves
+    # to anything -- relocated to the package module and its area, same defensive branch.
     BranchExclusion(
         exclusion_id="EXC-PDF-GLOB-NEITHER-FILE-NOR-DIR",
-        area_id="pdf",
-        file="pdf_to_scouts.py",
-        line=161,
-        branch_to=157,
+        area_id="pkg-features",
+        file="src/scoutmb/features/ingest/pdf_extract.py",
+        line=53,
+        branch_to=49,
         rationale=(
             "Only reached when a glob match is neither a file nor a directory (a broken "
             "symlink or a TOCTOU race between glob() and the is_file()/is_dir() checks). "
@@ -800,7 +862,12 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
             "this project also targets, and simulating the race would require deleting the "
             "path mid-call rather than exercising real behavior."
         ),
-        review_reference="Task 22 step 9 review: defensive branch, not portably testable across Windows+macOS.",
+        review_reference=(
+            "Task 22 step 9 review: defensive branch, not portably testable across Windows+"
+            "macOS. Task 24 re-pin: relocated from pdf_to_scouts.py:157-161 to "
+            "scoutmb.features.ingest.pdf_extract.expand_pdf_inputs:49-53 (Task 18 moved the "
+            "implementation into the package); re-verified against the current file."
+        ),
     ),
     # --- ui/server._platform_data_root's OS dispatch. The project's own test policy (see
     # tests/characterization/test_platform_matrix.py's docstring) never monkeypatches
@@ -910,5 +977,397 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
             "unhandled 500, an intentional-change owned by Slice 2 (cross-platform folder-open)."
         ),
         review_reference="Task 22 step 9 review: see UI-ROUTE-023 in tests/matrix/cases/interface_cases.py.",
+    ),
+    # =========================================================================================
+    # Task 24 review: gaps found while re-deriving the baseline for the first time since Task 22
+    # made write_outputs a "Form-2 shim" delegating to ReportingService.publish, and since the
+    # four pkg-* areas above were characterized for the first time. Reviewed the same way as
+    # Task 22 step 9: a genuine attempt to close each one with a real test first; each entry
+    # below records why that attempt did not close it.
+    # =========================================================================================
+    #
+    # --- scout_schedule_cli.write_html_report and its helper
+    # _assert_blank_identity_results_have_no_records are now entirely unreached. Before Task 22
+    # (commit ef5dd77), write_outputs called write_html_report directly; write_outputs now
+    # delegates the real report-composition/write path to ReportingService.publish (its own,
+    # independently-tested equivalent logic -- see the pkg-features/service.py entries below),
+    # and no test calls scout_schedule_cli.write_html_report directly (only write_email_reports,
+    # a sibling function, is still exercised that way). A genuine attempt to close this by
+    # calling write_html_report directly is deferred: this legacy copy is slated for retirement
+    # together with the rest of tests/harnesses/legacy.py at the START of Slice 2b (see this
+    # plan's "Deferred to Slice 2b" section), so a same-slice test investment here would be
+    # thrown away almost immediately. Every statement and branch in the two functions'
+    # (unreachable) bodies is listed individually, matching this table's one-line-or-arc
+    # convention.
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-STMT-FOR",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=493,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); this is its dead helper's loop header.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-STMT-IF",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=494,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); this is its dead helper's identity check.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-STMT-CONTINUE",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=495,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); this is its dead helper's continue.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-STMT-RECORDS-IF",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=496,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); this is its dead helper's records check.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-STMT-RAISE",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=497,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); this is its dead helper's raise.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-NOENTRY",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=493,
+        branch_to=-480,
+        rationale="write_html_report is unreached (see section header); zero-entry exit of the dead helper's loop.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-ENTRY",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=493,
+        branch_to=494,
+        rationale="write_html_report is unreached (see section header); loop-entry arc of the dead helper.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-CONTINUE-TRUE",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=494,
+        branch_to=495,
+        rationale="write_html_report is unreached (see section header); identity-blank arc of the dead helper.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-CONTINUE-FALSE",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=494,
+        branch_to=496,
+        rationale="write_html_report is unreached (see section header); identity-present arc of the dead helper.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-NORECORDS",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=496,
+        branch_to=493,
+        rationale="write_html_report is unreached (see section header); no-records loop-back arc of the dead helper.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-HASRECORDS",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=496,
+        branch_to=497,
+        rationale="write_html_report is unreached (see section header); has-records raise arc of the dead helper.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-ASSERT-CALL",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=749,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); the assert-guard call at its top.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-CLASSES",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=750,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); the classes projection.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-REQUIREMENTS",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=751,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); the annotated-requirements projection.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-ERRORS",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=754,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); the errors projection.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-SCOUTS",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=759,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); the scouts-summary projection.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-DATA",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=769,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); the assembled report_data dict.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-WRITE",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=779,
+        branch_to=None,
+        rationale="write_html_report is unreached (see section header); the final render+atomic_write_text call.",
+        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77).",
+    ),
+    # --- scout_schedule_cli._assert_blank_identity_scouts_have_no_records IS actively exercised
+    # (write_email_reports calls it, and every ART-EMAIL-*/privacy test that constructs a
+    # blank-identity scout does so specifically to prove the guard raises), but only the
+    # has-records arc: no test constructs a blank-identity scout with genuinely empty
+    # classes/requirements (the actual common shape for a scout that failed before identity
+    # resolution), so the loop-continues-without-raising arc is never taken.
+    BranchExclusion(
+        exclusion_id="EXC-SCHEDULE-BLANK-SCOUT-GUARD-NORECORDS-CONTINUES",
+        area_id="schedule",
+        file="scout_schedule_cli.py",
+        line=525,
+        branch_to=519,
+        rationale=(
+            "Every test that builds a blank-identity scout dict for this guard gives it "
+            "non-empty classes/requirements specifically to prove the guard raises; none "
+            "exercises the passing case (blank identity, empty records) that this arc covers."
+        ),
+        review_reference="Task 24 review: genuine attempt made; every existing caller targets the raising arc only.",
+    ),
+    # --- pkg-core: core.inference.missing.select_actionable's ancestor walk. `parent_index is
+    # None` fires only when a row's own `parent_requirement_number` names a number that never
+    # appears as another row's own number within the same (attendee, class) group -- malformed
+    # or truncated requirement data. REQ-B-MISSING's two required cases (REQ-EXCLUDE-001/002)
+    # exercise the function's actionability filter, not this specific dangling-reference shape.
+    BranchExclusion(
+        exclusion_id="EXC-PKG-MISSING-DANGLING-PARENT-BREAK",
+        area_id="pkg-core",
+        file="src/scoutmb/core/inference/missing.py",
+        line=69,
+        branch_to=None,
+        rationale=(
+            "Reached only when a row's parent_requirement_number does not match any row's own "
+            "number in the same group -- malformed numbering the frozen matrix catalog's two "
+            "REQ-EXCLUDE cases do not construct."
+        ),
+        review_reference="Task 24 review: defensive branch over malformed input, not in the frozen catalog's shapes.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-MISSING-DANGLING-PARENT-BREAK-ARC",
+        area_id="pkg-core",
+        file="src/scoutmb/core/inference/missing.py",
+        line=68,
+        branch_to=69,
+        rationale="Same dangling-parent-reference case as EXC-PKG-MISSING-DANGLING-PARENT-BREAK.",
+        review_reference="Task 24 review: defensive branch over malformed input, not in the frozen catalog's shapes.",
+    ),
+    # EXC-PKG-PDF-IMPORT-CAPABILITY-EXCEPT / -RAISE removed (Task 24 re-pin review, second
+    # pass): adapters.pdf.extract._import_pdf_stack's ImportError-to-CapabilityUnavailable
+    # conversion (lines 38-39) was first drafted as subprocess-only-and-thus-invisible, on the
+    # premise that this repo's coverage.py setup does not combine subprocess coverage. That
+    # premise was wrong -- it does, via pytest-cov's own COV_CORE_* env-var mechanism -- but a
+    # separate pytest-cov bug (COV_CORE_BRANCH is derived from pytest-cov's OWN --cov-branch CLI
+    # flag, not from `[tool.coverage.run] branch = true`) made every subprocess in the suite
+    # write statement-only data, which made `coverage combine` hard-crash rather than silently
+    # under-report. Fixed by adding `--cov-branch` to pytest's addopts (see pyproject.toml).
+    # With that fixed, tests/packaging/test_core_imports.py's real `python -I` subprocess runs
+    # DO show up: verified directly against coverage.json, lines 38-39 are no longer missing.
+    # --- pkg-adapters: adapters.pdf.extract.decode_embedded_qr's (pdf-path-level, multi-page)
+    # exhaustion fallback. tests/packaging/test_core_imports.py's happy-path test decodes a QR
+    # from a one-page PDF, so the loop always returns on its first iteration; no test at this
+    # level exercises a PDF whose pages contain no decodable embedded QR at all.
+    BranchExclusion(
+        exclusion_id="EXC-PKG-PDF-EMBEDDED-EXHAUSTED",
+        area_id="pkg-adapters",
+        file="src/scoutmb/adapters/pdf/extract.py",
+        line=246,
+        branch_to=None,
+        rationale=(
+            "Only the one-page, QR-found happy path is exercised at this entry point "
+            "(test_core_imports.py); no caller reaches this level with a PDF that has no "
+            "decodable embedded QR on any page."
+        ),
+        review_reference="Task 24 review: see test_core_imports.py test_decode_embedded_qr_success_path_...",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-PDF-EMBEDDED-EXHAUSTED-ARC",
+        area_id="pkg-adapters",
+        file="src/scoutmb/adapters/pdf/extract.py",
+        line=241,
+        branch_to=246,
+        rationale="Same single-page-always-found gap as EXC-PKG-PDF-EMBEDDED-EXHAUSTED.",
+        review_reference="Task 24 review: see test_core_imports.py test_decode_embedded_qr_success_path_...",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-PDF-EMBEDDED-CONTINUE-ARC",
+        area_id="pkg-adapters",
+        file="src/scoutmb/adapters/pdf/extract.py",
+        line=243,
+        branch_to=241,
+        rationale=(
+            "The value-not-found-on-this-page loop-continue arc; same single-page-always-found "
+            "gap as EXC-PKG-PDF-EMBEDDED-EXHAUSTED (the only test at this entry point supplies a "
+            "PDF whose first page already decodes)."
+        ),
+        review_reference="Task 24 review: see test_core_imports.py test_decode_embedded_qr_success_path_...",
+    ),
+    # --- pkg-features: features.reporting.service is ReportingService's own, independently
+    # written equivalent of scout_schedule_cli's requirement-annotation and email-rendering
+    # logic (Task 22's docstring: "cannot import back from this script"). It is exercised by
+    # tests/parity/test_output_parity.py's byte-for-byte comparison against the legacy path
+    # using the single shared golden fixture (tests/goldens/fixture.py), which does not
+    # construct every shape the exhaustively-matrixed legacy REQ-B-*/ART-B-EMAIL boundaries do
+    # (nested parent requirements, a real prerequisite-flagged row, or a fully-identity-blank
+    # item). Closing these by hand-building parallel fixtures duplicates work Slice 2b's
+    # package-side matrix wiring (this task's package_qualified_name field) is the intended home
+    # for; the D10 floor (90% branch), not 100%, is the standard this area is held to for 2a.
+    BranchExclusion(
+        exclusion_id="EXC-PKG-REPORTING-KEY-NAME-FALLBACK",
+        area_id="pkg-features",
+        file="src/scoutmb/features/reporting/service.py",
+        line=61,
+        branch_to=63,
+        rationale=(
+            "Reached only when an item has neither output_id nor attendee_id; the golden "
+            "fixture's records always carry at least one, so the name-only fallback is unused "
+            "by the one test exercising this module."
+        ),
+        review_reference="Task 24 review: golden fixture (tests/goldens/fixture.py) never omits both identity fields.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-REPORTING-KEY-NAME-FALLBACK-STMT",
+        area_id="pkg-features",
+        file="src/scoutmb/features/reporting/service.py",
+        line=63,
+        branch_to=None,
+        rationale="Same both-identity-fields-blank gap as EXC-PKG-REPORTING-KEY-NAME-FALLBACK.",
+        review_reference="Task 24 review: golden fixture (tests/goldens/fixture.py) never omits both identity fields.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-REPORTING-PARENT-NUMBER-ANNOTATE",
+        area_id="pkg-features",
+        file="src/scoutmb/features/reporting/service.py",
+        line=122,
+        branch_to=123,
+        rationale=(
+            "Reached only when a requirement row has a real parent in its group; the golden "
+            "fixture's requirement rows are all flat (no nested parent/child pairs)."
+        ),
+        review_reference="Task 24 review: golden fixture (tests/goldens/fixture.py) has no nested requirement tree.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-REPORTING-PARENT-NUMBER-ANNOTATE-STMT",
+        area_id="pkg-features",
+        file="src/scoutmb/features/reporting/service.py",
+        line=123,
+        branch_to=None,
+        rationale="Same no-nested-parent gap as EXC-PKG-REPORTING-PARENT-NUMBER-ANNOTATE.",
+        review_reference="Task 24 review: golden fixture (tests/goldens/fixture.py) has no nested requirement tree.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-REPORTING-SUBREQ-COUNTS",
+        area_id="pkg-features",
+        file="src/scoutmb/features/reporting/service.py",
+        line=136,
+        branch_to=137,
+        rationale=(
+            "Reached only when a requirement row has children (total_subrequirements is not "
+            "None); the golden fixture's requirement rows are all leaves."
+        ),
+        review_reference="Task 24 review: golden fixture (tests/goldens/fixture.py) has no parent/child requirements.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-REPORTING-SUBREQ-COUNTS-STMT-COMPLETED",
+        area_id="pkg-features",
+        file="src/scoutmb/features/reporting/service.py",
+        line=137,
+        branch_to=None,
+        rationale="Same no-children gap as EXC-PKG-REPORTING-SUBREQ-COUNTS.",
+        review_reference="Task 24 review: golden fixture (tests/goldens/fixture.py) has no parent/child requirements.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-REPORTING-SUBREQ-COUNTS-STMT-TOTAL",
+        area_id="pkg-features",
+        file="src/scoutmb/features/reporting/service.py",
+        line=138,
+        branch_to=None,
+        rationale="Same no-children gap as EXC-PKG-REPORTING-SUBREQ-COUNTS.",
+        review_reference="Task 24 review: golden fixture (tests/goldens/fixture.py) has no parent/child requirements.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-REPORTING-SUBREQ-COUNTS-STMT-CHOICE",
+        area_id="pkg-features",
+        file="src/scoutmb/features/reporting/service.py",
+        line=139,
+        branch_to=None,
+        rationale="Same no-children gap as EXC-PKG-REPORTING-SUBREQ-COUNTS.",
+        review_reference="Task 24 review: golden fixture (tests/goldens/fixture.py) has no parent/child requirements.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-REPORTING-EMAIL-PREREQ-SUFFIX",
+        area_id="pkg-features",
+        file="src/scoutmb/features/reporting/service.py",
+        line=186,
+        branch_to=187,
+        rationale=(
+            "Reached only when an email-body row is flagged is_prereq; the golden fixture's "
+            "requirement rows are never prerequisite-flagged."
+        ),
+        review_reference="Task 24 review: golden fixture (tests/goldens/fixture.py) has no is_prereq=True row.",
+    ),
+    BranchExclusion(
+        exclusion_id="EXC-PKG-REPORTING-EMAIL-PREREQ-SUFFIX-STMT",
+        area_id="pkg-features",
+        file="src/scoutmb/features/reporting/service.py",
+        line=187,
+        branch_to=None,
+        rationale="Same no-prereq-row gap as EXC-PKG-REPORTING-EMAIL-PREREQ-SUFFIX.",
+        review_reference="Task 24 review: golden fixture (tests/goldens/fixture.py) has no is_prereq=True row.",
     ),
 )

@@ -312,3 +312,31 @@ def test_no_first_party_sys_path_mutation() -> None:
                 if resolved in {"sys.path.append", "sys.path.insert", "sys.path.extend"}:
                     offenders.append(f"{path}:{node.lineno} {target}")
     assert offenders == [], "\n".join(offenders)
+
+
+# Task 24, step 5: once a legacy flat module becomes pure delegation to the package, its
+# coverage floor proves nothing (every line is a forwarding import/call), so it gets a shape
+# check here instead. `scout_schedule_cli.py` is NOT pure delegation at the end of Slice 2a --
+# acquisition still lives there -- so this stays empty until 2b; the parametrization exists so
+# the machinery is armed the moment a module qualifies, per this plan's "Deferred to Slice 2b"
+# section.
+SHIMMED_MODULES: tuple[str, ...] = ()
+
+
+@pytest.mark.parametrize("relative", SHIMMED_MODULES)
+def test_shimmed_module_contains_no_business_logic(relative: str) -> None:
+    """Once a module is pure delegation its coverage floor proves nothing, so it gets a shape
+    check instead. Permitted: imports, literal/imported-name bindings, and forwarding calls."""
+    path = Path(__file__).resolve().parents[2] / relative
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    offenders: list[str] = []
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign, ast.Expr)):
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            for inner in ast.walk(node):
+                if isinstance(inner, (ast.If, ast.For, ast.While, ast.Try, ast.BinOp)):
+                    offenders.append(f"{relative}:{inner.lineno} {type(inner).__name__}")
+            continue
+        offenders.append(f"{relative}:{node.lineno} {type(node).__name__}")
+    assert offenders == [], "\n".join(offenders)

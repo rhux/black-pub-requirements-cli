@@ -31,6 +31,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 
 @dataclass(frozen=True, slots=True)
 class AreaCoverage:
@@ -245,7 +247,13 @@ def _floors_from_baseline(baseline_path: Path) -> dict[str, tuple[float, float]]
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--coverage-json", required=True, type=Path)
+    parser.add_argument(
+        "--coverage-json",
+        type=Path,
+        help="Path to a `coverage json` report. Required unless --check is given, in which "
+        "case it defaults to <repo root>/coverage.json (coverage.py's own default output "
+        "location for `coverage json` with no -o).",
+    )
     parser.add_argument(
         "--exclusions",
         type=Path,
@@ -263,6 +271,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Fail if any missing statement/branch is not matched by an exact exclusion.",
     )
     parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Shorthand for the real Gate-1b/2a invocation: --coverage-json coverage.json, "
+        "--baseline tests/baselines/phase_a.json, and --require-complete, all resolved "
+        "against the repo root -- so `check_phase_a_coverage.py --check` works from a plain "
+        "`uv run pytest --cov --cov-report=json -q` run with no other flags. Any of "
+        "--coverage-json/--baseline given explicitly overrides its corresponding default.",
+    )
+    parser.add_argument(
         "--min-statement-pct",
         type=float,
         default=95.0,
@@ -278,6 +295,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.check:
+        if args.coverage_json is None:
+            args.coverage_json = REPO_ROOT / "coverage.json"
+        if args.baseline is None:
+            args.baseline = REPO_ROOT / "tests" / "baselines" / "phase_a.json"
+        args.require_complete = True
+
+    if args.coverage_json is None:
+        parser.error("--coverage-json is required unless --check is given")
+
     if args.exclusions is None and args.baseline is None:
         parser.error("at least one of --exclusions or --baseline is required")
 
@@ -288,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         # --baseline alone still needs COVERAGE_AREAS to know which files to aggregate; load it
         # from the repo's own boundaries module by default.
-        default_boundaries = Path(__file__).resolve().parent.parent / "tests/matrix/boundaries.py"
+        default_boundaries = REPO_ROOT / "tests/matrix/boundaries.py"
         areas, exclusions = load_exclusions(default_boundaries)
 
     coverage_by_area = compute_area_coverage(coverage_data, areas)
