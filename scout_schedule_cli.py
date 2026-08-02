@@ -19,7 +19,7 @@ import random
 import re
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -61,7 +61,11 @@ from scoutmb.core.inference.numbering import (  # noqa: F401 - legacy public sur
 from scoutmb.core.inference.missing import group_missing_requirements
 from scoutmb.core.inference.status import calculate_statuses
 from scoutmb.core.inference.tree import build_group_tree
-from scoutmb.core.models import ClassRecord, RequirementRecord  # noqa: F401 - legacy surface
+from scoutmb.core.models import (  # noqa: F401 - legacy surface
+    ClassRecord,
+    RequirementRecord,
+    ScoutInput,
+)
 from scoutmb.core.output_schemas import json_for_html  # noqa: F401 - legacy public surface
 
 AJAX_URL = "https://scoutingevent.com/mobile/inc/ajax_mobile.php"
@@ -72,16 +76,10 @@ DEAD_ASSET_HOSTS = {
 
 
 # NOTE: scoutmb.core.models holds the package copies of these four shapes, proven
-# field-identical by tests/parity/test_models_parity.py. ClassRecord/RequirementRecord are
-# aliases of the package shapes (imported above) as of Slice 2a Task 14; ScoutResult stays
-# legacy-defined until Slice 2b, once process_scout stops mutating it.
-@dataclass(slots=True)
-class ScoutInput:
-    name: str
-    url: str
-    registrant_type: str = ""
-
-
+# field-identical by tests/parity/test_models_parity.py. ClassRecord/RequirementRecord/
+# ScoutInput are aliases of the package shapes (imported above) as of Slice 2a Task 14 (and
+# this fix wave, for ScoutInput); ScoutResult stays legacy-defined until Slice 2b, once
+# process_scout stops mutating it.
 @dataclass(slots=True)
 class ScoutResult:
     name: str
@@ -532,7 +530,7 @@ def _assert_blank_identity_scouts_have_no_records(scouts: list[dict[str, Any]]) 
             )
 
 
-def _attendee_key_for(item: dict[str, Any]) -> str:
+def _attendee_key_for(item: Mapping[str, Any]) -> str:
     """Grouping identity: the attendee ID, never the display name. Two attendees can
     share a name; merging them silently corrupts both.
 
@@ -804,7 +802,8 @@ def write_outputs(
 
     build_reporting_service().publish(
         output_dir,
-        results,
+        results,  # type: ignore[arg-type]  # ScoutResult twin types are duck-type
+        # compatible; real alias deferred to Slice 2b (see class ScoutResult comment above)
         generated_at_local=generated_at_local,
         generated_at_iso=generated_at_iso,
         run_identity=run_identity,

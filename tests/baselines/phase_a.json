@@ -562,7 +562,7 @@
     },
     "schedule": {
       "branch_pct": 93.33,
-      "statement_pct": 96.63
+      "statement_pct": 96.59
     },
     "ui": {
       "branch_pct": 93.1,

@@ -24,7 +24,7 @@ import html
 import io
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -38,7 +38,7 @@ from scoutmb.core.output_schemas import class_to_row, requirement_to_row
 from scoutmb.ports.artifact_sink import ArtifactSink, ReportRenderer
 
 
-def _attendee_key_for(item: dict[str, Any]) -> str:
+def _attendee_key_for(item: Mapping[str, Any]) -> str:
     """Grouping identity: prefers output_id (the shareable report's rows), falls back to
     attendee_id (the operational `nested` rows this same helper also groups via
     _build_missing_requirements), then display name -- two attendees can share a name, and

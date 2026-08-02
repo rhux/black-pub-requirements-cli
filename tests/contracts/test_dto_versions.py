@@ -22,7 +22,7 @@ def test_bool_masquerading_as_int_fails_closed() -> None:
     """True == 1 in Python, so a naive `version not in {1}` check would silently accept a
     bool. `type(version) is int` must reject it explicitly."""
     with pytest.raises(UnsupportedSchemaVersion):
-        check_schema_version(True)  # type: ignore[arg-type]
+        check_schema_version(True)
 
 
 def test_float_masquerading_as_int_fails_closed() -> None:

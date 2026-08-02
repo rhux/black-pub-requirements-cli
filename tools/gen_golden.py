@@ -88,7 +88,7 @@ def _content_shape(report_data: dict[str, object]) -> str | None:
     is no row to inspect -- callers must not treat that as a mismatch.
     """
     scouts = report_data.get("scouts") or []
-    if not scouts:
+    if not isinstance(scouts, list) or not scouts:
         return None
     first = scouts[0]
     if not isinstance(first, dict):
@@ -123,12 +123,22 @@ def build(kind: str) -> dict[str, object]:
     with tempfile.TemporaryDirectory() as raw_dir:
         out = Path(raw_dir) / "run"
         legacy.write_outputs(
-            out, results, generate_html=True, generate_email_report=True, run_identity=identity
+            out,
+            results,  # type: ignore[arg-type]  # ScoutResult twin types are duck-type
+            # compatible; real alias deferred to Slice 2b (see class ScoutResult comment in
+            # scout_schedule_cli.py)
+            generate_html=True,
+            generate_email_report=True,
+            run_identity=identity,
         )
         report = (out / "report.html").read_text(encoding="utf-8")
-        embedded = json.loads(
-            re.search(r'<script id="report-data"[^>]*>(.*?)</script>', report, re.S).group(1)
-        )
+        match = re.search(r'<script id="report-data"[^>]*>(.*?)</script>', report, re.S)
+        if match is None:
+            raise AssertionError(
+                'report.html missing the embedded <script id="report-data"> block; '
+                "write_outputs's HTML template may have changed."
+            )
+        embedded = json.loads(match.group(1))
         emails = {
             path.name: path.read_text(encoding="utf-8-sig")
             for path in sorted((out / "emails").iterdir())
@@ -185,7 +195,10 @@ def main() -> int:
     if target.exists():
         stored = json.loads(target.read_text(encoding="utf-8"))
         stored_shape = _content_shape(stored.get("report_data", {}))
-        built_shape = _content_shape(built["report_data"])
+        built_report_data = built["report_data"]
+        built_shape = (
+            _content_shape(built_report_data) if isinstance(built_report_data, dict) else None
+        )
         if (
             stored_shape is not None
             and built_shape is not None
