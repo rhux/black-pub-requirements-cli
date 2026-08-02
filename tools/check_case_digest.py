@@ -80,6 +80,11 @@ def _canonicalize(value: object) -> object:
             **{f.name: _canonicalize(getattr(value, f.name)) for f in dataclasses.fields(value)},
         }
     if isinstance(value, Mapping):
+        # Sorts by the RAW key's repr, not _canonicalize(k)'s -- fine while every case
+        # dataclass's Mapping-typed fields (none exist today) key on plain str/int, but a
+        # future dataclass or dict key would reintroduce the same hash-order instability
+        # this function exists to eliminate. Sort by repr(_canonicalize(k)) instead if that
+        # ever happens.
         return {
             "__map__": [
                 [_canonicalize(k), _canonicalize(v)]
