@@ -744,6 +744,17 @@ def write_html_report(
     generated_at_iso: str,
     run_id: str = "",
 ) -> None:
+    """DEAD in production as of Slice 2a Task 22: `write_outputs` no longer calls this,
+    routing report.html through `ReportingService.publish` instead (see that class's module
+    docstring). This copy is kept alive only because the frozen ART-*/REQ-B-* characterization
+    catalog still calls it directly.
+
+    Do NOT call this from new code and do NOT copy it as a template for a new HTML-writing
+    path: unlike `ReportingService`, this embeds `scouts[i]["attendee_id"]` verbatim below,
+    never substituting the shareable `output_id` -- the exact PII this slice exists to keep out
+    of report.html. It has already silently diverged from the live path on this one property;
+    nothing catches a further divergence except a human reading both copies side by side.
+    """
     _assert_blank_identity_results_have_no_records(results)
     classes = [asdict(item) for result in results for item in result.classes]
     requirements = annotate_requirement_statuses(
