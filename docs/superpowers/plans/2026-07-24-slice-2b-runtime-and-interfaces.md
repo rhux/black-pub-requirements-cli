@@ -40,6 +40,21 @@ modules, and ship a release root that starts without the repository.
   through the new services must pass that run's `RunIdentity` through to this endpoint too, or
   the split-map defect 2a fixed reappears through this second call path.
 - `tests/harnesses/legacy.py` still loads the legacy UI.
+- **`pdf_to_scouts.py` already qualifies for `SHIMMED_MODULES` but isn't armed.** Post-2a
+  senior-engineer review: `pdf_to_scouts.py` became pure delegation this slice (only imports
+  plus one `if __name__` guard), but `tests/architecture/test_dependency_rules.py`'s shape
+  check (search `SHIMMED_MODULES`) currently flags any top-level `ast.If`, including a
+  canonical `if __name__ == "__main__": raise SystemExit(main())` guard — so adding this module
+  today would immediately red the suite. Whoever next touches that shape check should special-
+  case the canonical main-guard pattern, then add `pdf_to_scouts.py` to `SHIMMED_MODULES` so its
+  coverage-floor-proves-nothing status is actually caught, not just documented.
+- **`ArtifactSink.publish_rows`/`write_csv` (`src/scoutmb/adapters/files/atomic.py`) assumes
+  dataclass rows** (`asdict()` inside `write_csv`), which is why `ReportingService.publish`
+  can't route `errors.csv`/`missing_requirements.csv` through the sink port like everything else
+  it writes and instead hand-rolls two separate `csv.DictWriter` blocks in
+  `src/scoutmb/features/reporting/service.py` (post-2a code review finding). If B4/B5 touch this
+  port again, consider widening it to `Sequence[Mapping[str, Any]]` (coercing dataclasses only
+  when given one) so the two hand-rolled writers can be retired.
 
 ## Tasks (preliminary)
 
