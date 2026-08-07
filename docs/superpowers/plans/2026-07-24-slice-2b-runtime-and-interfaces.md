@@ -1,4 +1,35 @@
-# Slice 2b — Runtime & Interfaces (PRELIMINARY)
+# Slice 2b — Runtime & Interfaces (SUPERSEDED — finalized into four sub-plans)
+
+> ✅ **Finalized 2026-08-05, after Gate 2a passed.** This document's task skeleton is preserved
+> below for historical/traceability reasons, but it is no longer the plan to execute. Reviewing
+> it against the current codebase (post-2a) surfaced enough independent subsystems — network/
+> acquisition, config/run-state, web boundary/compose, retirement/packaging — that it was split
+> into four sub-plans, each carried to full 2a-level fidelity (RED tests, real code, exact verify
+> commands, recovery steps) and each with its own `.tasks.json` sidecar:
+>
+> 1. `2026-08-04-slice-2b-gateway-acquisition.md` — B4 (ScoutingEvent gateway) + B5 (bounded
+>    acquisition: retry/breaker/checkpoints). Lands `NET-WIRE-001/002`, `ACQ-REQ-004`,
+>    `ACQ-HASREQ-002`, `ACQ-BREAKER-*`, `ACQ-RESUME-*`.
+> 2. `2026-08-05-slice-2b-config-run-state.md` — B6 (typed config) + B7 (run-state machine +
+>    job supervisor), built standalone, wired into the live app in sub-plan 3.
+> 3. `2026-08-05-slice-2b-web-boundary-compose.md` — B8 (fixes the four UI defects on the live
+>    module first, then builds the package's `create_app` factory + route parity) + B9 (compose
+>    all three interfaces, fix `run_app.py`'s port-zero race). Lands `UI-IMPORT-001`,
+>    `UI-ROUTE-023`, `UI-ROUTE-030`.
+> 4. `2026-08-05-slice-2b-retirement-packaging.md` — B10 (final cutover + retire all four flat
+>    modules, one commit per module) + B11 (release root syncs `src/scoutmb`, not loose files).
+>
+> Execute the four in that order — each has an internal dependency on the previous one's merged
+> state, stated in its own header. The gate at the end of sub-plan 4 is Gate 2 for all of Slice 2b.
+>
+> Two review findings worth flagging to whoever executes these: sub-plan 3's `create_app` was
+> found to be missing a static-file mount (fixed as sub-plan 4's Task B10.0, since it was
+> discovered only once the retirement plan needed it); and the acquisition case metadata's
+> `evidence_reference` line numbers throughout `tests/matrix/cases/acquisition_cases.py` are
+> stale (pre-date Slice 1a/2a's shrinking of the flat scripts) — noted, not fixed, since it
+> touches no behavior.
+>
+> <details><summary>Original preliminary skeleton (superseded, kept for history)</summary>
 
 > ⚠️ **PRELIMINARY. Do not execute.** This carries forward the descoped Phase B task
 > structure, named tests, and recovery behaviors from the archived Slice 2 skeleton
@@ -206,3 +237,5 @@ Everything in Gate 2a, plus:
 
 **NO-GO:** restore the relevant compatibility adapter as the composed default, return the defect
 to its task, rerun the gate.
+
+</details>
