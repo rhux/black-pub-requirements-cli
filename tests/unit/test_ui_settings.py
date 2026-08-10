@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ui.server import UiSettings
+from scoutmb.config import UiSettings
 
 
 def test_explicit_wins(tmp_path, monkeypatch):

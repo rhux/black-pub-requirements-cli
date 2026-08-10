@@ -15,8 +15,6 @@ import os
 import sys
 import time
 import webbrowser
-from argparse import Namespace
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,54 +31,12 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile  # noqa: E
 from fastapi.responses import JSONResponse, StreamingResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-APP_NAME = "ScoutingMeritBadges"
-DATA_DIR_ENV = "SCOUTMB_DATA_DIR"
-
-
-def _platform_data_root() -> Path:
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA")
-        if base:
-            return Path(base) / APP_NAME / "data"
-    elif sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / APP_NAME / "data"
-    return Path.home() / ".local" / "share" / APP_NAME / "data"
-
-
-@dataclass(frozen=True, slots=True)
-class UiSettings:
-    """Where the UI reads/writes user data. NEVER derive a data path from __file__ —
-    that ties irreplaceable data to the code's on-disk location, so moving or reinstalling
-    silently relocates or destroys it (Hazard 1)."""
-
-    data_root: Path
-
-    @classmethod
-    def resolve(cls, data_root: Path | None = None, dev_mode: bool = False) -> "UiSettings":
-        if data_root is not None:
-            return cls(Path(data_root))
-        env = os.environ.get(DATA_DIR_ENV)
-        if env:
-            return cls(Path(env))
-        if dev_mode:
-            return cls(Path.cwd())
-        return cls(_platform_data_root())
-
-    @property
-    def scouts_csv(self) -> Path:
-        return self.data_root / "scouts.csv"
-
-    @property
-    def pdf_uploads_dir(self) -> Path:
-        return self.data_root / "pdf-uploads"
-
-    @property
-    def runs_dir(self) -> Path:
-        return self.data_root / "runs"
-
-    def ensure_dirs(self) -> None:
-        self.data_root.mkdir(parents=True, exist_ok=True)
-        self.runs_dir.mkdir(parents=True, exist_ok=True)
+from scoutmb.config import (  # noqa: F401 - legacy public surface
+    APP_NAME,
+    DATA_DIR_ENV,
+    ScheduleConfig,
+    UiSettings,
+)
 
 
 SETTINGS = UiSettings.resolve(dev_mode=bool(os.environ.get("SCOUTMB_DEV")))
@@ -237,7 +193,7 @@ async def start_schedule_download() -> JSONResponse:
 
     async def worker() -> None:
         try:
-            args = Namespace(
+            config = ScheduleConfig(
                 input=SCOUTS_CSV,
                 sheet="Scouts Only",
                 output=run_dir,
@@ -250,9 +206,10 @@ async def start_schedule_download() -> JSONResponse:
                 no_html=False,
                 html_name="report.html",
                 channel=BROWSER_CHANNEL,
+                email_report=False,  # explicit now -- this is the field the getattr used to cover for
             )
             await scout_schedule_cli.async_main(
-                args, progress_callback=on_progress, resume_event=resume_event
+                config, progress_callback=on_progress, resume_event=resume_event
             )
             summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
             report_name = summary.get("html_report")

@@ -80,7 +80,15 @@ DEAD_ASSET_HOSTS = {
 from scoutmb.core.models import ScoutResult  # noqa: F401 - legacy public surface
 
 
-def parse_args() -> argparse.Namespace:
+from scoutmb.config import ScheduleConfig
+
+# Sourced once, here: every non-required argparse default below reads this instance rather than
+# repeating a literal, so ScheduleConfig's own field defaults are the single source of truth
+# tests/contracts/test_cli_defaults_parity.py checks against.
+_DEFAULTS = ScheduleConfig(input=Path("unused"))
+
+
+def parse_args() -> ScheduleConfig:
     parser = argparse.ArgumentParser(
         description=(
             "Pull schedules and class requirements from ScoutingEvent QR URLs, "
@@ -96,15 +104,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--sheet",
-        default="Scouts Only",
-        help='XLSX sheet name (default: "Scouts Only").',
+        default=_DEFAULTS.sheet,
+        help=f'XLSX sheet name (default: "{_DEFAULTS.sheet}").',
     )
     parser.add_argument(
         "--output",
         "-o",
         type=Path,
-        default=Path("scouting-output"),
-        help="Output directory (default: scouting-output).",
+        default=_DEFAULTS.output,
+        help=f"Output directory (default: {_DEFAULTS.output}).",
     )
     parser.add_argument(
         "--headed",
@@ -113,25 +121,25 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--channel",
-        default=None,
+        default=_DEFAULTS.channel,
         help="Playwright browser channel to use (e.g. 'msedge'); default uses Playwright's bundled Chromium.",
     )
     parser.add_argument(
         "--timeout",
         type=int,
-        default=45,
-        help="Seconds to wait for the schedule response for each scout (default: 45).",
+        default=_DEFAULTS.timeout,
+        help=f"Seconds to wait for the schedule response for each scout (default: {_DEFAULTS.timeout}).",
     )
     parser.add_argument(
         "--request-delay-ms",
         type=int,
-        default=200,
-        help="Delay between class-requirement requests (default: 200 ms).",
+        default=_DEFAULTS.request_delay_ms,
+        help=f"Delay between class-requirement requests (default: {_DEFAULTS.request_delay_ms} ms).",
     )
     parser.add_argument(
         "--scout-delay-ms",
         type=int,
-        default=None,
+        default=_DEFAULTS.scout_delay_ms,
         help=(
             "Delay between scouts, in milliseconds. Default: a random delay "
             "between 500-2000 ms per scout (so requests don't hit the server at a "
@@ -156,8 +164,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--html-name",
-        default="report.html",
-        help="HTML report filename inside the output directory (default: report.html).",
+        default=_DEFAULTS.html_name,
+        help=f"HTML report filename inside the output directory (default: {_DEFAULTS.html_name}).",
     )
     parser.add_argument(
         "--email-report",
@@ -170,7 +178,22 @@ def parse_args() -> argparse.Namespace:
             "only needed for bare command-line runs (default: off)."
         ),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    return ScheduleConfig(
+        input=args.input,
+        sheet=args.sheet,
+        output=args.output,
+        headed=args.headed,
+        channel=args.channel,
+        timeout=args.timeout,
+        request_delay_ms=args.request_delay_ms,
+        scout_delay_ms=args.scout_delay_ms,
+        allow_dead_assets=args.allow_dead_assets,
+        include_adults=args.include_adults,
+        no_html=args.no_html,
+        html_name=args.html_name,
+        email_report=args.email_report,
+    )
 
 
 def load_inputs(path: Path, sheet_name: str, include_adults: bool) -> list[ScoutInput]:
@@ -250,14 +273,14 @@ async def post_requirement(page: Page, attendee_id: str, class_p4_id: str) -> di
 async def process_scout(
     browser: Browser,
     scout: ScoutInput,
-    args: argparse.Namespace,
+    config: ScheduleConfig,
     raw_dir: Path,
     run_identity: RunIdentity | None = None,
 ) -> ScoutResult:
     run_identity = run_identity or RunIdentity()
     context: BrowserContext = await browser.new_context(ignore_https_errors=True)
 
-    if not args.allow_dead_assets:
+    if not config.allow_dead_assets:
         async def block_dead_assets(route: Any) -> None:
             try:
                 hostname = re.sub(r"^https?://", "", route.request.url).split("/", 1)[0].split(":", 1)[0]
@@ -270,7 +293,7 @@ async def process_scout(
         await context.route("**/*", block_dead_assets)
 
     page = await context.new_page()
-    page.set_default_timeout(args.timeout * 1000)
+    page.set_default_timeout(config.timeout * 1000)
     page.on("pageerror", lambda error: print(f"    browser JS error: {error}", file=sys.stderr))
 
     name = scout.name or "Unknown Scout"
@@ -280,7 +303,7 @@ async def process_scout(
     errors: list[str] = []
 
     try:
-        schedule_response = await navigate_and_trigger_schedule(page, scout.url, args.timeout)
+        schedule_response = await navigate_and_trigger_schedule(page, scout.url, config.timeout)
         request_values = form_values(schedule_response.request.post_data)
         attendee_id = request_values.get("attendeeID", "")
         if not attendee_id:
@@ -383,8 +406,8 @@ async def process_scout(
                     )
                 )
 
-            if args.request_delay_ms > 0:
-                await page.wait_for_timeout(args.request_delay_ms)
+            if config.request_delay_ms > 0:
+                await page.wait_for_timeout(config.request_delay_ms)
 
     except Exception as exc:
         errors.append(str(exc))
@@ -751,14 +774,14 @@ def write_outputs(
 
 
 async def async_main(
-    args: argparse.Namespace,
+    config: ScheduleConfig,
     *,
     progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     resume_event: asyncio.Event | None = None,
 ) -> int:
-    scouts = load_inputs(args.input, args.sheet, args.include_adults)
-    args.output.mkdir(parents=True, exist_ok=True)
-    raw_dir = args.output / "raw"
+    scouts = load_inputs(config.input, config.sheet, config.include_adults)
+    config.output.mkdir(parents=True, exist_ok=True)
+    raw_dir = config.output / "raw"
 
     print(f"Loaded {len(scouts)} attendee QR link(s).")
     if progress_callback is not None:
@@ -768,7 +791,7 @@ async def async_main(
     run_identity = RunIdentity()
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
-            headless=not args.headed, channel=getattr(args, "channel", None) or None
+            headless=not config.headed, channel=config.channel or None
         )
         try:
             for index, scout in enumerate(scouts, start=1):
@@ -785,7 +808,7 @@ async def async_main(
                     await progress_callback(
                         {"type": "scout_start", "index": index, "total": len(scouts), "name": label}
                     )
-                result = await process_scout(browser, scout, args, raw_dir, run_identity)
+                result = await process_scout(browser, scout, config, raw_dir, run_identity)
                 results.append(result)
                 print(
                     f"    attendeeID={result.attendee_id or 'unknown'}, "
@@ -808,8 +831,8 @@ async def async_main(
                 if index < len(scouts):
                     delay_seconds = (
                         random.uniform(0.5, 2.0)
-                        if args.scout_delay_ms is None
-                        else args.scout_delay_ms / 1000
+                        if config.scout_delay_ms is None
+                        else config.scout_delay_ms / 1000
                     )
                     if delay_seconds > 0:
                         await asyncio.sleep(delay_seconds)
@@ -817,21 +840,21 @@ async def async_main(
             await browser.close()
 
     write_outputs(
-        args.output,
+        config.output,
         results,
-        generate_html=not args.no_html,
-        html_name=args.html_name,
-        generate_email_report=getattr(args, "email_report", False),
+        generate_html=not config.no_html,
+        html_name=config.html_name,
+        generate_email_report=config.email_report,
         run_identity=run_identity,
     )
-    print(f"Results written to: {args.output.resolve()}")
+    print(f"Results written to: {config.output.resolve()}")
     return 1 if any(result.errors for result in results) else 0
 
 
 def main() -> int:
-    args = parse_args()
+    config = parse_args()
     try:
-        return asyncio.run(async_main(args))
+        return asyncio.run(async_main(config))
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
         return 130
