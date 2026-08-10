@@ -549,19 +549,37 @@ def test_every_state_event_pair_transitions_or_fails_closed(
 # The Hypothesis property above proves TOTALITY (every pair transitions or raises -- no third
 # outcome) but does NOT pin which SPECIFIC edges are legal: an implementation with a completely
 # different (but still total) transition table would pass it too. This exhaustive parametrized
-# test is the complement -- it enumerates the CURRENT _TRANSITIONS table and asserts each entry
-# transitions to exactly its declared next-state, and separately asserts every (state, event)
-# pair NOT in the table raises. Import _TRANSITIONS directly rather than re-deriving the pairs by
-# hand, so this test can never drift from the table it is meant to pin.
+# test is the complement -- it enumerates every (state, event) pair against an INDEPENDENTLY
+# spelled-out expected table and asserts each pair transitions to its declared next-state (or
+# raises, if absent).
+#
+# _EXPECTED_TRANSITIONS is deliberately NOT imported from run_state.py's _TRANSITIONS -- an
+# earlier draft of this test did import it directly, which made the test tautological: comparing
+# a dict against itself always passes, so a WRONG _TRANSITIONS table (a missing edge, a typo'd
+# target state) would pass this test too, since the test would just be re-stating whatever the
+# implementation happens to say. Retyping the table here as a literal is what actually pins the
+# intended shape -- this test fails if run_state.py's table drifts from the spec below, which is
+# the whole point of an "exact table" test.
 _ALL_PAIRS = [(state, event) for state in RunState for event in RunEvent]
+
+_EXPECTED_TRANSITIONS: dict[tuple[RunState, RunEvent], RunState] = {
+    (RunState.IDLE, RunEvent.START): RunState.RUNNING,
+    (RunState.RUNNING, RunEvent.PAUSE): RunState.PAUSED,
+    (RunState.PAUSED, RunEvent.RESUME): RunState.RUNNING,
+    (RunState.RUNNING, RunEvent.CANCEL): RunState.CANCELLING,
+    (RunState.PAUSED, RunEvent.CANCEL): RunState.CANCELLING,
+    (RunState.CANCELLING, RunEvent.CANCELLED): RunState.CANCELLED,
+    (RunState.RUNNING, RunEvent.COMPLETE): RunState.COMPLETED,
+    (RunState.RUNNING, RunEvent.FAIL): RunState.FAILED,
+    (RunState.PAUSED, RunEvent.FAIL): RunState.FAILED,
+    (RunState.CANCELLING, RunEvent.FAIL): RunState.FAILED,
+}
 
 
 @pytest.mark.parametrize(("state", "event"), _ALL_PAIRS)
 def test_transition_table_matches_exactly(state: RunState, event: RunEvent) -> None:
-    from scoutmb.core.run_state import _TRANSITIONS
-
     machine = RunStateMachine(state=state)
-    expected_next = _TRANSITIONS.get((state, event))
+    expected_next = _EXPECTED_TRANSITIONS.get((state, event))
 
     if expected_next is None:
         with pytest.raises(IllegalTransition):
@@ -686,6 +704,11 @@ sub-plan's Design Decision 3).
       supervisor's bookkeeping clean (no pending `asyncio.Task`) even though the underlying
       thread may still be finishing its blocking call — asserted precisely, not overclaimed
 - [ ] `shutdown()` is idempotent — calling it twice does not raise
+- [ ] Starting a task under a `job_id` that already has a still-running task CANCELS that older
+      task — it is never silently dropped from the registry while still running (a naive
+      `self._tasks[job_id] = task` overwrite, with no cancellation, is a real bug an earlier
+      draft of this class had: the superseded task keeps running forever, untracked, and
+      `shutdown()` can never reach it again to cancel or await it)
 
 **Verify:** `uv run pytest tests/integration/test_job_supervisor.py -q` → PASS
 
@@ -787,32 +810,42 @@ async def test_cancellation_during_a_blocking_adapter_call_leaves_no_pending_tas
     assert thread_finished.is_set()
 
 
-async def test_reusing_a_job_id_before_the_first_task_finishes_does_not_lose_the_second() -> None:
-    """A naive `self._tasks[job_id] = task` plus an unconditional pop in the done-callback has a
-    real bug: if job A (id="x") is still running when job B (also id="x") starts, A's own
-    done-callback later pops "x" unconditionally -- evicting B's task reference even though B is
-    still running. The registry must only remove an entry if it is STILL the task that callback
-    belongs to."""
+async def test_reusing_a_job_id_cancels_the_superseded_task() -> None:
+    """A naive `self._tasks[job_id] = task` overwrite, with no cancellation, has a real bug: if
+    job A (id="x") is still running when job B (also id="x") starts, A's task reference is
+    simply dropped from the registry while STILL RUNNING -- shutdown() can never reach it again
+    to cancel or await it, since nothing tracks it anymore. Starting a new task under a reused
+    job_id must actively cancel the old one, not merely stop tracking it."""
     supervisor = JobSupervisor()
-    first_may_finish = asyncio.Event()
+    first_cancelled = asyncio.Event()
 
     async def first() -> str:
-        await first_may_finish.wait()
-        return "first"
+        try:
+            await asyncio.sleep(100)
+        except asyncio.CancelledError:
+            first_cancelled.set()
+            raise
 
     async def second() -> str:
         await asyncio.sleep(0.05)
         return "second"
 
     first_task = supervisor.start("x", first())
+    await asyncio.sleep(0)  # let first_task actually start awaiting sleep(100)
+
     second_task = supervisor.start("x", second())  # reuses "x" while first_task is still running
     assert supervisor.get("x") is second_task  # the registry now tracks the newer task
 
-    first_may_finish.set()
-    await first_task  # first's done-callback fires now -- it must NOT evict second_task
-    await asyncio.sleep(0)  # let the done-callback actually run
+    await asyncio.sleep(0)  # let first_task's cancellation actually propagate
+    assert first_cancelled.is_set(), (
+        "starting a new task under a reused job_id did not cancel the superseded task"
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await first_task
 
-    assert supervisor.get("x") is second_task, "first's completion evicted second's still-live entry"
+    # first_task's own done-callback fires here -- it must NOT evict second_task's still-live
+    # registry entry, since by the time it runs, "x" no longer belongs to first_task at all.
+    assert supervisor.get("x") is second_task, "the superseded task's cancellation evicted second's entry"
     await second_task
 ```
 
@@ -838,10 +871,18 @@ underlying OS thread already running inside the executor. "No pending task after
 what this class guarantees -- "no thread still running" is not achievable through this
 mechanism and is not claimed.
 
-Duplicate job IDs: reusing a job_id while its previous task is still running is handled safely --
-the done-callback only removes ITS OWN task from the registry if that task is still the current
-occupant of that key, never unconditionally. Without that check, an older task's completion could
-evict a newer task's still-live registry entry (a real bug an earlier draft of this class had)."""
+Duplicate job IDs are handled safely at BOTH ends of a task's life, which takes two separate
+fixes:
+
+1. `start()`: if `job_id` already names a still-running task, that task is CANCELLED before the
+   new one takes its place in the registry. An earlier draft only overwrote
+   `self._tasks[job_id]`, which silently dropped the older task's reference while it kept
+   running -- shutdown() could then never reach it again to cancel or await it, since nothing
+   tracked it anymore.
+2. The done-callback (`_discard_if_current`) only removes ITS OWN task from the registry if
+   that task is still the current occupant of that key, never unconditionally. Without that
+   check, the OLDER task's (now-cancelled) completion could evict the NEWER task's still-live
+   registry entry, since both callbacks close over the same `job_id` string."""
 
 from __future__ import annotations
 
@@ -856,6 +897,11 @@ class JobSupervisor:
     _tasks: dict[str, asyncio.Task[Any]] = field(default_factory=dict)
 
     def start(self, job_id: str, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
+        existing = self._tasks.get(job_id)
+        if existing is not None and not existing.done():
+            # Cancel, don't just overwrite -- an overwrite alone would drop the only reference
+            # to a still-running task, leaving it untracked and un-cancellable by shutdown().
+            existing.cancel()
         task = asyncio.create_task(coro)
         self._tasks[job_id] = task
         task.add_done_callback(lambda finished, key=job_id: self._discard_if_current(key, finished))

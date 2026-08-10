@@ -44,9 +44,13 @@ the existing strict-fake harness (`tests/fakes/acquisition.py`, `tests/fakes/bro
 **Global Constraints:**
 - No new third-party dependency. Schema validation is hand-written (matching
   `core/output_schemas.py`'s existing `_text`/`_flag` style), not a JSON-Schema library.
-- The retry backoff stays `500 * attempt` ms for attempts 1-3 (characterized, unchanged) —
-  including the wait after the third and final attempt, which the legacy loop also performs
-  unconditionally; the circuit breaker and checkpoint are additive, not replacements for it.
+- The retry backoff's BASE delay stays exactly `500 * attempt` ms for attempts 1-3
+  (characterized, unchanged) — including the wait after the third and final attempt, which the
+  legacy loop also performs unconditionally. `RetryPolicy.wait_after_failure` (Task B5.2) adds a
+  small jitter ON TOP of that base delay — this is new, deliberate hardening (avoids
+  synchronized retry storms across scouts), not a claim that the total slept duration is
+  bit-for-bit identical to legacy's. The circuit breaker and checkpoint are likewise additive,
+  not replacements for the backoff itself.
 - `process_scout`'s public signature (`browser, scout, args, raw_dir, run_identity`) does not
   change — every existing caller (`async_main`, `tests/characterization/test_acquisition_matrix.py`,
   `tests/characterization/test_browser_matrix.py`) keeps working unmodified.
@@ -342,10 +346,17 @@ Neither Protocol below names a Playwright type. The acquisition feature drives a
 through these two methods only; the concrete Browser/Context/Page lifecycle is the adapter's
 business, kept out of features/ and core/ so the dependency-rule architecture test can prove it.
 
-ScheduleFetchResult/fetch_requirements return the FULL upstream envelope (status + data), not
+ScheduleFetchResult/RequirementFetchResult carry the FULL upstream envelope (status + data), not
 just the data rows -- process_scout today writes the complete envelope to raw/ and checks its
 own status field independently of what's inside data (scout_schedule_cli.py:374,378,437,441).
 A gateway that stripped the envelope down to `rows` would silently drop both behaviors.
+
+RequirementFetchResult ALSO carries pre-validated rows and per-row schema-drift error strings --
+row-level validation (ACQ-REQ-004) happens INSIDE the adapter (playwright_gateway.py, an
+adapter-to-adapter import of adapters/scoutevent/schema.py, an allowed edge), never inside
+features/acquisition/service.py. A feature calling a schema-validation function directly would be
+"parsing an external format" in a features/ module, which the dependency rule forbids -- an
+earlier draft of this plan had exactly that violation.
 """
 
 from __future__ import annotations
@@ -363,6 +374,20 @@ class ScheduleFetchResult:
     payload: Mapping[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class RequirementFetchResult:
+    payload: Mapping[str, Any]
+    """The full envelope (status + data), unmodified -- for the raw/ dump and the status check."""
+
+    validated_rows: tuple[Mapping[str, Any], ...]
+    """Rows from `payload["data"]` that passed schema validation, already coerced/cleaned --
+    the feature builds RequirementRecords from these directly, no further parsing needed."""
+
+    row_errors: tuple[str, ...]
+    """One bounded, redacted error string per row that FAILED schema validation -- the feature
+    folds these into ScoutResult.errors verbatim, it never sees the raw failing row."""
+
+
 class ScoutingEventSession(Protocol):
     async def fetch_schedule(
         self, qr_url: str, timeout_seconds: int, fallback_name: str
@@ -370,7 +395,7 @@ class ScoutingEventSession(Protocol):
 
     async def fetch_requirements(
         self, attendee_id: str, class_p4_id: str
-    ) -> Mapping[str, Any]: ...
+    ) -> RequirementFetchResult: ...
 
 
 class ScoutingEventGateway(Protocol):
@@ -405,7 +430,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from scoutmb.network_policy import assert_egress_allowed
-from scoutmb.ports.scoutevent import ScheduleFetchResult
+from scoutmb.ports.scoutevent import RequirementFetchResult, ScheduleFetchResult
 
 if TYPE_CHECKING:
     from playwright.async_api import Browser, BrowserContext, Page, Response
@@ -470,10 +495,27 @@ class _PlaywrightSession:
         display_name = await discover_name(self._page, fallback_name)
         return ScheduleFetchResult(attendee_id=attendee_id, display_name=display_name, payload=payload)
 
-    async def fetch_requirements(self, attendee_id: str, class_p4_id: str) -> dict[str, Any]:
+    async def fetch_requirements(self, attendee_id: str, class_p4_id: str) -> RequirementFetchResult:
+        """Fetches AND validates in one step -- validate_requirement_row's import stays
+        adapter-to-adapter (allowed), never reaching into features/acquisition/service.py, which
+        only ever sees the already-validated result."""
         from scoutmb.adapters.scoutevent.http_gateway import fetch_requirement_payload
+        from scoutmb.adapters.scoutevent.schema import (
+            ScoutingEventSchemaDrift,
+            validate_requirement_row,
+        )
 
-        return await fetch_requirement_payload(self._page, attendee_id, class_p4_id)
+        payload = await fetch_requirement_payload(self._page, attendee_id, class_p4_id)
+        validated_rows: list[dict[str, Any]] = []
+        row_errors: list[str] = []
+        for row in payload.get("data") or ():
+            try:
+                validated_rows.append(validate_requirement_row(dict(row)))
+            except ScoutingEventSchemaDrift as exc:
+                row_errors.append(str(exc))
+        return RequirementFetchResult(
+            payload=payload, validated_rows=tuple(validated_rows), row_errors=tuple(row_errors)
+        )
 
 
 class PlaywrightScoutingEventGateway:
@@ -1392,7 +1434,11 @@ take, not just a wrong version number.
 
 **Files:**
 - Create: `src/scoutmb/ports/checkpoint_store.py`, `src/scoutmb/adapters/files/checkpoint.py`
-- Test: `tests/unit/acquisition/test_checkpointing.py`
+- Modify: `src/scoutmb/core/output_schemas.py` (add `scout_result_from_row`, the reverse of the
+  existing `scout_result_to_row`, so a checkpoint's `completed_results` can be rehydrated into
+  real `ScoutResult`s on resume — Task B5.5 needs this to stop silently dropping previously
+  -completed scouts from a resumed run's report)
+- Test: `tests/unit/acquisition/test_checkpointing.py`, `tests/unit/test_output_schemas.py`
 
 **Acceptance Criteria:**
 - [ ] A run with no prior checkpoint file creates one on first save
@@ -1400,12 +1446,26 @@ take, not just a wrong version number.
 - [ ] The attendee-id→output-id map round-trips through save/load unchanged, and the loaded
       `Checkpoint.output_ids` cannot be mutated by mutating a dict the caller still holds a
       reference to
+- [ ] `Checkpoint.completed_results` (one `scout_result_to_row`-shaped mapping per completed
+      scout's URL) round-trips through save/load unchanged, and `scout_result_from_row` rebuilds
+      an equal `ScoutResult` from any row `scout_result_to_row` produces (round-trip identity)
+- [ ] `Checkpoint.completed_results` is immutable at BOTH levels — the outer mapping AND each
+      individual row dict — not just the outer one; mutating a row dict the caller still holds a
+      reference to must not affect the constructed `Checkpoint`, and indexing into
+      `checkpoint.completed_results[url]` and assigning a key must raise `TypeError`
 - [ ] A checkpoint file with an unreadable/wrong-shaped body — including a `completed_urls` that
-      is a string, an `output_ids` that is a list, non-string keys or values inside `output_ids`,
+      is a string, an `output_ids` that is a list, a `completed_results` that is a list or has
+      non-string keys or non-object values, non-string keys or values inside `output_ids`,
+      a `completed_results` entry whose URL is absent from `completed_urls` (an orphaned entry —
+      `run_batch` reconstructs results from `completed_results.values()` without cross-checking
+      `completed_urls`, so an orphan would inject a bogus scout into the report),
       `version: true` (a JSON boolean, which Python's `json` module deserializes to `True`, an
       `int` subclass equal to `1` — the exact hazard `core/output_schemas.py`'s own
       `check_schema_version` already documents and guards against), or invalid UTF-8 — raises
       `CorruptCheckpoint` from `load()` rather than being partially trusted
+- [ ] A checkpoint file saved before `completed_results` existed (no such key at all) still loads
+      — the field defaults to `{}` rather than treating the missing key as corruption, so old
+      checkpoints from before this task remain readable
 - [ ] `CorruptCheckpoint` subclasses `ScoutmbError`
 - [ ] The save path is atomic (reuses `atomic_write_text`'s same-dir-temp-then-replace contract);
       a save that fails mid-replace leaves the prior checkpoint's bytes intact
@@ -1563,6 +1623,123 @@ def test_output_ids_non_string_value_fails_closed(tmp_path) -> None:
         AtomicFileCheckpointStore(path).load()
 
 
+def test_completed_results_round_trips(tmp_path) -> None:
+    """completed_results carries one scout_result_to_row-shaped mapping per completed scout's
+    URL, so a resumed run can rebuild that scout's ScoutResult without re-fetching it -- see
+    Task B5.5's run_batch, which is what actually reads this back via scout_result_from_row."""
+    store = AtomicFileCheckpointStore(tmp_path / "checkpoint.json")
+    row = {
+        "name": "Avery",
+        "qr_url": "https://x/a",
+        "attendee_id": "A1",
+        "classes": [],
+        "requirements": [],
+        "errors": [],
+    }
+    checkpoint = Checkpoint(
+        version=1,
+        completed_urls=("https://x/a",),
+        output_ids={},
+        completed_results={"https://x/a": row},
+    )
+    store.save(checkpoint)
+
+    loaded = store.load()
+    assert loaded == checkpoint
+    assert loaded.completed_results["https://x/a"] == row
+
+
+def test_completed_results_rows_are_genuinely_immutable_too(tmp_path) -> None:
+    """Freezing only the OUTER completed_results mapping (an earlier draft's shape) leaves each
+    ROW dict mutable through the exposed mapping's own values -- __post_init__ must wrap each
+    row in its own MappingProxyType too, not just the top-level dict."""
+    mutable_row = {"name": "Avery", "qr_url": "https://x/a", "attendee_id": "A1",
+                    "classes": [], "requirements": [], "errors": []}
+    checkpoint = Checkpoint(
+        version=1, completed_urls=("https://x/a",), output_ids={},
+        completed_results={"https://x/a": mutable_row},
+    )
+    mutable_row["name"] = "mutated-after-construction"
+    assert checkpoint.completed_results["https://x/a"]["name"] == "Avery"  # copied, not aliased
+
+    assert isinstance(checkpoint.completed_results["https://x/a"], MappingProxyType)
+    with pytest.raises(TypeError):
+        checkpoint.completed_results["https://x/a"]["name"] = "should-not-be-settable"
+
+
+def test_checkpoint_without_completed_results_key_is_backward_compatible(tmp_path) -> None:
+    """A checkpoint file saved before this field existed has no "completed_results" key at all
+    -- it must still load, with the field defaulting to {}, not be treated as corrupt."""
+    path = tmp_path / "checkpoint.json"
+    path.write_text(
+        json.dumps({"version": 1, "completed_urls": ["https://x/a"], "output_ids": {}}),
+        encoding="utf-8",
+    )
+    loaded = AtomicFileCheckpointStore(path).load()
+    assert loaded is not None
+    assert loaded.completed_results == {}
+
+
+def test_completed_results_wrong_type_fails_closed(tmp_path) -> None:
+    path = tmp_path / "checkpoint.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "completed_urls": [],
+                "output_ids": {},
+                "completed_results": ["not", "a", "dict"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CorruptCheckpoint):
+        AtomicFileCheckpointStore(path).load()
+
+
+def test_completed_results_non_object_value_fails_closed(tmp_path) -> None:
+    path = tmp_path / "checkpoint.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "completed_urls": [],
+                "output_ids": {},
+                "completed_results": {"https://x/a": "not-an-object"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CorruptCheckpoint):
+        AtomicFileCheckpointStore(path).load()
+
+
+def test_completed_results_orphaned_url_fails_closed(tmp_path) -> None:
+    """A completed_results entry for a URL absent from completed_urls is nonsensical -- if
+    accepted, run_batch's `[scout_result_from_row(row) for row in completed_results.values()]`
+    would inject a bogus reconstructed ScoutResult into the run's report even though that URL
+    was never marked complete. Must fail closed, not silently accept the mismatch."""
+    path = tmp_path / "checkpoint.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "completed_urls": [],  # empty -- the row below has no matching entry
+                "output_ids": {},
+                "completed_results": {
+                    "https://x/orphan": {
+                        "name": "Ghost", "qr_url": "https://x/orphan", "attendee_id": "G1",
+                        "classes": [], "requirements": [], "errors": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CorruptCheckpoint):
+        AtomicFileCheckpointStore(path).load()
+
+
 def test_invalid_utf8_fails_closed(tmp_path) -> None:
     path = tmp_path / "checkpoint.json"
     path.write_bytes(b"\xff\xfe\x00\x01not valid utf-8")
@@ -1605,7 +1782,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Protocol
+from typing import Any, Protocol
 
 from scoutmb.errors import ScoutmbError
 
@@ -1615,16 +1792,40 @@ CHECKPOINT_VERSION = 1
 @dataclass(frozen=True, slots=True)
 class Checkpoint:
     """frozen=True freezes the FIELD REFERENCE, not a mutable dict sitting behind it -- so
-    __post_init__ copies output_ids into a MappingProxyType, making the exposed mapping a
-    genuine read-only view rather than a typed-but-mutable dict a caller could still corrupt
-    through their own retained reference to the mapping they passed in."""
+    __post_init__ copies output_ids/completed_results into MappingProxyTypes, making the
+    exposed mappings genuine read-only views rather than typed-but-mutable dicts a caller could
+    still corrupt through their own retained reference to the mapping they passed in.
+
+    completed_results holds one scout_result_to_row-shaped mapping per completed scout's URL
+    (the same key space as completed_urls) -- Task B5.5's run_batch reads this back via
+    scout_result_from_row so a resumed run's report still includes scouts finished on a prior
+    process, not just the ones this process newly handles. Defaulted to {} so checkpoint files
+    saved before this field existed keep loading (see AtomicFileCheckpointStore.load's
+    backward-compatible .get)."""
 
     version: int
     completed_urls: tuple[str, ...]
     output_ids: Mapping[str, str] = field(default_factory=dict)
+    completed_results: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "output_ids", MappingProxyType(dict(self.output_ids)))
+        # TWO levels of MappingProxyType, not one -- output_ids' values are plain strings
+        # (already immutable), but completed_results' values are themselves dicts. Wrapping
+        # only the OUTER completed_results mapping (as an earlier draft did) leaves each row
+        # dict mutable through the exposed mapping's own values -- checkpoint.completed_results
+        # ["url"]["name"] = "x" would silently succeed, contradicting this class's own
+        # "genuine read-only view" claim. Freezing each row too closes that gap.
+        object.__setattr__(
+            self,
+            "completed_results",
+            MappingProxyType(
+                {
+                    url: MappingProxyType(dict(row))
+                    for url, row in self.completed_results.items()
+                }
+            ),
+        )
 
 
 class CorruptCheckpoint(ScoutmbError):
@@ -1706,10 +1907,34 @@ class AtomicFileCheckpointStore:
         ):
             raise CorruptCheckpoint(f"{self._path}'s output_ids must be a string-to-string object")
 
+        # .get, not data["completed_results"] -- a checkpoint file saved before this field
+        # existed has no such key at all, and that must still load (backward compatible), not
+        # be treated as corruption the way a genuinely wrong-shaped value is.
+        raw_completed_results = data.get("completed_results", {})
+        if not isinstance(raw_completed_results, dict) or not all(
+            isinstance(key, str) and isinstance(value, dict)
+            for key, value in raw_completed_results.items()
+        ):
+            raise CorruptCheckpoint(
+                f"{self._path}'s completed_results must be a string-to-object mapping"
+            )
+        # Every completed_results key must also appear in completed_urls -- an orphaned entry
+        # (a URL never marked complete, but present in completed_results) would otherwise inject
+        # a bogus reconstructed ScoutResult into the run's report the moment run_batch reads
+        # completed_results.values(), since that reconstruction never cross-checks against
+        # completed_urls itself. The reverse (a completed_urls entry absent from
+        # completed_results) is explicitly NOT required here -- that's the legitimate
+        # backward-compat shape run_batch handles by re-processing the scout, not a corruption.
+        if not set(raw_completed_results).issubset(raw_completed_urls):
+            raise CorruptCheckpoint(
+                f"{self._path}'s completed_results has a URL not present in completed_urls"
+            )
+
         return Checkpoint(
             version=version,
             completed_urls=tuple(raw_completed_urls),
             output_ids=raw_output_ids,
+            completed_results=raw_completed_results,
         )
 
     def save(self, checkpoint: Checkpoint) -> None:
@@ -1717,18 +1942,77 @@ class AtomicFileCheckpointStore:
             "version": checkpoint.version,
             "completed_urls": list(checkpoint.completed_urls),
             "output_ids": dict(checkpoint.output_ids),
+            "completed_results": {
+                url: dict(row) for url, row in checkpoint.completed_results.items()
+            },
         }
         atomic_write_text(self._path, json.dumps(payload, indent=2), encoding="utf-8")
 ```
 
-- [ ] **Step 4: Run and commit**
+- [ ] **Step 4: Add `scout_result_from_row`, the reverse of `scout_result_to_row`**
+
+```python
+# tests/unit/test_output_schemas.py -- add this test alongside the existing
+# requirement_from_mapping/class_from_mapping round-trip tests
+def test_scout_result_from_row_reverses_scout_result_to_row() -> None:
+    original = ScoutResult(
+        name="Avery Example",
+        qr_url="https://x.invalid",
+        attendee_id="A1",
+        classes=(
+            ClassRecord(
+                scout_name="Avery Example", attendee_id="A1", class_number="101",
+                class_p4_id="p4-1", class_name="Camping", days="Mon", period_name="AM",
+                start_time="9:00", start_time_24h="09:00", location="Hall",
+                has_requirements=True, class_completed=False, raw_class_name="Camping (raw)",
+            ),
+        ),
+        requirements=(
+            RequirementRecord(
+                scout_name="Avery Example", attendee_id="A1", class_number="101",
+                class_p4_id="p4-1", merit_badge_name="Camping", requirement_id="r1",
+                requirement_type_id="t1", requirement_number="1a", description="Do a thing",
+                completed_requirement=True, completed_class=False,
+                requirement_on_event=True, present_days="Mon,Tue",
+            ),
+        ),
+        errors=("Camping: requirement request failed: timeout",),
+    )
+    row = scout_result_to_row(original)
+    assert scout_result_from_row(row) == original
+```
+
+Run: `uv run pytest tests/unit/test_output_schemas.py -v` → FAIL (`scout_result_from_row` doesn't exist)
+
+```python
+# src/scoutmb/core/output_schemas.py -- add directly below scout_result_to_row
+def scout_result_from_row(data: Mapping[str, Any]) -> ScoutResult:
+    """Reverse of scout_result_to_row -- reconstructs a ScoutResult from its scouts.json-shaped
+    row. Used by the checkpoint store's completed_results (Task B5.3/B5.5): a resumed run
+    rebuilds each previously-completed scout's ScoutResult from what was saved, rather than
+    re-fetching it or silently dropping it from the resumed run's report."""
+    return ScoutResult(
+        name=_text(data.get("name")),
+        qr_url=_text(data.get("qr_url")),
+        attendee_id=_text(data.get("attendee_id")),
+        classes=tuple(class_from_mapping(row) for row in data.get("classes") or ()),
+        requirements=tuple(
+            requirement_from_mapping(row) for row in data.get("requirements") or ()
+        ),
+        errors=tuple(str(item) for item in data.get("errors") or ()),
+    )
+```
+
+Run: `uv run pytest tests/unit/test_output_schemas.py -q` → PASS
+
+- [ ] **Step 5: Run and commit**
 
 ```bash
-uv run pytest tests/unit/acquisition/test_checkpointing.py -q
+uv run pytest tests/unit/acquisition/test_checkpointing.py tests/unit/test_output_schemas.py -q
 ```
 
 ```bash
-git add src/scoutmb/ports/checkpoint_store.py src/scoutmb/adapters/files/checkpoint.py tests/unit/acquisition/test_checkpointing.py
+git add src/scoutmb/ports/checkpoint_store.py src/scoutmb/adapters/files/checkpoint.py src/scoutmb/core/output_schemas.py tests/unit/acquisition/test_checkpointing.py tests/unit/test_output_schemas.py
 git commit -m "feat(acquisition): add resumable JSON checkpoint store, fail closed on corruption"
 ```
 
@@ -1881,6 +2165,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import re
 from pathlib import Path
 
 import pytest
@@ -1891,7 +2176,6 @@ from scoutmb.core.identity import RunIdentity
 from scoutmb.core.models import ScoutInput
 from scoutmb.features.acquisition.retry import RetryPolicy
 from scoutmb.features.acquisition.service import AcquisitionConfig, AcquisitionService
-from tests.characterization.test_acquisition_matrix import _normalize_raw_names, _project
 from tests.fakes.acquisition import StrictScript
 from tests.fakes.browser import StrictFakeBrowser
 from tests.fakes.clock import FakeClock
@@ -1902,16 +2186,62 @@ from tests.matrix.cases.acquisition_cases import (
 )
 from tests.matrix.pytest_support import execution_params
 
+# _project/_normalize_raw_names/_UUID_HEX_RE are local copies of
+# tests/characterization/test_acquisition_matrix.py's own helpers of the same name --
+# deliberately NOT imported from there. That file is a Slice-2a-era characterization runner
+# against the legacy flat script, which Slice 2b's retirement plan (sub-plan 4, Task B10.4)
+# deletes once scout_schedule_cli.py itself retires; importing test-to-test across that boundary
+# would leave this parity test's collection broken the moment that deletion lands, entirely
+# independent of anything actually wrong with THIS test. Both copies must stay byte-for-byte
+# identical to their source until that deletion, since they exist to prove the SAME projection
+# function is being asked the same question of both the legacy and package runners.
+_UUID_HEX_RE = re.compile(r"(?<=-)[0-9a-f]{32}(?=[-.])")
+
+
+def _project(result: object) -> tuple:
+    classes = tuple(
+        ("class", c.class_number, c.class_p4_id, c.has_requirements, c.class_completed)
+        for c in result.classes  # type: ignore[attr-defined]
+    )
+    reqs = tuple(
+        ("req", r.class_p4_id, r.requirement_number, r.completed_requirement)
+        for r in result.requirements  # type: ignore[attr-defined]
+    )
+    errs = tuple(("error", e) for e in result.errors)  # type: ignore[attr-defined]
+    return (("attendee_id", result.attendee_id),) + classes + reqs + errs  # type: ignore[attr-defined]
+
+
+def _normalize_raw_names(root: Path) -> tuple[str, ...]:
+    raw_dir = root / "raw"
+    if not raw_dir.is_dir():
+        return ()
+    names = [
+        _UUID_HEX_RE.sub("<uuid>", path.relative_to(root).as_posix())
+        for path in raw_dir.rglob("*")
+        if path.is_file()
+    ]
+    return tuple(sorted(names))
+
 
 class _RecordingSleeper:
-    """Delegates to FakeClock so the package path's request-delay/backoff waits are recorded
-    exactly like the legacy path's page.wait_for_timeout calls -- same clock, same assertions."""
+    """Delegates to FakeClock AND consumes StrictScript's scripted "wait" entries via
+    script.next_wait(), exactly like the legacy path's page.wait_for_timeout does. An earlier
+    draft only recorded to the clock and never called next_wait() -- every scripted wait entry
+    (the retry backoff, the inter-class request_delay_ms wait) went unconsumed, so
+    script.assert_consumed() failed on any case exercising either. next_wait() can itself raise
+    a scripted error (a case testing a mid-retry failure injected via the wait step), which must
+    propagate exactly as the legacy page.wait_for_timeout path already does."""
 
-    def __init__(self, clock: FakeClock) -> None:
+    def __init__(self, clock: FakeClock, script: StrictScript) -> None:
         self._clock = clock
+        self._script = script
 
     async def sleep(self, seconds: float) -> None:
-        self._clock.record(round(seconds * 1000))
+        milliseconds = round(seconds * 1000)
+        self._clock.record(milliseconds)
+        response = self._script.next_wait(milliseconds)
+        if response.error_type is not None:
+            raise response.error_type(response.error_message)
 
     def monotonic(self) -> float:
         return 0.0
@@ -1942,7 +2272,7 @@ class PackageAcquisitionRunner:
             allow_dead_assets=case.allow_dead_assets,
         )
         retry_policy = RetryPolicy(
-            sleeper=_RecordingSleeper(clock), jitter=_ZeroJitter(), breaker_threshold=99
+            sleeper=_RecordingSleeper(clock, script), jitter=_ZeroJitter(), breaker_threshold=99
         )
         service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
 
@@ -2009,7 +2339,14 @@ is the adapter's job).
 Does NOT own the circuit breaker's check_closed()/record_failure()/record_success() calls, and
 does NOT touch the checkpoint store -- both are batch-level decisions (features/acquisition/
 batch.py, Task B5.5) that only make sense with visibility across an entire run's scouts, not one
-scout in isolation."""
+scout in isolation.
+
+Does NOT import scoutmb.adapters.scoutevent.schema (or any adapter) -- an earlier draft called
+validate_requirement_row directly from this features/ module, which is a features->adapters
+edge the dependency rule forbids. Row validation now happens INSIDE the gateway
+(adapters/scoutevent/playwright_gateway.py's fetch_requirements, an adapter-to-adapter import,
+which is allowed); this service receives an already-validated RequirementFetchResult and only
+folds its row_errors into ScoutResult.errors -- it never touches a raw requirement row."""
 
 from __future__ import annotations
 
@@ -2017,13 +2354,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from scoutmb.adapters.scoutevent.schema import ScoutingEventSchemaDrift, validate_requirement_row
 from scoutmb.core.identity import AttendeeId, RunIdentity, attendee_filename_stem, safe_slug
 from scoutmb.core.models import ClassRecord, RequirementRecord, ScoutInput, ScoutResult
-from scoutmb.core.output_schemas import json_for_html
 from scoutmb.features.acquisition.retry import RetryPolicy
 from scoutmb.ports.artifact_sink import ArtifactSink
-from scoutmb.ports.scoutevent import ScoutingEventGateway
+from scoutmb.ports.scoutevent import RequirementFetchResult, ScoutingEventGateway
 
 
 def _truthy(value: Any) -> bool:
@@ -2131,11 +2466,11 @@ class AcquisitionService:
                     if not class_record.class_p4_id or not class_record.has_requirements:
                         continue
 
-                    requirement_payload: dict[str, Any] | None = None
+                    requirement_result: RequirementFetchResult | None = None
                     last_error: Exception | None = None
                     for attempt in range(1, 4):
                         try:
-                            requirement_payload = await session.fetch_requirements(
+                            requirement_result = await session.fetch_requirements(
                                 attendee_id, class_record.class_p4_id
                             )
                             break
@@ -2143,7 +2478,7 @@ class AcquisitionService:
                             last_error = exc
                             await self.retry_policy.wait_after_failure(attempt)
 
-                    if requirement_payload is None:
+                    if requirement_result is None:
                         errors.append(
                             f"{class_record.class_name}: requirement request failed: {last_error}"
                         )
@@ -2152,23 +2487,20 @@ class AcquisitionService:
                     self.sink.publish_text(
                         raw_dir
                         / f"{slug}-{safe_slug(class_record.class_number or class_record.class_p4_id)}-requirements.json",
-                        _json_dump(requirement_payload),
+                        _json_dump(requirement_result.payload),
                         encoding="utf-8",
                     )
 
-                    if int((requirement_payload.get("status") or {}).get("status", 0)) != 1:
+                    if int((requirement_result.payload.get("status") or {}).get("status", 0)) != 1:
                         errors.append(
                             f"{class_record.class_name}: requirement API returned failure: "
-                            f"{requirement_payload.get('status')}"
+                            f"{requirement_result.payload.get('status')}"
                         )
                         continue
 
-                    for row in requirement_payload.get("data") or []:
-                        try:
-                            validated = validate_requirement_row(dict(row))
-                        except ScoutingEventSchemaDrift as exc:
-                            errors.append(f"{class_record.class_name}: {exc}")
-                            continue
+                    errors.extend(f"{class_record.class_name}: {msg}" for msg in requirement_result.row_errors)
+
+                    for validated in requirement_result.validated_rows:
                         requirements.append(
                             RequirementRecord(
                                 scout_name=name,
@@ -2202,10 +2534,6 @@ class AcquisitionService:
             errors=tuple(errors),
         )
 ```
-
-> `json_for_html` is imported but unused above — remove it before landing; it was pulled in by
-> habit from a neighboring module and does not belong here. Flagged explicitly rather than left
-> in, since an unused import is exactly the kind of small thing this review pass exists to catch.
 
 - [ ] **Step 5: Write the resource-closing integration test**
 
@@ -2303,12 +2631,35 @@ successors need to survive.
       is empty — one recording per scout, not one per retry attempt
 - [ ] A scout whose QR URL is already in the checkpoint's `completed_urls` is skipped entirely —
       `AcquisitionService.process()` is never called for it
-- [ ] After each scout, the checkpoint is saved with that scout's URL added to `completed_urls`
-      and `run_identity.snapshot()` as `output_ids` — a resumed run reuses the same output UUIDs
+- [ ] `run_batch()` saves a fresh, empty `Checkpoint` immediately on a run with no prior
+      checkpoint file — BEFORE the first scout is processed, not after — landing
+      `ACQ-RESUME-001`'s stated "creates a fresh on-disk checkpoint file at the start of a run"
+      behavior exactly, rather than only after the first scout happens to finish
+- [ ] A scout is added to `completed_urls`/`completed_results` ONLY when its `ScoutResult.errors`
+      is empty — a scout that raised or returned errors is NOT marked completed, so the NEXT
+      resume retries it rather than permanently skipping it
+- [ ] After each scout, the checkpoint is saved with `run_identity.snapshot()` as `output_ids` —
+      a resumed run reuses the same output UUIDs even for a scout that failed this run (its
+      output_id, once minted, must stay stable across retries)
+- [ ] A resumed run's returned `list[ScoutResult]` includes BOTH scouts reconstructed from the
+      checkpoint's `completed_results` (via `scout_result_from_row`) AND scouts newly processed
+      this run — a resumed run's report does not silently drop scouts finished on a prior process
+- [ ] A URL is skipped ONLY when it is in BOTH `completed_urls` AND `completed_results` — a
+      checkpoint saved before `completed_results` existed (Task B5.3's backward-compat load) has
+      a URL in `completed_urls` with nothing to reconstruct in `completed_results`; that scout
+      must be RE-PROCESSED, not silently dropped from the resumed run's results
 - [ ] A fresh `RunIdentity` hydrated from a prior checkpoint's `output_ids` returns the same
       `output_id` for an attendee ID it already had a UUID for, proven by reconstructing a new
       `RunIdentity` from a saved snapshot (simulating a process restart) — not merely asserting
       against the same in-memory instance
+- [ ] Between scouts (never after the last one actually processed), `run_batch()` sleeps via
+      `retry_policy.sleeper.sleep(...)` for `scout_delay_ms / 1000` seconds when `scout_delay_ms`
+      is given, else a `random.uniform(0.5, 2.0)` second delay — matching legacy `async_main`'s
+      inter-scout pacing, which an earlier draft of this task dropped entirely
+- [ ] `run_batch()` prints the same two lines per scout legacy `async_main` did —
+      `[{index}/{total}] {label}` before processing and the
+      `    attendeeID=..., classes=..., requirements=..., errors=...` summary after — since
+      nothing else in the CLI path produces this operator-facing progress output
 
 **Verify:** `uv run pytest tests/integration/test_acquisition_batch.py tests/unit/test_identity.py -q` → PASS
 
@@ -2351,13 +2702,15 @@ simulated process restart."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from scoutmb.adapters.files.atomic import AtomicFileSink
 from scoutmb.adapters.files.checkpoint import AtomicFileCheckpointStore
 from scoutmb.adapters.scoutevent.playwright_gateway import PlaywrightScoutingEventGateway
 from scoutmb.core.identity import RunIdentity
-from scoutmb.core.models import ScoutInput
+from scoutmb.core.models import ScoutInput, ScoutResult
 from scoutmb.features.acquisition.batch import run_batch
 from scoutmb.features.acquisition.retry import BreakerOpen, RetryPolicy
 from scoutmb.features.acquisition.service import AcquisitionConfig, AcquisitionService
@@ -2365,6 +2718,19 @@ from scoutmb.ports.checkpoint_store import Checkpoint
 from tests.fakes.acquisition import StrictScript
 from tests.fakes.browser import StrictFakeBrowser
 from tests.fakes.clock import FakeClock
+from tests.matrix.cases.acquisition_cases import ExpectedRequest, ScriptedResponse
+
+
+def _sched(attendee_id: str, payload: object) -> tuple[ExpectedRequest, ScriptedResponse]:
+    """Local copy of acquisition_cases._sched -- deliberately NOT imported, since that name is
+    module-private and this test module has no other reason to depend on the characterization
+    catalog. A schedule request scripted to answer with `payload`."""
+    return (ExpectedRequest("schedule", attendee_id), ScriptedResponse(value=payload))
+
+
+def _schedule_payload(rows: tuple[dict[str, object], ...] = ()) -> dict[str, object]:
+    """Local copy of acquisition_cases._schedule_payload -- see _sched's docstring."""
+    return {"status": {"status": 1}, "data": list(rows)}
 
 
 class _RecordingSleeper:
@@ -2461,6 +2827,232 @@ async def test_output_uuid_survives_a_simulated_process_restart(tmp_path) -> Non
     fresh_run_identity.hydrate(checkpoint.output_ids)
 
     assert fresh_run_identity.output_id(AttendeeId.parse("A1")) == prior_output_id
+
+
+async def test_checkpoint_file_exists_before_the_first_scout_is_processed(tmp_path) -> None:
+    """ACQ-RESUME-001: a fresh run creates its checkpoint file at the START of the run, not
+    only after the first scout happens to finish. Proven directly with a stand-in service whose
+    process() checks the file's existence the moment it is called -- before it returns
+    anything, so this cannot pass merely because run_batch eventually saves a checkpoint."""
+    checkpoint_path = tmp_path / "checkpoint.json"
+    checkpoint_store = AtomicFileCheckpointStore(checkpoint_path)
+    observed_exists_when_processing_started: list[bool] = []
+
+    class _ObservingService:
+        async def process(
+            self, *, scout: ScoutInput, config: AcquisitionConfig, raw_dir: Path,
+            run_identity: RunIdentity,
+        ) -> ScoutResult:
+            observed_exists_when_processing_started.append(checkpoint_path.exists())
+            return ScoutResult(name=scout.name, qr_url=scout.url, attendee_id="A1")
+
+    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+
+    await run_batch(
+        [ScoutInput(name="Avery", url="https://scoutingevent.com/mobile/checkin?t=A")],
+        service=_ObservingService(),  # type: ignore[arg-type] -- duck-types AcquisitionService
+        retry_policy=retry_policy,
+        checkpoint_store=checkpoint_store,
+        run_identity=RunIdentity(),
+        config=AcquisitionConfig(timeout_seconds=5, request_delay_ms=0),
+        raw_dir=tmp_path / "raw",
+    )
+
+    assert observed_exists_when_processing_started == [True]
+
+
+async def test_failed_scout_is_not_marked_completed_and_is_retried_on_resume(tmp_path) -> None:
+    """A scout whose ScoutResult.errors is non-empty must NOT be added to completed_urls or
+    completed_results -- otherwise one transient failure would permanently skip that scout on
+    every future resume instead of retrying it. output_ids IS still saved, since a scout's
+    output_id, once minted, must stay stable across retries."""
+    checkpoint_store = AtomicFileCheckpointStore(tmp_path / "checkpoint.json")
+    clock = FakeClock()
+    browser = StrictFakeBrowser(StrictScript(()), clock)  # nothing scripted -- schedule fetch fails
+    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    service = _service(browser, retry_policy)
+
+    results = await run_batch(
+        [ScoutInput(name="Avery", url="https://scoutingevent.com/mobile/checkin?t=A")],
+        service=service,
+        retry_policy=retry_policy,
+        checkpoint_store=checkpoint_store,
+        run_identity=RunIdentity(),
+        config=AcquisitionConfig(timeout_seconds=5, request_delay_ms=0),
+        raw_dir=tmp_path / "raw",
+    )
+    assert len(results) == 1
+    assert results[0].errors  # the scout failed -- fetch_schedule is never retried, see B5.4
+
+    loaded = checkpoint_store.load()
+    assert loaded is not None
+    assert "https://scoutingevent.com/mobile/checkin?t=A" not in loaded.completed_urls
+    assert loaded.completed_results == {}
+
+
+async def test_resumed_run_report_includes_previously_completed_scouts(tmp_path) -> None:
+    """A checkpoint's completed_results carries enough of each successful ScoutResult to
+    reconstruct it on resume. The SECOND run_batch call's returned list must include the FIRST
+    run's scout (reconstructed via scout_result_from_row) alongside the newly processed one --
+    a resumed run's report must not silently drop scouts finished on a prior process."""
+    checkpoint_store = AtomicFileCheckpointStore(tmp_path / "checkpoint.json")
+
+    clock_1 = FakeClock()
+    script_1 = StrictScript((_sched("90000001", _schedule_payload()),))
+    browser_1 = StrictFakeBrowser(script_1, clock_1)
+    retry_policy_1 = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    service_1 = _service(browser_1, retry_policy_1)
+
+    first_results = await run_batch(
+        [ScoutInput(name="Avery", url="https://scoutingevent.com/mobile/checkin?t=A")],
+        service=service_1,
+        retry_policy=retry_policy_1,
+        checkpoint_store=checkpoint_store,
+        run_identity=RunIdentity(),
+        config=AcquisitionConfig(timeout_seconds=5, request_delay_ms=0),
+        raw_dir=tmp_path / "raw",
+    )
+    script_1.assert_consumed()
+    assert len(first_results) == 1
+    assert not first_results[0].errors
+
+    clock_2 = FakeClock()
+    script_2 = StrictScript((_sched("90000002", _schedule_payload()),))
+    browser_2 = StrictFakeBrowser(script_2, clock_2)
+    retry_policy_2 = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    service_2 = _service(browser_2, retry_policy_2)
+
+    second_results = await run_batch(
+        [
+            ScoutInput(name="Avery", url="https://scoutingevent.com/mobile/checkin?t=A"),
+            ScoutInput(name="Bailey", url="https://scoutingevent.com/mobile/checkin?t=B"),
+        ],
+        service=service_2,
+        retry_policy=retry_policy_2,
+        checkpoint_store=checkpoint_store,
+        run_identity=RunIdentity(),
+        config=AcquisitionConfig(timeout_seconds=5, request_delay_ms=0),
+        raw_dir=tmp_path / "raw",
+    )
+    script_2.assert_consumed()
+    assert len(browser_2.contexts) == 1  # only Bailey touched the browser -- Avery was skipped
+    assert {result.attendee_id for result in second_results} == {"90000001", "90000002"}
+
+
+async def test_old_format_checkpoint_reprocesses_rather_than_drops_its_scout(tmp_path) -> None:
+    """A checkpoint saved before completed_results existed (Task B5.3's backward-compat load,
+    tests/unit/acquisition/test_checkpointing.py::test_checkpoint_without_completed_results_key_
+    is_backward_compatible) has a URL in completed_urls with NOTHING in completed_results to
+    reconstruct it from. Skipping on completed_urls alone would silently drop that scout from
+    this run's results -- the exact bug completed_results exists to prevent, just triggered by an
+    old-format file. run_batch must re-process it instead: still present in the final results,
+    with a fresh BrowserContext actually opened for it."""
+    checkpoint_path = tmp_path / "checkpoint.json"
+    checkpoint_store = AtomicFileCheckpointStore(checkpoint_path)
+    # Hand-write an old-format checkpoint: completed_urls populated, no completed_results key at
+    # all -- exactly what a pre-B5.3 save (or a hand-edited file) would look like on disk.
+    import json
+
+    checkpoint_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "completed_urls": ["https://scoutingevent.com/mobile/checkin?t=A"],
+                "output_ids": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    clock = FakeClock()
+    script = StrictScript((_sched("90000001", _schedule_payload()),))
+    browser = StrictFakeBrowser(script, clock)
+    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    service = _service(browser, retry_policy)
+
+    results = await run_batch(
+        [ScoutInput(name="Avery", url="https://scoutingevent.com/mobile/checkin?t=A")],
+        service=service,
+        retry_policy=retry_policy,
+        checkpoint_store=checkpoint_store,
+        run_identity=RunIdentity(),
+        config=AcquisitionConfig(timeout_seconds=5, request_delay_ms=0),
+        raw_dir=tmp_path / "raw",
+    )
+    script.assert_consumed()
+    assert len(browser.contexts) == 1  # re-processed, not silently skipped
+    assert {result.attendee_id for result in results} == {"90000001"}
+
+
+async def test_scout_delay_is_slept_between_scouts_but_not_after_the_last(tmp_path) -> None:
+    """Legacy async_main sleeps between scouts (never after the last one) using
+    scout_delay_ms/1000 seconds when scout_delay_ms is given -- an earlier draft of run_batch
+    dropped this pacing entirely. Sleeping through retry_policy.sleeper keeps this fake-clock
+    -testable rather than a real asyncio.sleep."""
+
+    class _DelayRecordingSleeper:
+        def __init__(self) -> None:
+            self.slept_seconds: list[float] = []
+
+        async def sleep(self, seconds: float) -> None:
+            self.slept_seconds.append(seconds)
+
+        def monotonic(self) -> float:
+            return 0.0
+
+    checkpoint_store = AtomicFileCheckpointStore(tmp_path / "checkpoint.json")
+    clock = FakeClock()
+    script = StrictScript(
+        (
+            _sched("90000001", _schedule_payload()),
+            _sched("90000002", _schedule_payload()),
+        )
+    )
+    browser = StrictFakeBrowser(script, clock)
+    sleeper = _DelayRecordingSleeper()
+    retry_policy = RetryPolicy(sleeper=sleeper, jitter=_ZeroJitter(), breaker_threshold=99)
+    service = _service(browser, retry_policy)
+
+    await run_batch(
+        [
+            ScoutInput(name="Avery", url="https://scoutingevent.com/mobile/checkin?t=A"),
+            ScoutInput(name="Bailey", url="https://scoutingevent.com/mobile/checkin?t=B"),
+        ],
+        service=service,
+        retry_policy=retry_policy,
+        checkpoint_store=checkpoint_store,
+        run_identity=RunIdentity(),
+        config=AcquisitionConfig(timeout_seconds=5, request_delay_ms=0),
+        raw_dir=tmp_path / "raw",
+        scout_delay_ms=250,
+    )
+    script.assert_consumed()
+    assert sleeper.slept_seconds == [0.25]  # exactly one delay -- between the two scouts, not after
+
+
+async def test_run_batch_prints_legacy_style_progress(tmp_path, capsys) -> None:
+    """Nothing else in the CLI path produces this operator-facing progress output -- an earlier
+    draft of run_batch dropped it when the inline async_main loop was extracted."""
+    checkpoint_store = AtomicFileCheckpointStore(tmp_path / "checkpoint.json")
+    clock = FakeClock()
+    script = StrictScript((_sched("90000001", _schedule_payload()),))
+    browser = StrictFakeBrowser(script, clock)
+    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    service = _service(browser, retry_policy)
+
+    await run_batch(
+        [ScoutInput(name="Avery", url="https://scoutingevent.com/mobile/checkin?t=A")],
+        service=service,
+        retry_policy=retry_policy,
+        checkpoint_store=checkpoint_store,
+        run_identity=RunIdentity(),
+        config=AcquisitionConfig(timeout_seconds=5, request_delay_ms=0),
+        raw_dir=tmp_path / "raw",
+    )
+
+    out = capsys.readouterr().out
+    assert "[1/1] Avery" in out
+    assert "attendeeID=90000001, classes=0, requirements=0, errors=0" in out
 ```
 
 Run: `uv run pytest tests/integration/test_acquisition_batch.py -v` → FAIL (module doesn't exist)
@@ -2471,17 +3063,31 @@ Run: `uv run pytest tests/integration/test_acquisition_batch.py -v` → FAIL (mo
 # src/scoutmb/features/acquisition/batch.py
 """Run-scoped acquisition composition (D22, ACQ-BREAKER, ACQ-RESUME). Owns the ONE RetryPolicy
 shared across every scout in the run (so its breaker sees cross-scout failures, matching
-ACQ-BREAKER's own rationale), the checkpoint store (skip completed scouts, persist output-UUIDs),
-and RunIdentity hydration. AcquisitionService.process() handles one scout in isolation and knows
-nothing about any of this -- see that module's docstring for why."""
+ACQ-BREAKER's own rationale), the checkpoint store (skip completed scouts, persist output-UUIDs
+and completed scouts' results, so a resumed run's report stays complete), and RunIdentity
+hydration. AcquisitionService.process() handles one scout in isolation and knows nothing about
+any of this -- see that module's docstring for why.
+
+A scout is marked completed (added to completed_urls/completed_results) ONLY when its
+ScoutResult.errors is empty -- an earlier draft marked every attempted scout completed
+unconditionally, which meant a scout that failed once was silently skipped on every future
+resume instead of being retried. output_ids IS still saved after every scout regardless of
+success, since a scout's output_id, once minted via RunIdentity, must stay stable across
+retries.
+
+The checkpoint file is created (empty) at the very start of a fresh run, before any scout is
+processed -- ACQ-RESUME-001 promises a checkpoint file exists from the start of a run, not only
+after the first scout happens to finish."""
 
 from __future__ import annotations
 
+import random
 from collections.abc import Sequence
 from pathlib import Path
 
 from scoutmb.core.identity import RunIdentity
 from scoutmb.core.models import ScoutInput, ScoutResult
+from scoutmb.core.output_schemas import scout_result_from_row, scout_result_to_row
 from scoutmb.features.acquisition.retry import RetryPolicy
 from scoutmb.features.acquisition.service import AcquisitionConfig, AcquisitionService
 from scoutmb.ports.checkpoint_store import CHECKPOINT_VERSION, Checkpoint, CheckpointStore
@@ -2496,36 +3102,80 @@ async def run_batch(
     run_identity: RunIdentity,
     config: AcquisitionConfig,
     raw_dir: Path,
+    scout_delay_ms: int | None = None,
 ) -> list[ScoutResult]:
     checkpoint = checkpoint_store.load()
-    if checkpoint is not None:
+    if checkpoint is None:
+        # Create the checkpoint file NOW, before any scout is processed -- ACQ-RESUME-001's
+        # "a fresh run creates a checkpoint file at the start of a run" behavior, not only once
+        # the first scout happens to finish.
+        checkpoint = Checkpoint(version=CHECKPOINT_VERSION, completed_urls=(), output_ids={})
+        checkpoint_store.save(checkpoint)
+    else:
         run_identity.hydrate(checkpoint.output_ids)
-    completed_urls = set(checkpoint.completed_urls) if checkpoint is not None else set()
 
-    results: list[ScoutResult] = []
-    for scout in scouts:
-        if scout.url in completed_urls:
+    completed_urls = set(checkpoint.completed_urls)
+    completed_results = dict(checkpoint.completed_results)
+
+    # Scouts finished on a prior process are reconstructed from the checkpoint, not re-fetched
+    # -- a resumed run's report must include them alongside whatever this run newly processes.
+    results: list[ScoutResult] = [
+        scout_result_from_row(row) for row in completed_results.values()
+    ]
+
+    total = len(scouts)
+    for index, scout in enumerate(scouts, start=1):
+        # Requires BOTH: a checkpoint written by this exact code always adds a URL to
+        # completed_urls and completed_results in the same atomic step (below), so for a
+        # same-version checkpoint the two are always in lockstep and this extra check changes
+        # nothing. It only matters for a checkpoint saved before completed_results existed
+        # (backward-compat load, Task B5.3) -- completed_urls has the entry but completed_results
+        # is {}, so scout_result_from_row has nothing to reconstruct. Skipping on completed_urls
+        # ALONE in that case would silently drop the scout from this run's results entirely --
+        # the exact bug completed_results was added to fix, just triggered by an old-format file
+        # instead of a same-format one. Re-processing it once here is the safe fallback: no
+        # scout is ever silently lost, at the cost of one extra fetch for that edge case only.
+        if scout.url in completed_urls and scout.url in completed_results:
             continue
+
+        label = scout.name or scout.url
+        print(f"[{index}/{total}] {label}")
 
         retry_policy.check_closed()  # raises BreakerOpen before opening a session for this scout
         result = await service.process(
             scout=scout, config=config, raw_dir=raw_dir, run_identity=run_identity
         )
         results.append(result)
+        print(
+            f"    attendeeID={result.attendee_id or 'unknown'}, "
+            f"classes={len(result.classes)}, requirements={len(result.requirements)}, "
+            f"errors={len(result.errors)}"
+        )
 
         if result.errors:
             retry_policy.record_failure()
         else:
             retry_policy.record_success()
+            completed_urls.add(scout.url)
+            completed_results[scout.url] = scout_result_to_row(result)
 
-        completed_urls.add(scout.url)
         checkpoint_store.save(
             Checkpoint(
                 version=CHECKPOINT_VERSION,
                 completed_urls=tuple(completed_urls),
                 output_ids=run_identity.snapshot(),
+                completed_results=completed_results,
             )
         )
+
+        # Only sleep if a not-yet-completed scout remains after this one -- never a pointless
+        # delay before a tail of already-checkpointed scouts that will just be skipped.
+        if any(remaining.url not in completed_urls for remaining in scouts[index:]):
+            delay_seconds = (
+                random.uniform(0.5, 2.0) if scout_delay_ms is None else scout_delay_ms / 1000
+            )
+            if delay_seconds > 0:
+                await retry_policy.sleeper.sleep(delay_seconds)
 
     return results
 ```
