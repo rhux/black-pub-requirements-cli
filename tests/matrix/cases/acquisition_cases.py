@@ -1320,108 +1320,91 @@ NEW_ACCEPTANCE_ACQUISITION_METADATA: tuple[CaseMetadata, ...] = (
         axis_id="ACQ-BREAKER",
         member="below-threshold",
         domain=Domain.ACQUISITION,
-        classification=Classification.NEW_ACCEPTANCE,
+        classification=Classification.PRESERVE,
         evidence=EvidenceKind.PROPERTY_BOUNDARY,
-        rationale="The current acquisition loop has no failure-count breaker at all -- every "
-        "scout is attempted regardless of how many prior scouts failed.",
-        contexts=(),
-        evidence_reference="scout_schedule_cli.async_main lines 1799-1873 (no breaker state)",
-        target_owner="Slice 2",
-        target_observation="Slice 2 will track consecutive failures and stay closed (keep "
-        "attempting scouts) while the count is below a configured threshold.",
+        rationale="The acquisition retry policy tracks consecutive failures and stays closed "
+        "(keeps attempting scouts) while the count is below the configured threshold.",
+        contexts=("breaker",),
+        evidence_reference="tests/unit/acquisition/test_retry_policy.py::"
+        "test_stays_closed_below_threshold",
     ),
     CaseMetadata(
         case_id="ACQ-BREAKER-002",
         axis_id="ACQ-BREAKER",
         member="threshold-opens",
         domain=Domain.ACQUISITION,
-        classification=Classification.NEW_ACCEPTANCE,
+        classification=Classification.PRESERVE,
         evidence=EvidenceKind.PROPERTY_BOUNDARY,
-        rationale="The current acquisition loop cannot open a circuit -- there is no concept "
-        "of consecutive-failure count to compare against a threshold.",
-        contexts=(),
-        evidence_reference="scout_schedule_cli.async_main lines 1799-1873 (no breaker state)",
-        target_owner="Slice 2",
-        target_observation="Slice 2 will open the circuit and stop attempting further scouts "
+        rationale="The acquisition retry policy opens its circuit and rejects further attempts "
         "once consecutive failures reach the configured threshold.",
+        contexts=("breaker",),
+        evidence_reference="tests/unit/acquisition/test_retry_policy.py::"
+        "test_opens_at_threshold_and_rejects_further_attempts",
     ),
     CaseMetadata(
         case_id="ACQ-BREAKER-003",
         axis_id="ACQ-BREAKER",
         member="recovery-resets",
         domain=Domain.ACQUISITION,
-        classification=Classification.NEW_ACCEPTANCE,
+        classification=Classification.PRESERVE,
         evidence=EvidenceKind.PROPERTY_BOUNDARY,
-        rationale="The current acquisition loop has no recovery/half-open state to reset -- "
-        "every scout's success or failure is independent of the ones before it.",
-        contexts=(),
-        evidence_reference="scout_schedule_cli.async_main lines 1799-1873 (no breaker state)",
-        target_owner="Slice 2",
-        target_observation="Slice 2 will reset the consecutive-failure count to zero after a "
-        "successful scout, so a transient run of failures does not permanently trip the "
-        "breaker.",
+        rationale="The acquisition retry policy resets the consecutive-failure count to zero "
+        "after a successful scout, so a transient run of failures does not permanently trip "
+        "the breaker.",
+        contexts=("breaker",),
+        evidence_reference="tests/unit/acquisition/test_retry_policy.py::"
+        "test_success_resets_consecutive_failures",
     ),
     CaseMetadata(
         case_id="ACQ-RESUME-001",
         axis_id="ACQ-RESUME",
         member="new-checkpoint",
         domain=Domain.ACQUISITION,
-        classification=Classification.NEW_ACCEPTANCE,
+        classification=Classification.PRESERVE,
         evidence=EvidenceKind.PROPERTY_BOUNDARY,
-        rationale="The current acquisition loop has no on-disk checkpoint of any kind -- a run "
-        "that is interrupted leaves nothing behind to resume from.",
-        contexts=(),
-        evidence_reference="scout_schedule_cli.async_main lines 1799-1873 (no checkpoint I/O)",
-        target_owner="Slice 2",
-        target_observation="Slice 2 will create a fresh on-disk checkpoint file at the start "
-        "of a run with no prior checkpoint.",
+        rationale="A run with no prior checkpoint file creates one on first save.",
+        contexts=("resume",),
+        evidence_reference="tests/unit/acquisition/test_checkpointing.py::"
+        "test_fresh_run_has_no_checkpoint",
     ),
     CaseMetadata(
         case_id="ACQ-RESUME-002",
         axis_id="ACQ-RESUME",
         member="completed-not-repeated",
         domain=Domain.ACQUISITION,
-        classification=Classification.NEW_ACCEPTANCE,
+        classification=Classification.PRESERVE,
         evidence=EvidenceKind.PROPERTY_BOUNDARY,
-        rationale="The current acquisition loop always reprocesses every scout in the input "
-        "file from the top -- there is no notion of 'already completed' to skip.",
-        contexts=(),
-        evidence_reference="scout_schedule_cli.async_main lines 1820-1834 unconditional "
-        "enumerate(scouts, start=1)",
-        target_owner="Slice 2",
-        target_observation="Slice 2 will skip scouts the checkpoint already recorded as "
-        "completed when resuming an interrupted run.",
+        rationale="A scout whose QR URL is already recorded in the checkpoint's completed_urls "
+        "is recognized as already complete on resume.",
+        contexts=("resume",),
+        evidence_reference="tests/unit/acquisition/test_checkpointing.py::"
+        "test_completed_url_is_recognized_on_resume",
     ),
     CaseMetadata(
         case_id="ACQ-RESUME-003",
         axis_id="ACQ-RESUME",
         member="uuid-survives-resume",
         domain=Domain.ACQUISITION,
-        classification=Classification.NEW_ACCEPTANCE,
+        classification=Classification.PRESERVE,
         evidence=EvidenceKind.PROPERTY_BOUNDARY,
-        rationale="RunIdentity is created fresh in async_main (line 1814) every time it runs, "
-        "so an attendee's output UUID does not currently survive a process restart.",
-        contexts=(),
-        evidence_reference="scout_schedule_cli.async_main line 1814 run_identity = RunIdentity()",
-        target_owner="Slice 2",
-        target_observation="Slice 2 will persist the attendee-to-output-UUID map in the "
-        "checkpoint so a resumed run reuses the same output UUID for each attendee.",
+        rationale="The attendee-to-output-UUID map persists in the checkpoint and survives a "
+        "reload, so a resumed run reuses the same output UUID for each attendee.",
+        contexts=("resume",),
+        evidence_reference="tests/unit/acquisition/test_checkpointing.py::"
+        "test_output_id_map_survives_a_reload",
     ),
     CaseMetadata(
         case_id="ACQ-RESUME-004",
         axis_id="ACQ-RESUME",
         member="corrupt-checkpoint-fails-closed",
         domain=Domain.ACQUISITION,
-        classification=Classification.NEW_ACCEPTANCE,
+        classification=Classification.PRESERVE,
         evidence=EvidenceKind.PROPERTY_BOUNDARY,
-        rationale="There is no checkpoint file format yet, so there is nothing that could be "
-        "corrupt or version-mismatched today.",
-        contexts=(),
-        evidence_reference="scout_schedule_cli.async_main lines 1799-1873 (no checkpoint I/O)",
-        target_owner="Slice 2",
-        target_observation="Slice 2 will refuse to resume from a corrupt or version-mismatched "
-        "checkpoint file, failing closed (starting a fresh run only on explicit request) "
-        "rather than guessing at partial state.",
+        rationale="A checkpoint file that is corrupt, version-mismatched, or wrong-shaped fails "
+        "closed with CorruptCheckpoint rather than being partially trusted.",
+        contexts=("resume",),
+        evidence_reference="tests/unit/acquisition/test_checkpointing.py::"
+        "test_corrupt_json_fails_closed",
     ),
 )
 
@@ -1676,33 +1659,26 @@ NET_WIRE_METADATA: tuple[CaseMetadata, ...] = (
         axis_id="NET-WIRE",
         member="http-gateway-consults-policy",
         domain=Domain.ACQUISITION,
-        classification=Classification.NEW_ACCEPTANCE,
+        classification=Classification.PRESERVE,
         evidence=EvidenceKind.PROPERTY_BOUNDARY,
-        rationale="No extracted HTTP gateway exists yet in this branch -- scout_schedule_cli "
-        "issues its fetch() calls directly from in-page Playwright code, never through a "
-        "gateway that could consult assert_egress_allowed.",
-        contexts=(),
-        evidence_reference="scout_schedule_cli.post_requirement lines 454-486 (no gateway seam)",
-        target_owner="Slice 2",
-        target_observation="Slice 2 will extract an HTTP gateway that calls "
-        "assert_egress_allowed(host) before issuing any request.",
+        rationale="The extracted HTTP requirement gateway calls assert_egress_allowed(host) "
+        "before issuing any request, and never issues the request when the host is blocked.",
+        contexts=("net-wire",),
+        evidence_reference="tests/unit/scoutevent/test_http_gateway.py::"
+        "test_egress_check_runs_before_evaluate",
     ),
     CaseMetadata(
         case_id="NET-WIRE-002",
         axis_id="NET-WIRE",
         member="playwright-gateway-consults-policy",
         domain=Domain.ACQUISITION,
-        classification=Classification.NEW_ACCEPTANCE,
+        classification=Classification.PRESERVE,
         evidence=EvidenceKind.PROPERTY_BOUNDARY,
-        rationale="No extracted Playwright navigation gateway exists yet -- "
-        "navigate_and_trigger_schedule calls page.goto() directly, never through a gateway "
-        "that could consult assert_egress_allowed.",
-        contexts=(),
-        evidence_reference="scout_schedule_cli.navigate_and_trigger_schedule lines 405-451 "
-        "(no gateway seam)",
-        target_owner="Slice 2",
-        target_observation="Slice 2 will extract a Playwright navigation gateway that calls "
-        "assert_egress_allowed(host) before any page.goto()/navigation.",
+        rationale="The extracted Playwright navigation gateway calls assert_egress_allowed(host) "
+        "before any page.goto()/navigation, and never navigates when the host is blocked.",
+        contexts=("net-wire",),
+        evidence_reference="tests/unit/scoutevent/test_playwright_gateway.py::"
+        "test_blocked_host_raises_and_never_navigates",
     ),
 )
 
