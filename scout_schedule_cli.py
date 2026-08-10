@@ -246,52 +246,9 @@ async def discover_name(page: Page, fallback: str) -> str:
 
 
 async def navigate_and_trigger_schedule(page: Page, qr_url: str, timeout_seconds: int) -> Response:
-    loop = asyncio.get_running_loop()
-    future: asyncio.Future[Response] = loop.create_future()
+    from scoutmb.adapters.scoutevent.playwright_gateway import PlaywrightScoutingEventGateway
 
-    async def inspect_response(response: Response) -> None:
-        if not future.done() and is_schedule_response(response):
-            future.set_result(response)
-
-    def on_response(response: Response) -> None:
-        asyncio.create_task(inspect_response(response))
-
-    page.on("response", on_response)
-    try:
-        # Attach the response listener before navigation so an eager page cannot race us.
-        await page.goto(qr_url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000)
-
-        # The schedule sometimes loads automatically after the QR redirect.
-        await page.wait_for_timeout(1200)
-        if not future.done():
-            selectors = [
-                'a[href="#scoutPage"]',
-                'a[href$="event.html#scoutPage"]',
-                'a:has-text("Schedule")',
-            ]
-            clicked = False
-            for selector in selectors:
-                locator = page.locator(selector)
-                try:
-                    if await locator.count():
-                        await locator.first.click(force=True, timeout=5000)
-                        clicked = True
-                        break
-                except Exception:
-                    continue
-            if not clicked:
-                # Invoke the existing handler in-page if the old UI is not considered clickable.
-                await page.evaluate(
-                    """() => {
-                        const link = document.querySelector('a[href="#scoutPage"]') ||
-                                     [...document.querySelectorAll('a')].find(a =>
-                                         (a.textContent || '').trim().toLowerCase() === 'schedule');
-                        if (link) link.click();
-                    }"""
-                )
-        return await asyncio.wait_for(future, timeout=timeout_seconds)
-    finally:
-        page.remove_listener("response", on_response)
+    return await PlaywrightScoutingEventGateway._fetch_schedule_on_page(page, qr_url, timeout_seconds)
 
 
 async def post_requirement(page: Page, attendee_id: str, class_p4_id: str) -> dict[str, Any]:

@@ -738,6 +738,7 @@ COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = (
             "src/scoutmb/ports/ids.py",
             "src/scoutmb/ports/attendee_source.py",
             "src/scoutmb/ports/artifact_sink.py",
+            "src/scoutmb/ports/scoutevent.py",
         ),
     ),
     CoverageAreaSpec(
@@ -748,6 +749,7 @@ COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = (
             "src/scoutmb/adapters/pdf/extract.py",
             "src/scoutmb/adapters/pdf/pages.py",
             "src/scoutmb/adapters/html/report.py",
+            "src/scoutmb/adapters/scoutevent/playwright_gateway.py",
         ),
     ),
     CoverageAreaSpec(
