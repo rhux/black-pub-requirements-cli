@@ -27,7 +27,7 @@
     {
       "id": 3,
       "subject": "B5.2: Retry policy + circuit breaker (renamed wait_after_failure)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Standalone RetryPolicy: characterized 500ms*attempt backoff (incl. 3rd attempt) + consecutive-failure breaker. Who shares/calls it is B5.5's job.\n\n**Files:**\n- Create: `src/scoutmb/features/acquisition/retry.py`\n- Test: `tests/unit/acquisition/test_retry_policy.py`\n\n**Acceptance Criteria:**\n- [ ] Stays closed below threshold, opens at threshold, success resets\n- [ ] Backoff uses injected Sleeper/Jitter, 500ms*attempt including the 3rd\n\n**Verify:** `uv run pytest tests/unit/acquisition/test_retry_policy.py -q` → PASS\n\nPOST-CODEX FIX: renamed wait_before_attempt -> wait_after_failure (it's called after a failed attempt, not before every attempt).\n\n```json:metadata\n{\"files\": [\"src/scoutmb/features/acquisition/retry.py\"], \"verifyCommand\": \"uv run pytest tests/unit/acquisition/test_retry_policy.py -q\", \"acceptanceCriteria\": [\"breaker state machine correct\", \"backoff timing exact including 3rd attempt\"], \"modelTier\": \"standard\"}\n```",
       "activeForm": "Implementing retry policy and circuit breaker"
     },
