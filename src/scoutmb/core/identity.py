@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 
 class MissingAttendeeId(RuntimeError):
@@ -49,6 +51,19 @@ class RunIdentity:
             existing = str(uuid.uuid4())
             self._by_attendee[attendee.value] = existing
         return existing
+
+    def snapshot(self) -> Mapping[str, str]:
+        """A read-only view of the current attendee-id -> output-id map, for persisting into a
+        checkpoint. Not a live view -- callers that need to observe later output_id() calls must
+        re-snapshot."""
+        return MappingProxyType(dict(self._by_attendee))
+
+    def hydrate(self, existing: Mapping[str, str]) -> None:
+        """Seed this instance's map from a prior run's snapshot (e.g. a loaded checkpoint), so
+        an attendee this run already resolved on a previous process gets the SAME output_id
+        again rather than a fresh one. Only call this before any output_id() calls on this
+        instance -- hydrating after would not retroactively change UUIDs already handed out."""
+        self._by_attendee.update(existing)
 
 
 def safe_slug(value: str) -> str:
