@@ -20,7 +20,7 @@ import re
 import sys
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -77,17 +77,7 @@ DEAD_ASSET_HOSTS = {
 
 # NOTE: scoutmb.core.models holds the package copies of these four shapes, proven
 # field-identical by tests/parity/test_models_parity.py. ClassRecord/RequirementRecord/
-# ScoutInput are aliases of the package shapes (imported above) as of Slice 2a Task 14 (and
-# this fix wave, for ScoutInput); ScoutResult stays legacy-defined until Slice 2b, once
-# process_scout stops mutating it.
-@dataclass(slots=True)
-class ScoutResult:
-    name: str
-    qr_url: str
-    attendee_id: str = ""
-    classes: list[ClassRecord] = field(default_factory=list)
-    requirements: list[RequirementRecord] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
+from scoutmb.core.models import ScoutResult  # noqa: F401 - legacy public surface
 
 
 def parse_args() -> argparse.Namespace:
@@ -281,9 +271,13 @@ async def process_scout(
 
     page = await context.new_page()
     page.set_default_timeout(args.timeout * 1000)
-    result = ScoutResult(name=scout.name or "Unknown Scout", qr_url=scout.url)
-
     page.on("pageerror", lambda error: print(f"    browser JS error: {error}", file=sys.stderr))
+
+    name = scout.name or "Unknown Scout"
+    attendee_id = ""
+    classes: list[ClassRecord] = []
+    requirements: list[RequirementRecord] = []
+    errors: list[str] = []
 
     try:
         schedule_response = await navigate_and_trigger_schedule(page, scout.url, args.timeout)
@@ -292,13 +286,12 @@ async def process_scout(
         if not attendee_id:
             raise RuntimeError("The schedule request did not contain attendeeID")
 
-        result.attendee_id = attendee_id
-        result.name = await discover_name(page, scout.name)
+        name = await discover_name(page, scout.name)
 
         schedule_payload = await schedule_response.json()
         raw_dir.mkdir(parents=True, exist_ok=True)
-        output_id = run_identity.output_id(AttendeeId.parse(attendee_id, result.name))
-        slug = attendee_filename_stem(result.name, output_id)
+        output_id = run_identity.output_id(AttendeeId.parse(attendee_id, name))
+        slug = attendee_filename_stem(name, output_id)
         (raw_dir / f"{slug}-schedule.json").write_text(
             json.dumps(schedule_payload, indent=2, ensure_ascii=False), encoding="utf-8"
         )
@@ -325,7 +318,7 @@ async def process_scout(
         for item in schedule_rows:
             raw_class_name = str(item.get("CLASS_NAME") or "")
             class_record = ClassRecord(
-                scout_name=result.name,
+                scout_name=name,
                 attendee_id=attendee_id,
                 class_number=str(item.get("CLASS_NBR") or ""),
                 class_p4_id=str(item.get("classP4ID") or ""),
@@ -339,7 +332,7 @@ async def process_scout(
                 class_completed=truthy(item.get("CLASS_COMPLETED")),
                 raw_class_name=raw_class_name,
             )
-            result.classes.append(class_record)
+            classes.append(class_record)
 
             if not class_record.class_p4_id:
                 continue
@@ -357,9 +350,7 @@ async def process_scout(
                     await page.wait_for_timeout(500 * attempt)
 
             if requirement_payload is None:
-                result.errors.append(
-                    f"{class_record.class_name}: requirement request failed: {last_error}"
-                )
+                errors.append(f"{class_record.class_name}: requirement request failed: {last_error}")
                 continue
 
             (raw_dir / f"{slug}-{safe_slug(class_record.class_number or class_record.class_p4_id)}-requirements.json").write_text(
@@ -367,16 +358,16 @@ async def process_scout(
             )
 
             if int(requirement_payload.get("status", {}).get("status", 0)) != 1:
-                result.errors.append(
+                errors.append(
                     f"{class_record.class_name}: requirement API returned failure: "
                     f"{requirement_payload.get('status')}"
                 )
                 continue
 
             for req in requirement_payload.get("data") or []:
-                result.requirements.append(
+                requirements.append(
                     RequirementRecord(
-                        scout_name=result.name,
+                        scout_name=name,
                         attendee_id=attendee_id,
                         class_number=class_record.class_number,
                         class_p4_id=class_record.class_p4_id,
@@ -396,11 +387,18 @@ async def process_scout(
                 await page.wait_for_timeout(args.request_delay_ms)
 
     except Exception as exc:
-        result.errors.append(str(exc))
+        errors.append(str(exc))
     finally:
         await context.close()
 
-    return result
+    return ScoutResult(
+        name=name,
+        qr_url=scout.url,
+        attendee_id=attendee_id,
+        classes=tuple(classes),
+        requirements=tuple(requirements),
+        errors=tuple(errors),
+    )
 
 
 def _assert_blank_identity_results_have_no_records(results: Sequence[ScoutResult]) -> None:

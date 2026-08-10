@@ -73,7 +73,7 @@ async def test_process_scout_builds_records_without_browser(monkeypatch, tmp_pat
     result = await cli.process_scout(_browser(), scout, _args(), tmp_path)
     assert result.classes[0].class_name == "Chess"
     assert result.requirements[0].requirement_number == "#1"
-    assert result.errors == []
+    assert result.errors == ()
 
 
 async def test_failing_scout_accumulates_error(monkeypatch, tmp_path):

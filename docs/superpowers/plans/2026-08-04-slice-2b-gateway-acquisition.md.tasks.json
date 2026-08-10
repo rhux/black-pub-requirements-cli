@@ -11,7 +11,7 @@
     {
       "id": 1,
       "subject": "B4.2: HTTP requirement gateway, schema validation with HTML cleaning + redaction",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [0],
       "description": "**Goal:** Extract post_requirement behind fetch_requirements (full envelope), wire NET-WIRE-001, land ACQ-REQ-004 with real HTML-cleaning of descriptions and key-name redaction (not just truncation) in the schema-drift sample.\n\n**Files:**\n- Create: `src/scoutmb/adapters/scoutevent/http_gateway.py`, `src/scoutmb/adapters/scoutevent/schema.py`, `tests/parity/conftest.py`, `tests/integration/conftest.py`, `tests/unit/scoutevent/conftest.py`\n- Modify: `scout_schedule_cli.py`\n\n**Acceptance Criteria:**\n- [ ] Egress check before page.evaluate; returns FULL requirement envelope\n- [ ] Missing identity fields raise ScoutingEventSchemaDrift with a REDACTED (not just truncated) bounded sample\n- [ ] description field is clean_html_description-cleaned, not raw REQ_DESCR\n- [ ] Well-formed row round-trips correctly\n\n**Verify:** `uv run pytest tests/unit/scoutevent -q` → PASS\n\nPOST-CODEX FIX: added HTML cleaning (was silently dropped) and real key-name redaction (was truncation-only). See plan doc Task B4.2.\n\n```json:metadata\n{\"files\": [\"src/scoutmb/adapters/scoutevent/http_gateway.py\", \"src/scoutmb/adapters/scoutevent/schema.py\"], \"verifyCommand\": \"uv run pytest tests/unit/scoutevent -q\", \"acceptanceCriteria\": [\"egress check before evaluate\", \"full envelope returned\", \"schema drift redacts sensitive keys\", \"description HTML-cleaned\", \"well-formed row validates\"], \"modelTier\": \"standard\"}\n```",
       "activeForm": "Extracting HTTP requirement gateway with HTML cleaning"
@@ -19,7 +19,7 @@
     {
       "id": 2,
       "subject": "B5.1: Freeze ScoutResult, process_scout accumulates then constructs once",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "**Goal:** process_scout builds the frozen package ScoutResult directly; legacy class becomes a re-export. Pure mechanical restructuring, no behavior change.\n\n**Files:**\n- Modify: `scout_schedule_cli.py`\n- Test: `tests/unit/test_process_scout_frozen.py`\n\n**Acceptance Criteria:**\n- [ ] ScoutResult is the frozen package shape\n- [ ] process_scout accumulates locally, constructs once\n- [ ] No ACQ-* regression\n- [ ] dataclasses.replace works\n\n**Verify:** `uv run pytest tests/parity/test_models_parity.py tests/unit/test_process_scout_frozen.py tests/characterization/test_acquisition_matrix.py -q` → PASS\n\n```json:metadata\n{\"files\": [\"scout_schedule_cli.py\"], \"verifyCommand\": \"uv run pytest tests/parity/test_models_parity.py tests/unit/test_process_scout_frozen.py tests/characterization/test_acquisition_matrix.py -q\", \"acceptanceCriteria\": [\"frozen package shape\", \"accumulate then construct once\", \"no regression\", \"dataclasses.replace works\"], \"modelTier\": \"mechanical\"}\n```",
       "activeForm": "Freezing ScoutResult and rewriting process_scout"
