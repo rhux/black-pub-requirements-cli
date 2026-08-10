@@ -150,6 +150,23 @@ def scout_result_to_row(record: ScoutResult) -> dict[str, Any]:
     }
 
 
+def scout_result_from_row(data: Mapping[str, Any]) -> ScoutResult:
+    """Reverse of scout_result_to_row -- reconstructs a ScoutResult from its scouts.json-shaped
+    row. Used by the checkpoint store's completed_results (Task B5.3/B5.5): a resumed run
+    rebuilds each previously-completed scout's ScoutResult from what was saved, rather than
+    re-fetching it or silently dropping it from the resumed run's report."""
+    return ScoutResult(
+        name=_text(data.get("name")),
+        qr_url=_text(data.get("qr_url")),
+        attendee_id=_text(data.get("attendee_id")),
+        classes=tuple(class_from_mapping(row) for row in data.get("classes") or ()),
+        requirements=tuple(
+            requirement_from_mapping(row) for row in data.get("requirements") or ()
+        ),
+        errors=tuple(str(item) for item in data.get("errors") or ()),
+    )
+
+
 def json_for_html(value: Any) -> str:
     """Serialize JSON safely for embedding inside an HTML script element."""
     return (

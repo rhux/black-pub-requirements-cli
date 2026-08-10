@@ -113,6 +113,37 @@ def test_serializer_normalizes_tuples_to_lists() -> None:
     assert isinstance(row["errors"], list)
 
 
+def test_scout_result_from_row_reverses_scout_result_to_row() -> None:
+    from scoutmb.core.models import ScoutResult
+    from scoutmb.core.output_schemas import scout_result_from_row, scout_result_to_row
+
+    original = ScoutResult(
+        name="Avery Example",
+        qr_url="https://x.invalid",
+        attendee_id="A1",
+        classes=(
+            ClassRecord(
+                scout_name="Avery Example", attendee_id="A1", class_number="101",
+                class_p4_id="p4-1", class_name="Camping", days="Mon", period_name="AM",
+                start_time="9:00", start_time_24h="09:00", location="Hall",
+                has_requirements=True, class_completed=False, raw_class_name="Camping (raw)",
+            ),
+        ),
+        requirements=(
+            RequirementRecord(
+                scout_name="Avery Example", attendee_id="A1", class_number="101",
+                class_p4_id="p4-1", merit_badge_name="Camping", requirement_id="r1",
+                requirement_type_id="t1", requirement_number="1a", description="Do a thing",
+                completed_requirement=True, completed_class=False,
+                requirement_on_event=True, present_days="Mon,Tue",
+            ),
+        ),
+        errors=("Camping: requirement request failed: timeout",),
+    )
+    row = scout_result_to_row(original)
+    assert scout_result_from_row(row) == original
+
+
 def test_requirement_to_row_shareable_true_substitutes_output_id_in_place() -> None:
     """attendee_id is replaced BY output_id at the same index -- a deletion plus an insertion,
     never a reordering (Task 23)."""
