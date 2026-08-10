@@ -729,6 +729,7 @@ COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = (
             "src/scoutmb/core/inference/tree.py",
             "src/scoutmb/core/inference/status.py",
             "src/scoutmb/core/inference/missing.py",
+            "src/scoutmb/core/run_state.py",
         ),
     ),
     CoverageAreaSpec(
