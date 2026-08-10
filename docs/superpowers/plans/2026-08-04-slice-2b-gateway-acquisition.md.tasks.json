@@ -4,7 +4,7 @@
     {
       "id": 0,
       "subject": "B4.1: Playwright navigation gateway (schedule fetch), egress opt-in fixture",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Extract navigate_and_trigger_schedule behind a gateway calling assert_egress_allowed, landing NET-WIRE-002, preserving DOM name discovery and the full schedule envelope. Adds a scoped test-fixture opt-in so the egress check doesn't break every existing ACQ-* test (all of which use non-loopback scoutingevent.com URLs).\n\n**Files:**\n- Create: `src/scoutmb/ports/scoutevent.py`, `src/scoutmb/adapters/scoutevent/playwright_gateway.py`, `tests/characterization/conftest.py`\n- Modify: `scout_schedule_cli.py`\n- Test: `tests/unit/scoutevent/test_playwright_gateway.py`\n\n**Acceptance Criteria:**\n- [ ] Egress check runs before page.goto; blocked host raises ExternalNetworkBlocked and never navigates\n- [ ] ScheduleFetchResult carries the FULL envelope, attendee_id, and DOM-discovered display_name -- not stripped rows\n- [ ] Playwright imported only under TYPE_CHECKING in the adapter, never at runtime module scope\n- [ ] features/ports/core import zero Playwright symbols\n- [ ] All ACQ-* process/raw/asset contexts pass unmodified (via the new opt-in fixture)\n\n**Verify:** `uv run pytest tests/unit/scoutevent tests/parity/test_scoutevent_adapter_parity.py tests/characterization/test_acquisition_matrix.py tests/architecture -q` → PASS\n\nPOST-CODEX FIX: this task was rewritten after independent review found the egress check as originally designed would break every existing ACQ-* test, the loopback test had a real bug (shared stub raising unconditionally), and Playwright was imported unguarded at module scope. See plan doc Task B4.1 for the corrected implementation.\n\n```json:metadata\n{\"files\": [\"src/scoutmb/ports/scoutevent.py\", \"src/scoutmb/adapters/scoutevent/playwright_gateway.py\", \"tests/characterization/conftest.py\", \"scout_schedule_cli.py\"], \"verifyCommand\": \"uv run pytest tests/unit/scoutevent tests/parity/test_scoutevent_adapter_parity.py tests/characterization/test_acquisition_matrix.py tests/architecture -q\", \"acceptanceCriteria\": [\"egress check before navigation\", \"full envelope+name preserved\", \"TYPE_CHECKING-only Playwright import\", \"zero Playwright in features/ports/core\", \"existing ACQ-* tests unbroken\"], \"modelTier\": \"standard\"}\n```",
       "activeForm": "Extracting Playwright navigation gateway with egress fix"
     },
@@ -55,5 +55,5 @@
       "activeForm": "Composing run_batch with shared breaker, fail-closed checkpoint, and RunIdentity hydration"
     }
   ],
-  "lastUpdated": "2026-08-09T14:24:00Z"
+  "lastUpdated": "2026-08-10T13:15:00Z"
 }

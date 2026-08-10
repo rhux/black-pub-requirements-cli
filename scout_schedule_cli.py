@@ -252,38 +252,9 @@ async def navigate_and_trigger_schedule(page: Page, qr_url: str, timeout_seconds
 
 
 async def post_requirement(page: Page, attendee_id: str, class_p4_id: str) -> dict[str, Any]:
-    result = await page.evaluate(
-        """async ({url, attendeeId, classP4Id}) => {
-            const body = new URLSearchParams({
-                getClassRequirement: 'true',
-                classP4ID: classP4Id,
-                attendeeID: attendeeId,
-                TimeStamp: new Date().toString()
-            });
-            const response = await fetch(url, {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                    'X-Requested-With': 'XMLHttpRequest'
-                },
-                body: body.toString()
-            });
-            return {
-                ok: response.ok,
-                status: response.status,
-                text: await response.text()
-            };
-        }""",
-        {"url": AJAX_URL, "attendeeId": attendee_id, "classP4Id": class_p4_id},
-    )
-    if not result["ok"]:
-        raise RuntimeError(f"Requirement request returned HTTP {result['status']}")
-    try:
-        return json.loads(result["text"])
-    except json.JSONDecodeError as exc:
-        preview = result["text"][:300].replace("\n", " ")
-        raise RuntimeError(f"Requirement response was not JSON: {preview}") from exc
+    from scoutmb.adapters.scoutevent.http_gateway import fetch_requirement_payload
+
+    return await fetch_requirement_payload(page, attendee_id, class_p4_id)
 
 
 async def process_scout(
