@@ -21,6 +21,7 @@ pdf = ["PyMuPDF>=1.24,<2", "opencv-python-headless>=4.10,<5"]
 
 [project.scripts]
 troop349-pdf = "scoutmb.interfaces.cli.pdf:main"
+troop349-schedule = "scoutmb.interfaces.cli.schedule:main"
 troop349 = "scoutmb.interfaces.desktop.app:main"
 
 [dependency-groups]
@@ -39,6 +40,14 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/scoutmb"]
+# Explicit (not detected): an editable install's sys.path normally gets only "src" (derived
+# from `packages` above), which is all a real, fully-package-native install would ever need.
+# Task B9.2's troop349-schedule console script still delegates to the repo-root flat
+# scout_schedule_cli.py (no package-native replacement exists yet -- Slice 2b sub-plan 4's
+# job), so an editable install -- the only supported install mode for this tool, per CLAUDE.md's
+# git-clone-and-run setup -- also needs the repo root itself on sys.path for that import to
+# succeed when the console script is invoked from outside the repository.
+dev-mode-dirs = ["src", "."]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/scoutmb/py.typed" = "scoutmb/py.typed"
