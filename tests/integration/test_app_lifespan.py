@@ -24,10 +24,10 @@ def test_import_has_no_side_effects_in_a_poisoned_environment(tmp_path) -> None:
     poisoned_data_dir = tmp_path / "does-not-exist-and-must-stay-that-way"
     src_path = Path(__file__).resolve().parents[2] / "src"
     probe = (
-        "import sys; sys.path.insert(0, %r)\n"
+        f"import sys; sys.path.insert(0, {str(src_path)!r})\n"
         "import scoutmb.interfaces.web.app\n"
         "print('IMPORT_OK')\n"
-    ) % str(src_path)
+    )
     result = subprocess.run(
         [sys.executable, "-I", "-c", probe],
         env={"SCOUTMB_DATA_DIR": str(poisoned_data_dir)},

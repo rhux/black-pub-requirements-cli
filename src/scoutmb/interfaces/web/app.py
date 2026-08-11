@@ -14,8 +14,8 @@ gap; it is cheap and idempotent, so calling it twice (here and in the lifespan) 
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI
 
@@ -30,6 +30,8 @@ def create_app(settings: UiSettings) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = settings
         app.state.job_registry = JobSupervisor()
+        app.state.operations = {}
+        app.state.current_download = {}
         try:
             yield
         finally:
@@ -40,5 +42,9 @@ def create_app(settings: UiSettings) -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    from scoutmb.interfaces.web.routes import router
+
+    app.include_router(router)
 
     return app
