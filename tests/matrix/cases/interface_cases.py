@@ -743,7 +743,7 @@ INTERFACE_CASES_ROUTE: tuple[InterfaceCase, ...] = (
         ),
         method="POST",
         route="/api/runs/{run_id}/open-emails-folder",
-        expected_by_context={"route": InterfaceObservation(status=500, body=None)},
+        expected_by_context={"route": InterfaceObservation(status=200, body={"opened": True})},
     ),
     InterfaceCase(
         meta=_meta(
@@ -904,7 +904,7 @@ INTERFACE_CASES_ROUTE: tuple[InterfaceCase, ...] = (
         method="POST",
         route="/api/runs/{run_id}/open-report",
         expected_by_context={
-            "route": InterfaceObservation(status=200, body={"url_contains_unsanitized_value": True})
+            "route": InterfaceObservation(status=400, body={"webbrowser_open_called": False})
         },
     ),
 )

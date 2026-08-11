@@ -410,7 +410,8 @@ class LegacyInterfaceRunner:
             return True
 
         module.webbrowser.open = _record_open
-        self._write_summary(module, "2026-07-23_1200", {"html_report": "report.html"})
+        run_dir = self._write_summary(module, "2026-07-23_1200", {"html_report": "report.html"})
+        (run_dir / "report.html").write_text("<html></html>", encoding="utf-8")
         resp = await client.post("/api/runs/2026-07-23_1200/open-report")
         body = resp.json()
         assert opened, "webbrowser.open was never called"
@@ -465,10 +466,15 @@ class LegacyInterfaceRunner:
         return await _observe(resp)
 
     async def _route_UI_ROUTE_023(self, module, client) -> InterfaceObservation:
+        opened_paths: list[str] = []
+        self.monkeypatch.setattr(module, "open_folder", lambda path: opened_paths.append(str(path)))
         run_dir = module.RUNS_DIR / "2026-07-23_1200"
         (run_dir / "emails").mkdir(parents=True)
         resp = await client.post("/api/runs/2026-07-23_1200/open-emails-folder")
-        return await _observe(resp)
+        assert opened_paths, "open_folder was never called"
+        return InterfaceObservation(
+            status=resp.status_code, body={"opened": resp.json().get("opened")}
+        )
 
     async def _route_UI_ROUTE_024(self, module, client) -> InterfaceObservation:
         self.monkeypatch.setattr(
@@ -585,10 +591,8 @@ class LegacyInterfaceRunner:
         module.webbrowser.open = _record_open
         self._write_summary(module, "2026-07-23_1200", {"html_report": "../../elsewhere/evil.html"})
         resp = await client.post("/api/runs/2026-07-23_1200/open-report")
-        assert opened, "webbrowser.open was never called"
         return InterfaceObservation(
-            status=resp.status_code,
-            body={"url_contains_unsanitized_value": "../../elsewhere/evil.html" in opened[0]},
+            status=resp.status_code, body={"webbrowser_open_called": bool(opened)}
         )
 
     # -- sse-frame / sse-clean (bespoke per case_id, over the SseCase catalog) ------------------

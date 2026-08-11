@@ -12,6 +12,7 @@ import asyncio
 import csv
 import json
 import os
+import subprocess
 import sys
 import time
 import webbrowser
@@ -62,6 +63,33 @@ def _safe_run_id(run_id: str) -> Path:
     if run_dir.resolve().parent != RUNS_DIR.resolve():
         raise HTTPException(400, "Invalid run id")
     return run_dir
+
+
+def open_folder(path: Path) -> None:
+    """Cross-platform 'reveal in file manager'. A module-level function (not inlined into the
+    route) so tests can monkeypatch it instead of launching a real GUI window -- see
+    tests/characterization/test_interface_matrix.py's UI-ROUTE-023 runner, which does exactly
+    that, the same way UI-ROUTE-018 already monkeypatches module-level webbrowser.open."""
+    if sys.platform == "win32":
+        os.startfile(str(path))  # noqa: S606 - local-only app, user-triggered
+    elif sys.platform == "darwin":
+        subprocess.run(["open", str(path)], check=False)
+    else:
+        subprocess.run(["xdg-open", str(path)], check=False)
+
+
+def _safe_report_path(run_dir: Path, html_report: str) -> Path | None:
+    """None if html_report is not a bare filename resolving inside run_dir -- never lets an
+    unvalidated persisted string reach webbrowser.open (UI-ROUTE-030)."""
+    candidate = Path(html_report)
+    if not html_report or candidate.name != html_report:
+        return None  # rejects any path separator, ".."  segment, or absolute path
+    resolved = (run_dir / html_report).resolve()
+    if resolved.parent != run_dir.resolve():
+        return None
+    if not resolved.is_file():
+        return None
+    return resolved
 
 
 def read_scouts_rows() -> list[dict[str, str]]:
@@ -121,7 +149,8 @@ async def start_pdf_extract(files: list[UploadFile] = File(...)) -> JSONResponse
 
     if PDF_UPLOADS_DIR.exists():
         for stale in PDF_UPLOADS_DIR.iterdir():
-            stale.unlink()
+            if stale.is_file():
+                stale.unlink()
     else:
         PDF_UPLOADS_DIR.mkdir(parents=True)
 
@@ -302,10 +331,15 @@ async def open_report(run_id: str, request: Request) -> dict[str, Any]:
     summary_path = run_dir / "summary.json"
     if not summary_path.exists():
         raise HTTPException(404, "Run not found")
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(400, "This run's summary.json is corrupt")
     report_name = summary.get("html_report")
     if not report_name:
         raise HTTPException(404, "This run has no HTML report")
+    if _safe_report_path(run_dir, report_name) is None:
+        raise HTTPException(400, "This run's recorded report filename is invalid")
     url = f"{request.base_url}runs/{run_id}/{report_name}"
     webbrowser.open(url)
     return {"opened": True, "url": url}
@@ -340,7 +374,12 @@ async def open_emails_folder(run_id: str) -> dict[str, Any]:
     emails_dir = run_dir / "emails"
     if not emails_dir.exists():
         raise HTTPException(404, "Emails have not been generated yet for this run")
-    os.startfile(str(emails_dir))  # noqa: S606 - local-only app, user-triggered
+    # open_folder does a blocking subprocess.run/os.startfile call -- awaiting it directly in
+    # this async route would block the event loop (and every other in-flight request) for
+    # however long the OS takes to launch a file-manager window. asyncio.to_thread keeps the
+    # route itself non-blocking; the monkeypatch in _route_UI_ROUTE_023 still applies, since
+    # asyncio.to_thread resolves `open_folder` as a plain module-global lookup at call time.
+    await asyncio.to_thread(open_folder, emails_dir)
     return {"opened": True}
 
 
