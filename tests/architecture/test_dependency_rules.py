@@ -415,11 +415,11 @@ def _shape_check_offenders(path: Path) -> list[str]:
 
 # Task 24, step 5: once a legacy flat module becomes pure delegation to the package, its
 # coverage floor proves nothing (every line is a forwarding import/call), so it gets a shape
-# check here instead. `scout_schedule_cli.py` is NOT pure delegation at the end of Slice 2a --
-# acquisition still lives there -- so this stays empty until 2b; the parametrization exists so
-# the machinery is armed the moment a module qualifies, per this plan's "Deferred to Slice 2b"
-# section.
-SHIMMED_MODULES: tuple[str, ...] = ("pdf_to_scouts.py", "scout_schedule_cli.py")
+# check here instead. Both flat modules (pdf_to_scouts.py, scout_schedule_cli.py) armed this
+# check in turn during Slice 2b B10.1/B10.4, then were deleted outright once nothing referenced
+# them anymore -- there is currently nothing left to shape-check, but the mechanism (and this
+# empty parametrization) stays in place for any future flat-module-to-package migration.
+SHIMMED_MODULES: tuple[str, ...] = ()
 
 
 @pytest.mark.parametrize("relative", SHIMMED_MODULES)

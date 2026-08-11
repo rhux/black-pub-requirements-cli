@@ -1,13 +1,17 @@
-"""The console script must be argv-identical to the flat script it replaces, and must work
-from an installed wheel with no repository present.
+"""The console script must work from an installed wheel with no repository present.
 
 Executed as SUBPROCESSES: calling main() in-process skips the generated wrapper, the
 sys.argv[0] the parser sees, and the exit-code path -- most of what could actually differ.
+
+Slice 2b B10.4: retired pdf_to_scouts.py, so this file's original "argv-identical to the flat
+script it replaces" comparison (test_pdf_console_script_usage_matches_flat_script) no longer has
+anything to compare against -- deleted, not migrated. The package-only tests below (proving the
+installed console script genuinely works, and that the package never imports the flat module)
+are unaffected and stay.
 """
 
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -15,21 +19,6 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _normalize_usage(text: str) -> str:
-    """Collapse whitespace runs to a single space, then blank out the prog name.
-
-    argparse wraps the usage synopsis to fit the terminal width, and the wrap points shift with
-    prog's length. Task 18 review finding #3 replaced a single hardcoded prog= (which happened
-    to make both invocations wrap identically, masking that pdf_to_scouts.py showed the wrong
-    name) with one derived from actual invocation -- so troop349-pdf (12 chars) and
-    pdf_to_scouts.py (16 chars) now legitimately wrap the same synopsis at different points. The
-    wrapped CONTENT is identical either way, only the line breaks/indentation differ, so
-    whitespace is not part of what this test enforces -- only the sequence of words is.
-    """
-    collapsed = re.sub(r"\s+", " ", text)
-    return re.sub(r"(usage:\s*)\S+", r"\1PROG", collapsed).strip()
 
 
 @pytest.fixture(scope="module")
@@ -53,24 +42,6 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
         capture_output=True,
     )
     return python.parent
-
-
-def test_pdf_console_script_usage_matches_flat_script(installed: Path, tmp_path: Path) -> None:
-    legacy = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "pdf_to_scouts.py"), "--help"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    package = subprocess.run(
-        [str(installed / "troop349-pdf"), "--help"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    assert package.returncode == legacy.returncode
-    assert _normalize_usage(package.stdout) == _normalize_usage(legacy.stdout)
-    assert _normalize_usage(package.stderr) == _normalize_usage(legacy.stderr)
 
 
 def test_pdf_console_script_runs_with_no_repository_present(
