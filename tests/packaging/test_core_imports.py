@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "src"
 HEAVY = ("cv2", "fitz", "playwright")
@@ -141,6 +143,7 @@ sys.stdout.write(json.dumps(out))
     assert "scoutmb[pdf]" in payload["message"]
 
 
+@pytest.mark.matrix_case(case_id="PDF-QR-001", context_id="extract", lane="default")
 def test_decode_embedded_qr_success_path_decodes_the_embedded_image(tmp_path: Path) -> None:
     """The failure-path test above proves CapabilityUnavailable; this proves the happy path
     actually works end-to-end through the guarded public entry point, not just that it fails

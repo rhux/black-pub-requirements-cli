@@ -218,6 +218,7 @@ def test_write_outputs_partial_multi_file_failure_stops_later_siblings(tmp_path,
     assert (out / "summary.json").exists() is False
 
 
+@pytest.mark.matrix_case(case_id="PDF-SCHEMA-001", context_id="schema", lane="default")
 def test_write_attendees_csv_header_unchanged_after_atomic_routing(tmp_path):
     import csv
 

@@ -13,6 +13,7 @@ from scoutmb.config import ScheduleConfig
 from scoutmb.interfaces.cli.schedule import parse_args
 
 
+@pytest.mark.matrix_case(case_id="CLI-SCHED-001", context_id="defaults", lane="default")
 def test_parse_args_defaults_equal_scheduleconfig_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["troop349-schedule", "--input", "scouts.csv"])
     parsed = parse_args()
