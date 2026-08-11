@@ -81,6 +81,7 @@ from scoutmb.core.models import ScoutResult  # noqa: F401 - legacy public surfac
 
 
 from scoutmb.config import ScheduleConfig
+from scoutmb.interfaces.cli.schedule import main  # noqa: F401 - legacy public surface
 
 # Sourced once, here: every non-required argparse default below reads this instance rather than
 # repeating a literal, so ScheduleConfig's own field defaults are the single source of truth
@@ -178,6 +179,15 @@ def parse_args() -> ScheduleConfig:
             "only needed for bare command-line runs (default: off)."
         ),
     )
+    parser.add_argument(
+        "--breaker-threshold",
+        type=int,
+        default=_DEFAULTS.breaker_threshold,
+        help=(
+            "Consecutive scout-fetch failures before the acquisition circuit breaker opens "
+            f"and the batch stops (default: {_DEFAULTS.breaker_threshold})."
+        ),
+    )
     args = parser.parse_args()
     return ScheduleConfig(
         input=args.input,
@@ -193,6 +203,7 @@ def parse_args() -> ScheduleConfig:
         no_html=args.no_html,
         html_name=args.html_name,
         email_report=args.email_report,
+        breaker_threshold=args.breaker_threshold,
     )
 
 
@@ -277,150 +288,25 @@ async def process_scout(
     raw_dir: Path,
     run_identity: RunIdentity | None = None,
 ) -> ScoutResult:
+    from scoutmb.adapters.files.atomic import AtomicFileSink
+    from scoutmb.adapters.scoutevent.playwright_gateway import PlaywrightScoutingEventGateway
+    from scoutmb.features.acquisition.retry import RetryPolicy
+    from scoutmb.features.acquisition.service import AcquisitionConfig, AcquisitionService
+    from scoutmb.ports.clock import MonotonicSleeper, SeededJitter
+
     run_identity = run_identity or RunIdentity()
-    context: BrowserContext = await browser.new_context(ignore_https_errors=True)
-
-    if not config.allow_dead_assets:
-        async def block_dead_assets(route: Any) -> None:
-            try:
-                hostname = re.sub(r"^https?://", "", route.request.url).split("/", 1)[0].split(":", 1)[0]
-                if hostname in DEAD_ASSET_HOSTS:
-                    await route.abort()
-                else:
-                    await route.continue_()
-            except Exception:
-                await route.continue_()
-        await context.route("**/*", block_dead_assets)
-
-    page = await context.new_page()
-    page.set_default_timeout(config.timeout * 1000)
-    page.on("pageerror", lambda error: print(f"    browser JS error: {error}", file=sys.stderr))
-
-    name = scout.name or "Unknown Scout"
-    attendee_id = ""
-    classes: list[ClassRecord] = []
-    requirements: list[RequirementRecord] = []
-    errors: list[str] = []
-
-    try:
-        schedule_response = await navigate_and_trigger_schedule(page, scout.url, config.timeout)
-        request_values = form_values(schedule_response.request.post_data)
-        attendee_id = request_values.get("attendeeID", "")
-        if not attendee_id:
-            raise RuntimeError("The schedule request did not contain attendeeID")
-
-        name = await discover_name(page, scout.name)
-
-        schedule_payload = await schedule_response.json()
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        output_id = run_identity.output_id(AttendeeId.parse(attendee_id, name))
-        slug = attendee_filename_stem(name, output_id)
-        (raw_dir / f"{slug}-schedule.json").write_text(
-            json.dumps(schedule_payload, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-
-        if int(schedule_payload.get("status", {}).get("status", 0)) != 1:
-            raise RuntimeError(f"Schedule API returned failure: {schedule_payload.get('status')}")
-
-        schedule_rows = schedule_payload.get("data") or []
-        deduped_rows: dict[str, dict[str, Any]] = {}
-        order: list[str] = []
-        for item in schedule_rows:
-            key = str(item.get("classP4ID") or "")
-            if not key:
-                key = f"__no_id_{len(order)}"  # no ID to dedupe on; treat as its own class
-                deduped_rows[key] = item
-                order.append(key)
-            elif key not in deduped_rows:
-                deduped_rows[key] = item
-                order.append(key)
-            elif truthy(item.get("CLASS_COMPLETED")) and not truthy(deduped_rows[key].get("CLASS_COMPLETED")):
-                deduped_rows[key] = item  # prefer the completed duplicate — status should not regress
-        schedule_rows = [deduped_rows[key] for key in order]
-
-        for item in schedule_rows:
-            raw_class_name = str(item.get("CLASS_NAME") or "")
-            class_record = ClassRecord(
-                scout_name=name,
-                attendee_id=attendee_id,
-                class_number=str(item.get("CLASS_NBR") or ""),
-                class_p4_id=str(item.get("classP4ID") or ""),
-                class_name=str(item.get("CLASS_NAME_ONLY") or ""),
-                days=days_from_class_name(raw_class_name),
-                period_name=str(item.get("PERIOD_NAME") or ""),
-                start_time=str(item.get("CLASS_STIME") or ""),
-                start_time_24h=str(item.get("STIME") or ""),
-                location=str(item.get("LOCATION_ROOM_NAME") or ""),
-                has_requirements=truthy(item.get("HAS_REQ")),
-                class_completed=truthy(item.get("CLASS_COMPLETED")),
-                raw_class_name=raw_class_name,
-            )
-            classes.append(class_record)
-
-            if not class_record.class_p4_id:
-                continue
-
-            requirement_payload: dict[str, Any] | None = None
-            last_error: Exception | None = None
-            for attempt in range(1, 4):
-                try:
-                    requirement_payload = await post_requirement(
-                        page, attendee_id, class_record.class_p4_id
-                    )
-                    break
-                except Exception as exc:
-                    last_error = exc
-                    await page.wait_for_timeout(500 * attempt)
-
-            if requirement_payload is None:
-                errors.append(f"{class_record.class_name}: requirement request failed: {last_error}")
-                continue
-
-            (raw_dir / f"{slug}-{safe_slug(class_record.class_number or class_record.class_p4_id)}-requirements.json").write_text(
-                json.dumps(requirement_payload, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
-
-            if int(requirement_payload.get("status", {}).get("status", 0)) != 1:
-                errors.append(
-                    f"{class_record.class_name}: requirement API returned failure: "
-                    f"{requirement_payload.get('status')}"
-                )
-                continue
-
-            for req in requirement_payload.get("data") or []:
-                requirements.append(
-                    RequirementRecord(
-                        scout_name=name,
-                        attendee_id=attendee_id,
-                        class_number=class_record.class_number,
-                        class_p4_id=class_record.class_p4_id,
-                        merit_badge_name=str(req.get("MERIT_BADGE_NAME") or ""),
-                        requirement_id=str(req.get("MDM_LKP_BADGE_REQ_ID") or ""),
-                        requirement_type_id=str(req.get("MDM_LKP_BADGE_REQ_TYPE_ID") or ""),
-                        requirement_number=str(req.get("REQ_NBR_WEB_DISPLAY") or req.get("REQ_NBR") or ""),
-                        description=clean_html_description(str(req.get("REQ_DESCR") or "")),
-                        completed_requirement=truthy(req.get("COMPLETED_REQ_FLAG")),
-                        completed_class=truthy(req.get("COMPLETED_CLASS_FLAG")),
-                        requirement_on_event=truthy(req.get("REQ_ON_EVENT")),
-                        present_days=str(req.get("PRESENT_DAYS") or "").strip(),
-                    )
-                )
-
-            if config.request_delay_ms > 0:
-                await page.wait_for_timeout(config.request_delay_ms)
-
-    except Exception as exc:
-        errors.append(str(exc))
-    finally:
-        await context.close()
-
-    return ScoutResult(
-        name=name,
-        qr_url=scout.url,
-        attendee_id=attendee_id,
-        classes=tuple(classes),
-        requirements=tuple(requirements),
-        errors=tuple(errors),
+    gateway = PlaywrightScoutingEventGateway(browser, allow_dead_assets=config.allow_dead_assets)
+    retry_policy = RetryPolicy(
+        sleeper=MonotonicSleeper(), jitter=SeededJitter(), breaker_threshold=config.breaker_threshold
+    )
+    service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
+    return await service.process(
+        scout=scout,
+        config=AcquisitionConfig(
+            timeout_seconds=config.timeout, request_delay_ms=config.request_delay_ms
+        ),
+        raw_dir=raw_dir,
+        run_identity=run_identity,
     )
 
 
@@ -779,88 +665,9 @@ async def async_main(
     progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     resume_event: asyncio.Event | None = None,
 ) -> int:
-    scouts = load_inputs(config.input, config.sheet, config.include_adults)
-    config.output.mkdir(parents=True, exist_ok=True)
-    raw_dir = config.output / "raw"
+    from scoutmb.interfaces.cli.schedule import run
 
-    print(f"Loaded {len(scouts)} attendee QR link(s).")
-    if progress_callback is not None:
-        await progress_callback({"type": "batch_start", "total": len(scouts)})
-    results: list[ScoutResult] = []
-
-    run_identity = RunIdentity()
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(
-            headless=not config.headed, channel=config.channel or None
-        )
-        try:
-            for index, scout in enumerate(scouts, start=1):
-                if resume_event is not None and not resume_event.is_set():
-                    if progress_callback is not None:
-                        await progress_callback({"type": "paused", "index": index, "total": len(scouts)})
-                    await resume_event.wait()
-                    if progress_callback is not None:
-                        await progress_callback({"type": "resumed", "index": index, "total": len(scouts)})
-
-                label = scout.name or scout.url
-                print(f"[{index}/{len(scouts)}] {label}")
-                if progress_callback is not None:
-                    await progress_callback(
-                        {"type": "scout_start", "index": index, "total": len(scouts), "name": label}
-                    )
-                result = await process_scout(browser, scout, config, raw_dir, run_identity)
-                results.append(result)
-                print(
-                    f"    attendeeID={result.attendee_id or 'unknown'}, "
-                    f"classes={len(result.classes)}, requirements={len(result.requirements)}, "
-                    f"errors={len(result.errors)}"
-                )
-                if progress_callback is not None:
-                    await progress_callback(
-                        {
-                            "type": "scout_done",
-                            "index": index,
-                            "total": len(scouts),
-                            "name": label,
-                            "attendee_id": result.attendee_id,
-                            "classes": len(result.classes),
-                            "requirements": len(result.requirements),
-                            "errors": len(result.errors),
-                        }
-                    )
-                if index < len(scouts):
-                    delay_seconds = (
-                        random.uniform(0.5, 2.0)
-                        if config.scout_delay_ms is None
-                        else config.scout_delay_ms / 1000
-                    )
-                    if delay_seconds > 0:
-                        await asyncio.sleep(delay_seconds)
-        finally:
-            await browser.close()
-
-    write_outputs(
-        config.output,
-        results,
-        generate_html=not config.no_html,
-        html_name=config.html_name,
-        generate_email_report=config.email_report,
-        run_identity=run_identity,
-    )
-    print(f"Results written to: {config.output.resolve()}")
-    return 1 if any(result.errors for result in results) else 0
-
-
-def main() -> int:
-    config = parse_args()
-    try:
-        return asyncio.run(async_main(config))
-    except KeyboardInterrupt:
-        print("Interrupted.", file=sys.stderr)
-        return 130
-    except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+    return await run(config, progress_callback=progress_callback, resume_event=resume_event)
 
 
 if __name__ == "__main__":

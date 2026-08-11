@@ -666,9 +666,8 @@ _HASREQ_CASES: tuple[AcquisitionCase, ...] = (
             "ACQ-HASREQ",
             "has-req-0",
             "process",
-            "HAS_REQ=0 does NOT skip the requirement fetch: process_scout only gates on a "
-            "non-blank classP4ID (line 573), never on HAS_REQ, so a requirement request is "
-            "still issued for a class the schedule marked as having none.",
+            "HAS_REQ=0 now skips the requirement fetch entirely, instead of the legacy "
+            "behavior of issuing it regardless and relying on the response to be empty.",
             "scout_schedule_cli.process_scout lines 567,573-582 -- has_requirements is stored "
             "on ClassRecord but never read before the requirement fetch",
             classification=Classification.INTENTIONAL_CHANGE,
@@ -678,15 +677,11 @@ _HASREQ_CASES: tuple[AcquisitionCase, ...] = (
         ),
         NAME_A,
         URL_A,
-        (
-            _sched(ATTENDEE_A, _schedule_payload((_class_row(CLASS_A, has_req="0"),))),
-            _req(ATTENDEE_A, CLASS_A, _requirement_payload((_req_row(),))),
-        ),
+        (_sched(ATTENDEE_A, _schedule_payload((_class_row(CLASS_A, has_req="0"),))),),
         AcquisitionObservation(
             result=(
                 ("attendee_id", ATTENDEE_A),
                 ("class", "26MB1", CLASS_A, False, False),
-                ("req", CLASS_A, "#1", False),
             )
         ),
     ),
@@ -787,9 +782,9 @@ _REQ_CASES: tuple[AcquisitionCase, ...] = (
             "ACQ-REQ",
             "missing-fields",
             "process",
-            "A requirement row missing every optional field is silently coerced to blank "
-            "strings and false flags (str(x.get(k) or '') / truthy(None) is False) rather than "
-            "being rejected.",
+            "A requirement row missing every optional field is now validated against a schema "
+            "and flagged as a row-level error, instead of the legacy silent coercion to blank "
+            "strings and false flags (str(x.get(k) or '') / truthy(None) is False).",
             "scout_schedule_cli.process_scout lines 605-622 str(...or '') / truthy(...) coercion",
             classification=Classification.INTENTIONAL_CHANGE,
             target_owner="Slice 2",
@@ -811,7 +806,11 @@ _REQ_CASES: tuple[AcquisitionCase, ...] = (
             result=(
                 ("attendee_id", ATTENDEE_A),
                 ("class", "26MB1", CLASS_A, True, False),
-                ("req", CLASS_A, "", False),
+                (
+                    "error",
+                    "Chess: requirement_row is missing required field(s) requirement_id, "
+                    "requirement_number: {'MERIT_BADGE_NAME': 'Chess'}",
+                ),
             )
         ),
     ),

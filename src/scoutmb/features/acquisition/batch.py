@@ -18,9 +18,11 @@ after the first scout happens to finish."""
 
 from __future__ import annotations
 
+import asyncio
 import random
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from scoutmb.core.identity import RunIdentity
 from scoutmb.core.models import ScoutInput, ScoutResult
@@ -28,6 +30,9 @@ from scoutmb.core.output_schemas import scout_result_from_row, scout_result_to_r
 from scoutmb.features.acquisition.retry import RetryPolicy
 from scoutmb.features.acquisition.service import AcquisitionConfig, AcquisitionService
 from scoutmb.ports.checkpoint_store import CHECKPOINT_VERSION, Checkpoint, CheckpointStore
+
+if TYPE_CHECKING:
+    from scoutmb.core.run_state import RunStateMachine
 
 
 async def run_batch(
@@ -40,6 +45,9 @@ async def run_batch(
     config: AcquisitionConfig,
     raw_dir: Path,
     scout_delay_ms: int | None = None,
+    progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    resume_event: asyncio.Event | None = None,
+    run_state: RunStateMachine | None = None,
 ) -> list[ScoutResult]:
     checkpoint = checkpoint_store.load()
     if checkpoint is None:
@@ -61,6 +69,7 @@ async def run_batch(
     ]
 
     total = len(scouts)
+    was_paused = False
     for index, scout in enumerate(scouts, start=1):
         # Requires BOTH: a checkpoint written by this exact code always adds a URL to
         # completed_urls and completed_results in the same atomic step (below), so for a
@@ -75,8 +84,29 @@ async def run_batch(
         if scout.url in completed_urls and scout.url in completed_results:
             continue
 
+        if resume_event is not None and not resume_event.is_set():
+            if run_state is not None and not was_paused:
+                from scoutmb.core.run_state import RunEvent
+
+                run_state.apply(RunEvent.PAUSE)
+                was_paused = True
+            if progress_callback is not None:
+                await progress_callback({"type": "paused", "index": index, "total": total})
+            await resume_event.wait()
+            if run_state is not None and was_paused:
+                from scoutmb.core.run_state import RunEvent
+
+                run_state.apply(RunEvent.RESUME)
+                was_paused = False
+            if progress_callback is not None:
+                await progress_callback({"type": "resumed", "index": index, "total": total})
+
         label = scout.name or scout.url
         print(f"[{index}/{total}] {label}")
+        if progress_callback is not None:
+            await progress_callback(
+                {"type": "scout_start", "index": index, "total": total, "name": label}
+            )
 
         retry_policy.check_closed()  # raises BreakerOpen before opening a session for this scout
         result = await service.process(
@@ -88,6 +118,16 @@ async def run_batch(
             f"classes={len(result.classes)}, requirements={len(result.requirements)}, "
             f"errors={len(result.errors)}"
         )
+
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "type": "scout_done", "index": index, "total": total,
+                    "name": label, "attendee_id": result.attendee_id,
+                    "classes": len(result.classes), "requirements": len(result.requirements),
+                    "errors": len(result.errors),
+                }
+            )
 
         if result.errors:
             retry_policy.record_failure()

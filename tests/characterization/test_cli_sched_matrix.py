@@ -1,83 +1,65 @@
 """Typed matrix execution of scout_schedule_cli.py's CLI-entry catalog (Task 21 continuation).
 
-Drives the REAL ``scout_schedule_cli.main()`` / ``parse_args()``. The three members that must
-reach ``async_main``'s body (empty-success, one-scout-success, partial-failure) narrowly
-monkeypatch ``cli.async_playwright`` to a fake context manager yielding a Task-19
-``StrictFakeBrowser`` -- never a real Chromium process -- plus the same
-``navigate_and_trigger_schedule``/``discover_name``/``post_requirement`` monkeypatches
-``test_process_scout.py`` already established. The two exception-wrapper members
-(top-level-exception, keyboard-interrupt) monkeypatch ``cli.async_main`` itself, so nothing
-below it ever runs.
+Drives the REAL ``scout_schedule_cli.main()`` (a pure re-export of
+``scoutmb.interfaces.cli.schedule.main``, B10.2) / ``parse_args()``. B10.2 moved all acquisition
+orchestration into the package: ``async_main`` no longer opens its own browser or drives
+``navigate_and_trigger_schedule``/``discover_name``/``post_requirement`` directly, and ``main()``
+no longer calls ``async_main`` at all -- it calls ``scoutmb.interfaces.cli.schedule.run()``
+directly. The three members that must reach real acquisition logic (empty-success,
+one-scout-success, partial-failure) now monkeypatch
+``scoutmb.interfaces.cli.composition.build_launched_browser`` -- the function's SOURCE module,
+looked up fresh by ``run()``'s own function-local import every call -- to yield a Task-19
+``StrictFakeBrowser`` scripted exactly like ``test_acquisition_matrix.py``'s ``ACQ-SCHED-*``
+cases (the same real gateway/service drives both, proven parity-equivalent by
+``tests/parity/test_acquisition_parity.py``). The two exception-wrapper members
+(top-level-exception, keyboard-interrupt) monkeypatch ``scoutmb.interfaces.cli.schedule.run``
+itself -- the function ``main()`` actually calls -- so nothing below it ever runs.
 """
 
 from __future__ import annotations
 
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import scout_schedule_cli as cli
 from tests.fakes.acquisition import StrictScript
 from tests.fakes.browser import StrictFakeBrowser
 from tests.fakes.clock import FakeClock
+from tests.matrix.cases.acquisition_cases import (
+    _class_row,
+    _req,
+    _req_row,
+    _requirement_payload,
+    _sched,
+    _schedule_payload,
+)
 from tests.matrix.cases.cli_cases import CLI_CASES, CliCase, CliObservation
 from tests.matrix.pytest_support import execution_params
 
 _CSV_HEADER = "Attendee Name,Registrant Type,QR Code Contents\r\n"
+_ATTENDEE_A = "90000001"
+_ATTENDEE_B = "90000002"
+_CLASS_A = "2000001"
+_CLASS_B = "2000002"
 
 
-class _FakePlaywrightCM:
-    """Stands in for ``async_playwright()``'s real context manager (Task 21 continuation).
+def _patch_launched_browser(monkeypatch: pytest.MonkeyPatch, browser: StrictFakeBrowser) -> None:
+    """Patches build_launched_browser at its SOURCE module (composition.py) -- run()'s own
+    function-local `from scoutmb.interfaces.cli.composition import (..., build_launched_browser,
+    ...)` looks this attribute up fresh every call, so patching it here, before invoking main(),
+    is picked up correctly. Patching `scoutmb.interfaces.cli.schedule.build_launched_browser`
+    would NOT work: that name is never bound at schedule.py's module level, only as a local
+    inside run()'s own function scope after it has already been called."""
 
-    Implements only ``__aenter__``/``__aexit__`` and the single ``chromium.launch(...)`` call
-    ``async_main`` makes on the object it yields -- never a real Chromium subprocess.
-    """
+    @asynccontextmanager
+    async def fake_launched_browser(*, headed: bool, channel: str | None):
+        yield browser
 
-    def __init__(self, browser: StrictFakeBrowser) -> None:
-        self._browser = browser
-
-    async def __aenter__(self) -> SimpleNamespace:
-        async def _launch(**kwargs: object) -> StrictFakeBrowser:
-            return self._browser
-
-        return SimpleNamespace(chromium=SimpleNamespace(launch=_launch))
-
-    async def __aexit__(self, *exc_info: object) -> bool:
-        return False
-
-
-def _patch_playwright(monkeypatch: pytest.MonkeyPatch) -> None:
-    browser = StrictFakeBrowser(StrictScript(()), FakeClock())
-    monkeypatch.setattr(cli, "async_playwright", lambda: _FakePlaywrightCM(browser))
-
-
-async def _ok_nav(page: object, url: str, timeout: int) -> object:
-    from tests.factories.payloads import schedule_payload
-
-    class _Req:
-        def __init__(self, post_data: str) -> None:
-            self.post_data = post_data
-
-    class _Resp:
-        def __init__(self, payload: object, post_data: str) -> None:
-            self._payload = payload
-            self.request = _Req(post_data)
-
-        async def json(self) -> object:
-            return self._payload
-
-    return _Resp(schedule_payload(), "attendeeID=90000001")
-
-
-async def _ok_name(page: object, fallback: str) -> str:
-    return fallback
-
-
-async def _ok_post(page: object, attendee_id: str, class_id: str) -> object:
-    from tests.factories.payloads import requirement_payload
-
-    return requirement_payload()
+    monkeypatch.setattr(
+        "scoutmb.interfaces.cli.composition.build_launched_browser", fake_launched_browser
+    )
 
 
 def _run_main(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> tuple[int, str]:
@@ -153,10 +135,14 @@ class CliRunner:
     def _ctx_CLI_SCHED_003(
         self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> object:
-        monkeypatch.setattr(cli, "navigate_and_trigger_schedule", _ok_nav)
-        monkeypatch.setattr(cli, "discover_name", _ok_name)
-        monkeypatch.setattr(cli, "post_requirement", _ok_post)
-        _patch_playwright(monkeypatch)
+        script = StrictScript(
+            (
+                _sched(_ATTENDEE_A, _schedule_payload((_class_row(_CLASS_A),))),
+                _req(_ATTENDEE_A, _CLASS_A, _requirement_payload((_req_row(),))),
+            )
+        )
+        browser = StrictFakeBrowser(script, FakeClock())
+        _patch_launched_browser(monkeypatch, browser)
         input_csv = root / "scouts.csv"
         _write_csv(
             input_csv,
@@ -182,15 +168,19 @@ class CliRunner:
     def _ctx_CLI_SCHED_004(
         self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> object:
-        async def flaky_nav(page: object, url: str, timeout: int) -> object:
-            if "bad" in url:
-                raise RuntimeError("schedule exploded")
-            return await _ok_nav(page, url, timeout)
-
-        monkeypatch.setattr(cli, "navigate_and_trigger_schedule", flaky_nav)
-        monkeypatch.setattr(cli, "discover_name", _ok_name)
-        monkeypatch.setattr(cli, "post_requirement", _ok_post)
-        _patch_playwright(monkeypatch)
+        # Avery's schedule+requirement round trip succeeds; Bo's schedule payload carries a
+        # failure status (status.status != 1) -- the real gateway turns that into a per-scout
+        # error the same way ACQ-SCHED-004 already characterizes, never a raised exception that
+        # would stop the batch.
+        script = StrictScript(
+            (
+                _sched(_ATTENDEE_A, _schedule_payload((_class_row(_CLASS_A),))),
+                _req(_ATTENDEE_A, _CLASS_A, _requirement_payload((_req_row(),))),
+                _sched(_ATTENDEE_B, _schedule_payload((_class_row(_CLASS_B),), status=0)),
+            )
+        )
+        browser = StrictFakeBrowser(script, FakeClock())
+        _patch_launched_browser(monkeypatch, browser)
         input_csv = root / "scouts.csv"
         _write_csv(
             input_csv,
@@ -221,10 +211,10 @@ class CliRunner:
     def _ctx_CLI_SCHED_005(
         self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> object:
-        async def boom(args: object, **kwargs: object) -> int:
+        async def boom(config: object, **kwargs: object) -> int:
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(cli, "async_main", boom)
+        monkeypatch.setattr("scoutmb.interfaces.cli.schedule.run", boom)
         input_csv = root / "scouts.csv"
         _write_csv(input_csv, [])
         code, stderr = _run_main(monkeypatch, ["--input", str(input_csv)])
@@ -234,10 +224,10 @@ class CliRunner:
     def _ctx_CLI_SCHED_006(
         self, case: CliCase, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> object:
-        async def interrupt(args: object, **kwargs: object) -> int:
+        async def interrupt(config: object, **kwargs: object) -> int:
             raise KeyboardInterrupt()
 
-        monkeypatch.setattr(cli, "async_main", interrupt)
+        monkeypatch.setattr("scoutmb.interfaces.cli.schedule.run", interrupt)
         input_csv = root / "scouts.csv"
         _write_csv(input_csv, [])
         code, stderr = _run_main(monkeypatch, ["--input", str(input_csv)])

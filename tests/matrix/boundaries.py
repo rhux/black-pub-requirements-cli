@@ -766,6 +766,7 @@ COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = (
             "src/scoutmb/features/acquisition/retry.py",
             "src/scoutmb/features/acquisition/service.py",
             "src/scoutmb/features/acquisition/batch.py",
+            "src/scoutmb/features/acquisition/pipeline.py",
         ),
     ),
 )

@@ -35,6 +35,9 @@ class ScheduleConfig:
     no_html: bool = False
     html_name: str = "report.html"
     email_report: bool = False
+    # Consecutive scout-fetch failures before the acquisition circuit breaker opens (D22/B10.2)
+    # -- the legacy CLI had no breaker at all, so there is no prior value to preserve.
+    breaker_threshold: int = 5
 
 
 def _platform_data_root() -> Path:
@@ -56,7 +59,7 @@ class UiSettings:
     data_root: Path
 
     @classmethod
-    def resolve(cls, data_root: Path | None = None, dev_mode: bool = False) -> "UiSettings":
+    def resolve(cls, data_root: Path | None = None, dev_mode: bool = False) -> UiSettings:
         if data_root is not None:
             return cls(Path(data_root))
         env = os.environ.get(DATA_DIR_ENV)

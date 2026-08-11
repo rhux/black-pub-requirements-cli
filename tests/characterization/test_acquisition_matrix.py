@@ -9,6 +9,16 @@ call ``form_values`` / ``is_schedule_response`` / ``RunIdentity.output_id`` dire
 browser at all. ``NET-POLICY-*`` cases exercise the real, EXISTING
 ``scoutmb.network_policy.assert_egress_allowed`` boundary.
 
+B10.2: ``process_scout`` is now a thin shim delegating to ``AcquisitionService.process()``, whose
+retry backoff sleeps via an injected ``Sleeper``/``Jitter`` pair (``retry_policy.sleeper.sleep``),
+never ``page.wait_for_timeout`` -- the mechanism the OLD inline retry loop used and that this
+file's ``StrictFakeBrowser`` script originally characterized. ``_run_process`` below
+class-level-patches ``scoutmb.ports.clock.MonotonicSleeper.sleep``/``SeededJitter.jitter`` (the
+exact concrete classes the shim constructs internally) to route through the SAME
+``script``/``clock`` the page-level fakes already use, and zero out jitter -- reproducing the
+legacy loop's exact 500ms*attempt, un-jittered timing so every already-scripted ``_wait(...)``
+entry keeps meaning what it always meant, without any change to the case catalog itself.
+
 No test writes outside ``tmp_path`` and no test performs real network I/O: the strict fakes never
 open a socket, and the offline pytest-socket policy in ``tests/conftest.py`` would block one
 regardless.
@@ -21,6 +31,7 @@ import asyncio
 import dataclasses
 import re
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from tests.fakes.acquisition import FormResponseStub, StrictScript
@@ -46,6 +57,7 @@ def _args(**overrides: object) -> argparse.Namespace:
             "allow_dead_assets": False,
             "headed": False,
             "channel": None,
+            "breaker_threshold": 5,
             **overrides,
         }
     )
@@ -126,6 +138,8 @@ class LegacyAcquisitionRunner:
     async def _run_process(self, case: AcquisitionCase, root: Path):
         import scout_schedule_cli as legacy
 
+        from scoutmb.ports.clock import MonotonicSleeper, SeededJitter
+
         script = StrictScript(case.script)
         clock = FakeClock()
         browser = StrictFakeBrowser(script, clock)
@@ -137,7 +151,22 @@ class LegacyAcquisitionRunner:
             allow_dead_assets=case.allow_dead_assets,
             timeout=case.timeout_seconds,
         )
-        result = await legacy.process_scout(browser, scout, args, raw_dir, run_identity)
+
+        async def fake_sleep(self_sleeper: object, seconds: float) -> None:
+            # Mirrors StrictFakePage.wait_for_timeout exactly -- the shim's retry backoff sleeps
+            # via MonotonicSleeper.sleep, never page.wait_for_timeout, so this routes it through
+            # the SAME script/clock the page-level fakes already use.
+            milliseconds = round(seconds * 1000)
+            clock.record(milliseconds)
+            response = script.next_wait(milliseconds)
+            if response.error_type is not None:
+                raise response.error_type(response.error_message)
+
+        with (
+            patch.object(MonotonicSleeper, "sleep", fake_sleep),
+            patch.object(SeededJitter, "jitter", lambda self_jitter, low, high: 0.0),
+        ):
+            result = await legacy.process_scout(browser, scout, args, raw_dir, run_identity)
         return result, browser.contexts[0], script, clock
 
     def _ctx_process(self, case: AcquisitionCase, root: Path) -> AcquisitionObservation:
