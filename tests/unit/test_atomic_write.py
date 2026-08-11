@@ -34,6 +34,7 @@ def test_failure_during_replace_preserves_original(tmp_path, monkeypatch):
     assert list(tmp_path.glob("*.tmp")) == []  # temp cleaned up
 
 
+@pytest.mark.matrix_case(case_id="PDF-SCHEMA-001", context_id="schema", lane="default")
 def test_write_attendees_csv_header_unchanged_after_atomic_routing(tmp_path):
     import csv
 

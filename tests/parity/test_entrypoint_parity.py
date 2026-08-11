@@ -31,6 +31,7 @@ def test_desktop_entrypoint_is_installed() -> None:
     assert "--browser" in result.stdout
 
 
+@pytest.mark.matrix_case(case_id="CLI-SCHED-006", context_id="run", lane="default")
 def test_keyboard_interrupt_maps_to_130(monkeypatch: pytest.MonkeyPatch) -> None:
     """KeyboardInterrupt -> 130 is a UNIT test against main() in-process, not a subprocess:
     reliably delivering a real SIGINT to a subprocess mid-run requires it to be blocked on
