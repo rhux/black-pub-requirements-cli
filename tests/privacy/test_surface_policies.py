@@ -137,7 +137,7 @@ def test_priv_surface_input_private_scouts_csv_allows_only_its_three_fields(
     (CLAUDE.md: "Output CSV columns Attendee Name / Registrant Type / QR Code Contents are the
     exact contract scout_schedule_cli.py expects") -- an absolute filesystem path appearing
     elsewhere on the parsed PDF page, or carried on an audit-only field, never leaks into it."""
-    import pdf_to_scouts
+    from scoutmb.adapters.pdf.pages import value_after_label
 
     lines = [
         SENTINEL_ABSOLUTE_PATH,  # incidental PDF page text; must never be captured as a value
@@ -146,14 +146,17 @@ def test_priv_surface_input_private_scouts_csv_allows_only_its_three_fields(
         "Registrant",
         "Youth",
     ]
-    attendee_name = pdf_to_scouts.value_after_label(lines, "Attendee Information")
-    registrant_type = pdf_to_scouts.value_after_label(lines, "Registrant")
+    attendee_name = value_after_label(lines, "Attendee Information")
+    registrant_type = value_after_label(lines, "Registrant")
     assert attendee_name == "Avery Example"
     assert registrant_type == "Youth"
     assert SENTINEL_ABSOLUTE_PATH not in attendee_name
     assert SENTINEL_ABSOLUTE_PATH not in registrant_type
 
-    attendee = pdf_to_scouts.ExtractedAttendee(
+    from scoutmb.core.models import ExtractedAttendee
+    from scoutmb.features.ingest.pdf_extract import write_attendees_csv
+
+    attendee = ExtractedAttendee(
         attendee_name=attendee_name,
         name_as_printed=attendee_name,
         registrant_type=registrant_type,
@@ -163,7 +166,7 @@ def test_priv_surface_input_private_scouts_csv_allows_only_its_three_fields(
         qr_decode_method="embedded",
     )
     csv_path = tmp_path / "scouts.csv"
-    pdf_to_scouts.write_attendees_csv(csv_path, [attendee])
+    write_attendees_csv(csv_path, [attendee])
     text = csv_path.read_text(encoding="utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
     rows = list(reader)
@@ -184,11 +187,11 @@ def test_priv_surface_input_private_scouts_csv_allows_only_its_three_fields(
 def test_priv_surface_operational_private_forbids_upstream_id_and_session(tmp_path: Path) -> None:
     """PRIV-SURFACE operational-private: raw/-style filenames never carry the bearer attendee_id
     or a session identifier -- only the slug + run-UUID + class-number-slug fields."""
-    import scout_schedule_cli as legacy
+    from scoutmb.core.identity import AttendeeId, RunIdentity, attendee_filename_stem
 
-    run_identity = legacy.RunIdentity()
-    output_id = run_identity.output_id(legacy.AttendeeId.parse(SENTINEL_UPSTREAM_ID))
-    stem = legacy.attendee_filename_stem("Avery Example", output_id)
+    run_identity = RunIdentity()
+    output_id = run_identity.output_id(AttendeeId.parse(SENTINEL_UPSTREAM_ID))
+    stem = attendee_filename_stem("Avery Example", output_id)
     assert SENTINEL_UPSTREAM_ID not in stem
     assert SENTINEL_SESSION_ID not in stem
 
@@ -205,10 +208,10 @@ def test_priv_surface_adapter_private_allows_upstream_id_by_design(tmp_path: Pat
 def test_priv_surface_adapter_private_forbids_absolute_path(tmp_path: Path) -> None:
     """PRIV-SURFACE adapter-private forbidden: even though the upstream ID is allowed, an
     absolute host filesystem path must never appear in raw/ audit JSON content."""
-    import scout_schedule_cli as legacy
+    from scoutmb.adapters.files.atomic import atomic_write_text
 
     payload = {"attendeeID": SENTINEL_UPSTREAM_ID, "status": {"status": 1}, "data": []}
-    legacy.atomic_write_text(
+    atomic_write_text(
         tmp_path / "raw-schedule.json", __import__("json").dumps(payload), encoding="utf-8"
     )
     text = (tmp_path / "raw-schedule.json").read_text(encoding="utf-8-sig")
@@ -222,7 +225,7 @@ def test_priv_surface_audience_shareable_email_never_carries_upstream_identity(
     scout_name + badge-group entries (requirement_number/description/is_prereq/depth) -- there
     is no attendee_id, session, payload-fragment, or absolute-path field anywhere on that call
     path, so none of those sentinels can appear in the rendered email."""
-    import scout_schedule_cli as legacy
+    from scoutmb.features.reporting import service as reporting_service
 
     badge_groups = {
         "Chess": [
@@ -235,8 +238,8 @@ def test_priv_surface_audience_shareable_email_never_carries_upstream_identity(
             }
         ]
     }
-    text = legacy.render_email_text("Avery Example", badge_groups)
-    html_body = legacy.render_email_html("Avery Example", badge_groups)
+    text = reporting_service._render_email_text("Avery Example", badge_groups)
+    html_body = reporting_service._render_email_html("Avery Example", badge_groups)
     for sentinel in (
         SENTINEL_UPSTREAM_ID,
         SENTINEL_QR_TOKEN,
@@ -251,7 +254,7 @@ def test_priv_surface_audience_shareable_email_never_carries_upstream_identity(
 def test_priv_surface_audience_shareable_allows_scout_name_and_requirement_fields() -> None:
     """PRIV-SURFACE audience-shareable allowed: scout_name/merit_badge_name/requirement_number/
     description are the intended content of a rendered email."""
-    import scout_schedule_cli as legacy
+    from scoutmb.features.reporting import service as reporting_service
 
     badge_groups = {
         "Chess": [
@@ -264,7 +267,7 @@ def test_priv_surface_audience_shareable_allows_scout_name_and_requirement_field
             }
         ]
     }
-    text = legacy.render_email_text("Avery Example", badge_groups)
+    text = reporting_service._render_email_text("Avery Example", badge_groups)
     assert "Avery Example" in text
     assert "Chess" in text
     assert "#1a" in text
@@ -313,20 +316,22 @@ def _requirement_row(**overrides: object) -> dict[str, object]:
 
 @pytest.mark.matrix_case(case_id="PRIV-EGRESS-001", context_id="privacy", lane="default")
 def test_priv_egress_filename(tmp_path: Path) -> None:
-    import scout_schedule_cli as legacy
+    from scoutmb.core.identity import AttendeeId, RunIdentity, attendee_filename_stem
 
-    run_identity = legacy.RunIdentity()
-    output_id = run_identity.output_id(legacy.AttendeeId.parse("90000001"))
-    stem = legacy.attendee_filename_stem("Avery Example", output_id)
+    run_identity = RunIdentity()
+    output_id = run_identity.output_id(AttendeeId.parse("90000001"))
+    stem = attendee_filename_stem("Avery Example", output_id)
     assert SENTINEL_SESSION_ID not in stem
     assert SENTINEL_ABSOLUTE_PATH not in stem
 
 
 @pytest.mark.matrix_case(case_id="PRIV-EGRESS-002", context_id="privacy", lane="default")
 def test_priv_egress_json(tmp_path: Path) -> None:
-    import scout_schedule_cli as legacy
+    from scoutmb.core.identity import RunIdentity
+    from scoutmb.core.models import ScoutResult
+    from scoutmb.interfaces.cli.composition import build_reporting_service
 
-    result = legacy.ScoutResult(
+    result = ScoutResult(
         name="Avery Example",
         qr_url="https://scoutingevent.com/mobile/checkin?t=TESTTOKEN_X",
         attendee_id="90000001",
@@ -334,7 +339,14 @@ def test_priv_egress_json(tmp_path: Path) -> None:
         requirements=[],
         errors=[],
     )
-    legacy.write_outputs(tmp_path, [result], generate_html=False)
+    build_reporting_service().publish(
+        tmp_path,
+        [result],
+        generated_at_local="2026-01-01 00:00:00",
+        generated_at_iso="2026-01-01T00:00:00",
+        run_identity=RunIdentity(),
+        generate_html=False,
+    )
     text = (tmp_path / "scouts.json").read_text(encoding="utf-8")
     assert SENTINEL_SESSION_ID not in text
     assert SENTINEL_ABSOLUTE_PATH not in text
@@ -342,11 +354,12 @@ def test_priv_egress_json(tmp_path: Path) -> None:
 
 @pytest.mark.matrix_case(case_id="PRIV-EGRESS-003", context_id="privacy", lane="default")
 def test_priv_egress_csv(tmp_path: Path) -> None:
-    import scout_schedule_cli as legacy
+    from scoutmb.adapters.files.atomic import write_csv
+    from scoutmb.core.models import RequirementRecord
 
-    record = legacy.RequirementRecord(**_requirement_row())
-    legacy.write_csv(
-        tmp_path / "requirements.csv", [record], list(legacy.RequirementRecord.__dataclass_fields__)
+    record = RequirementRecord(**_requirement_row())
+    write_csv(
+        tmp_path / "requirements.csv", [record], list(RequirementRecord.__dataclass_fields__)
     )
     text = (tmp_path / "requirements.csv").read_text(encoding="utf-8-sig")
     assert SENTINEL_SESSION_ID not in text
@@ -355,9 +368,11 @@ def test_priv_egress_csv(tmp_path: Path) -> None:
 
 @pytest.mark.matrix_case(case_id="PRIV-EGRESS-004", context_id="privacy", lane="default")
 def test_priv_egress_html(tmp_path: Path) -> None:
-    import scout_schedule_cli as legacy
+    from scoutmb.core.identity import RunIdentity
+    from scoutmb.core.models import ScoutResult
+    from scoutmb.interfaces.cli.composition import build_reporting_service
 
-    result = legacy.ScoutResult(
+    result = ScoutResult(
         name="Avery Example",
         qr_url="https://scoutingevent.com/mobile/checkin?t=TESTTOKEN_X",
         attendee_id="90000001",
@@ -365,7 +380,14 @@ def test_priv_egress_html(tmp_path: Path) -> None:
         requirements=[],
         errors=[],
     )
-    legacy.write_outputs(tmp_path, [result], generate_html=True)
+    build_reporting_service().publish(
+        tmp_path,
+        [result],
+        generated_at_local="2026-01-01 00:00:00",
+        generated_at_iso="2026-01-01T00:00:00",
+        run_identity=RunIdentity(),
+        generate_html=True,
+    )
     text = (tmp_path / "report.html").read_text(encoding="utf-8")
     assert SENTINEL_SESSION_ID not in text
     assert SENTINEL_ABSOLUTE_PATH not in text
@@ -373,7 +395,8 @@ def test_priv_egress_html(tmp_path: Path) -> None:
 
 @pytest.mark.matrix_case(case_id="PRIV-EGRESS-005", context_id="privacy", lane="default")
 def test_priv_egress_email(tmp_path: Path) -> None:
-    import scout_schedule_cli as legacy
+    from scoutmb.core.identity import RunIdentity
+    from scoutmb.interfaces.cli.composition import build_reporting_service
 
     nested = [
         {
@@ -384,7 +407,7 @@ def test_priv_egress_email(tmp_path: Path) -> None:
             "errors": [],
         }
     ]
-    legacy.write_email_reports(tmp_path, nested)
+    build_reporting_service()._write_email_reports(tmp_path, nested, run_identity=RunIdentity())
     for path in (tmp_path / "emails").rglob("*"):
         if path.is_file():
             text = path.read_text(encoding="utf-8-sig")
@@ -394,9 +417,9 @@ def test_priv_egress_email(tmp_path: Path) -> None:
 
 @pytest.mark.matrix_case(case_id="PRIV-EGRESS-006", context_id="privacy", lane="default")
 def test_priv_egress_stdout(capsys: pytest.CaptureFixture[str]) -> None:
-    import scout_schedule_cli as legacy
+    from scoutmb.core.output_schemas import json_for_html
 
-    legacy.json_for_html({"requirements": [_requirement_row()]})
+    json_for_html({"requirements": [_requirement_row()]})
     captured = capsys.readouterr()
     assert SENTINEL_SESSION_ID not in captured.out
     assert SENTINEL_ABSOLUTE_PATH not in captured.out
@@ -404,9 +427,9 @@ def test_priv_egress_stdout(capsys: pytest.CaptureFixture[str]) -> None:
 
 @pytest.mark.matrix_case(case_id="PRIV-EGRESS-007", context_id="privacy", lane="default")
 def test_priv_egress_stderr(capsys: pytest.CaptureFixture[str]) -> None:
-    import scout_schedule_cli as legacy
+    from scoutmb.features.reporting import service as reporting_service
 
-    legacy.annotate_requirement_statuses([_requirement_row()])
+    reporting_service._annotate_requirement_statuses([_requirement_row()])
     captured = capsys.readouterr()
     assert SENTINEL_SESSION_ID not in captured.err
     assert SENTINEL_ABSOLUTE_PATH not in captured.err
@@ -414,7 +437,7 @@ def test_priv_egress_stderr(capsys: pytest.CaptureFixture[str]) -> None:
 
 @pytest.mark.matrix_case(case_id="PRIV-EGRESS-008", context_id="privacy", lane="default")
 def test_priv_egress_api_error(tmp_path: Path) -> None:
-    import scout_schedule_cli as legacy
+    from scoutmb.adapters.files.atomic import atomic_write_text
 
     error_writer_input = [
         {
@@ -430,7 +453,7 @@ def test_priv_egress_api_error(tmp_path: Path) -> None:
     writer = csv.DictWriter(buffer, fieldnames=["scout_name", "attendee_id", "error"])
     writer.writeheader()
     writer.writerows(error_writer_input)
-    legacy.atomic_write_text(tmp_path / "errors.csv", buffer.getvalue())
+    atomic_write_text(tmp_path / "errors.csv", buffer.getvalue())
     text = (tmp_path / "errors.csv").read_text(encoding="utf-8-sig")
     assert SENTINEL_SESSION_ID not in text
     assert SENTINEL_ABSOLUTE_PATH not in text
@@ -438,13 +461,12 @@ def test_priv_egress_api_error(tmp_path: Path) -> None:
 
 @pytest.mark.matrix_case(case_id="PRIV-EGRESS-009", context_id="privacy", lane="default")
 def test_priv_egress_sse() -> None:
-    """The local web UI (ui/server.py) is Task 21's ("interfaces") territory; here we only
-    prove the sentinel strings are absent from its committed source, as a proxy for "no SSE
-    event payload is built from a literal secret constant"."""
-    server_path = _REPO_ROOT / "ui" / "server.py"
-    if not server_path.exists():
-        pytest.skip("ui/server.py not present in this checkout")
-    text = server_path.read_text(encoding="utf-8")
+    """The local web UI is scoutmb.interfaces.web.app's territory (ui/server.py, Task 21's
+    original home for this, was retired in Slice 2b B10.3); here we only prove the sentinel
+    strings are absent from its committed source, as a proxy for "no SSE event payload is built
+    from a literal secret constant"."""
+    app_path = _REPO_ROOT / "src" / "scoutmb" / "interfaces" / "web" / "app.py"
+    text = app_path.read_text(encoding="utf-8")
     assert SENTINEL_SESSION_ID not in text
     assert SENTINEL_ABSOLUTE_PATH not in text
 
@@ -492,16 +514,17 @@ def test_priv_contain_adapter_file_stays_in_root(tmp_path: Path) -> None:
     """PRIV-CONTAIN-001: an adapter-private (raw/) file, written through the real
     attendee_filename_stem + atomic_write_text path, resolves strictly inside its selected
     output root."""
-    import scout_schedule_cli as legacy
+    from scoutmb.adapters.files.atomic import atomic_write_text
+    from scoutmb.core.identity import AttendeeId, RunIdentity, attendee_filename_stem
 
     output_root = tmp_path / "run-output"
     raw_dir = output_root / "raw"
-    run_identity = legacy.RunIdentity()
-    output_id = run_identity.output_id(legacy.AttendeeId.parse("90000001"))
-    stem = legacy.attendee_filename_stem("Avery Example", output_id)
+    run_identity = RunIdentity()
+    output_id = run_identity.output_id(AttendeeId.parse("90000001"))
+    stem = attendee_filename_stem("Avery Example", output_id)
     raw_dir.mkdir(parents=True)
     target = raw_dir / f"{stem}-schedule.json"
-    legacy.atomic_write_text(target, "{}", encoding="utf-8")
+    atomic_write_text(target, "{}", encoding="utf-8")
     assert target.resolve().is_relative_to(output_root.resolve())
 
 

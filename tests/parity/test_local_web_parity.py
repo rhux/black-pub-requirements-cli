@@ -195,9 +195,7 @@ async def test_pdf_extract_rejects_concurrent_run(
 
 async def test_schedule_download_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        routes_module.scout_schedule_cli,
-        "async_main",
-        _fake_schedule_async_main(summary_extra={"scouts_processed": 1}),
+        routes_module, "run_schedule", _fake_schedule_async_main(summary_extra={"scouts_processed": 1})
     )
     async with _client_for(tmp_path) as (client, settings):
         settings.scouts_csv.write_text(_SCOUTS_CSV_BODY, encoding="utf-8-sig")
@@ -214,9 +212,7 @@ async def test_schedule_download_success(tmp_path: Path, monkeypatch: pytest.Mon
 
 async def test_schedule_download_worker_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        routes_module.scout_schedule_cli,
-        "async_main",
-        _fake_schedule_async_main(raise_message="boom-schedule"),
+        routes_module, "run_schedule", _fake_schedule_async_main(raise_message="boom-schedule")
     )
     async with _client_for(tmp_path) as (client, settings):
         settings.scouts_csv.write_text(_SCOUTS_CSV_BODY, encoding="utf-8-sig")
@@ -273,9 +269,7 @@ async def test_schedule_download_busy_rejects_a_second_start(
 ) -> None:
     release = asyncio.Event()
     monkeypatch.setattr(
-        routes_module.scout_schedule_cli,
-        "async_main",
-        _fake_schedule_async_main_blocks_until_released(release),
+        routes_module, "run_schedule", _fake_schedule_async_main_blocks_until_released(release)
     )
     async with _client_for(tmp_path) as (client, settings):
         settings.scouts_csv.write_text(_SCOUTS_CSV_BODY, encoding="utf-8-sig")
@@ -293,9 +287,7 @@ async def test_pause_while_active_returns_paused_true(
 ) -> None:
     release = asyncio.Event()
     monkeypatch.setattr(
-        routes_module.scout_schedule_cli,
-        "async_main",
-        _fake_schedule_async_main_blocks_until_released(release),
+        routes_module, "run_schedule", _fake_schedule_async_main_blocks_until_released(release)
     )
     async with _client_for(tmp_path) as (client, settings):
         settings.scouts_csv.write_text(_SCOUTS_CSV_BODY, encoding="utf-8-sig")
@@ -314,9 +306,7 @@ async def test_resume_while_active_returns_paused_false(
 ) -> None:
     release = asyncio.Event()
     monkeypatch.setattr(
-        routes_module.scout_schedule_cli,
-        "async_main",
-        _fake_schedule_async_main_blocks_until_released(release),
+        routes_module, "run_schedule", _fake_schedule_async_main_blocks_until_released(release)
     )
     async with _client_for(tmp_path) as (client, settings):
         settings.scouts_csv.write_text(_SCOUTS_CSV_BODY, encoding="utf-8-sig")

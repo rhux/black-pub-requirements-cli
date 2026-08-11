@@ -2,27 +2,16 @@
 (scoutmb.interfaces.web.composition is the sole adapter-importing module in this package,
 enforced by the architecture test). Registered onto the app by create_app().
 
-pdf-extract uses scoutmb.interfaces.cli.pdf.main -- the real, package-native implementation
-pdf_to_scouts.main is now just a compatibility shim re-exporting (same function object,
-confirmed by reading pdf_to_scouts.py's own docstring) -- never the flat pdf_to_scouts module
-itself, which tests/compat/test_legacy_entrypoints.py's test_package_never_imports_the_flat_pdf_module
-bans anywhere under src/scoutmb.
-
-schedule-download still delegates to the top-level scout_schedule_cli module, exactly as
-ui/server.py does -- its package-native replacement doesn't exist yet (Slice 2b sub-plan 4's
-job; sub-plan 1 built AcquisitionService as an additive, parity-tested unit, not yet the thing
-async_main calls). scout_schedule_cli is not part of the scoutmb.* layered package, so importing
-it here does not create a cross-layer edge the architecture test tracks. State that ui/server.py
-keeps in module globals (busy/operations/current_download) is kept in app.state instead, with
-"is a job currently running" tracked via app.state.job_registry (a JobSupervisor) rather than a
-bare busy dict.
-
-No sys.path/__file__ bootstrap here (tests/architecture bans both anywhere in src/scoutmb) --
-scout_schedule_cli imports successfully because the process that runs this module already has
-the repo root on sys.path (pytest's own rootdir insertion during tests; ui/server.py's explicit
-insertion in production). A troop349-schedule console-script run from outside the repo, with
-neither of those already true, is out of scope for this sub-plan -- resolved when sub-plan 4
-retires the flat script in favor of a fully package-native equivalent."""
+pdf-extract and schedule-download both now use package-native entry points --
+scoutmb.interfaces.cli.pdf.main and scoutmb.interfaces.cli.schedule.run respectively -- never the
+flat pdf_to_scouts/scout_schedule_cli modules, which Slice 2b B10.4 retires entirely and which
+tests/architecture bans importing anywhere under src/scoutmb. generate-emails uses
+ReportingService._write_email_reports (composition.build_reporting_service) in place of the
+retired scout_schedule_cli.write_email_reports, minting its own fresh RunIdentity exactly as the
+legacy function's own `run_identity or RunIdentity()` default did when this route called it
+without one. State that ui/server.py (also retired) kept in module globals (busy/operations/
+current_download) is kept in app.state instead, with "is a job currently running" tracked via
+app.state.job_registry (a JobSupervisor) rather than a bare busy dict."""
 
 from __future__ import annotations
 
@@ -39,12 +28,14 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import scout_schedule_cli
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from scoutmb.config import ScheduleConfig, UiSettings
+from scoutmb.core.identity import RunIdentity
 from scoutmb.interfaces.cli import pdf as pdf_cli
+from scoutmb.interfaces.cli.schedule import run as run_schedule
+from scoutmb.interfaces.web.composition import build_reporting_service
 
 router = APIRouter()
 
@@ -234,7 +225,7 @@ async def start_schedule_download(request: Request) -> JSONResponse:
                 channel=browser_channel,
                 email_report=False,
             )
-            await scout_schedule_cli.async_main(
+            await run_schedule(
                 config, progress_callback=on_progress, resume_event=resume_event
             )
             summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
@@ -355,7 +346,12 @@ async def generate_emails(run_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(404, "Run not found or has no scouts.json")
     scouts = json.loads(scouts_json.read_text(encoding="utf-8"))
 
-    await asyncio.to_thread(scout_schedule_cli.write_email_reports, run_dir, scouts)
+    await asyncio.to_thread(
+        build_reporting_service()._write_email_reports,
+        run_dir,
+        scouts,
+        run_identity=RunIdentity(),
+    )
 
     with (run_dir / "emails" / "missing_requirements.csv").open(
         "r", encoding="utf-8-sig", newline=""

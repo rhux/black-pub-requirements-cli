@@ -89,6 +89,36 @@ def _assert_blank_identity_has_no_records(results: Sequence[ScoutResult]) -> Non
             )
 
 
+def _assert_blank_identity_scouts_have_no_records(scouts: list[dict[str, Any]]) -> None:
+    """Fail loudly if a blank-identity scout dict carries class/requirement data.
+
+    Dict-shape sibling of `_assert_blank_identity_has_no_records`, for the nested `scouts.json`
+    shape ({name, attendee_id, classes, requirements, errors}) `_build_missing_requirements`
+    consumes. This is the guard that closes the live gap `_assert_blank_identity_has_no_records`
+    (called only from `publish`) cannot: `scoutmb.interfaces.web.routes.generate_emails` calls
+    `_write_email_reports` directly with scouts loaded straight off disk from a prior run's
+    scouts.json (possibly written by pre-fix code, or hand-edited), never going through
+    `publish` and so never hitting that guard. Without this check, `_attendee_key_for`'s
+    name-based fallback would silently merge two same-named blank-identity scouts' requirement
+    data with no exception and no warning. Mirrors scout_schedule_cli's retired
+    _assert_blank_identity_scouts_have_no_records exactly.
+    """
+    for scout in scouts:
+        attendee_id = str(scout.get("attendee_id") or "").strip()
+        if attendee_id:
+            continue
+        classes = scout.get("classes") or []
+        requirements = scout.get("requirements") or []
+        if classes or requirements:
+            raise AssertionError(
+                f"Scout {scout.get('name')!r} has a blank attendee_id but "
+                f"{len(classes)} class record(s) and {len(requirements)} requirement "
+                "record(s). _attendee_key_for's name-based fallback would group this with any "
+                "other blank-identity scout sharing the same name, silently merging their "
+                "data -- refusing to build missing-requirement groupings instead."
+            )
+
+
 def _resolve_output_id(attendee_id: str, scout_name: str, run_identity: RunIdentity) -> str | None:
     """None for an attempt that failed before identity resolution (process_scout can build a
     ScoutResult with attendee_id == "" before ever reading it); never a placeholder string."""
@@ -153,6 +183,7 @@ def _clean_html_description(value: str) -> str:
 
 def _build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Mirrors scout_schedule_cli.build_missing_requirements exactly."""
+    _assert_blank_identity_scouts_have_no_records(scouts)
     flattened = [dict(req) for scout in scouts for req in scout.get("requirements", [])]
     annotated = _annotate_requirement_statuses(flattened)
     return group_missing_requirements(

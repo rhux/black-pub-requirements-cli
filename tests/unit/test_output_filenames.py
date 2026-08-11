@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import scout_schedule_cli as cli
-from scoutmb.core.identity import attendee_filename_stem
+from scoutmb.core.identity import RunIdentity, attendee_filename_stem
+from scoutmb.core.models import ScoutInput
+from scoutmb.interfaces.cli.composition import build_reporting_service
 from tests.factories.records import make_requirement
 
 
@@ -39,42 +40,52 @@ def test_email_reports_do_not_collide_for_same_named_attendees(tmp_path):
             ],
         }
 
-    cli.write_email_reports(tmp_path, [scout("90000001", "r1"), scout("90000002", "r2")])
+    build_reporting_service()._write_email_reports(
+        tmp_path, [scout("90000001", "r1"), scout("90000002", "r2")], run_identity=RunIdentity()
+    )
     txt = sorted((tmp_path / "emails").glob("avery-archer-*.txt"))
     # Two same-named attendees -> two distinct email files, not one overwritten file.
     assert len(txt) == 2 and txt[0].name != txt[1].name
 
 
-def test_process_scout_raw_filenames_are_distinct_for_same_named(monkeypatch, tmp_path):
-    """The raw side (inside process_scout) must also not collide. Reuses the Task 19 strict fakes."""
+def test_process_scout_raw_filenames_are_distinct_for_same_named(tmp_path):
+    """The raw side (inside AcquisitionService.process) must also not collide. Migrated off
+    scout_schedule_cli.process_scout's old 4-positional-arg call onto AcquisitionService's real
+    keyword-only API."""
     import asyncio
 
-    from tests.characterization.test_process_scout import _Resp
-    from tests.factories.payloads import requirement_payload, schedule_payload
     from tests.fakes.acquisition import StrictScript
     from tests.fakes.browser import StrictFakeBrowser
     from tests.fakes.clock import FakeClock
+    from tests.matrix.cases.acquisition_cases import ExpectedRequest, ScriptedResponse
 
-    async def name(page, fb):
-        return fb
+    from scoutmb.adapters.files.atomic import AtomicFileSink
+    from scoutmb.adapters.scoutevent.playwright_gateway import PlaywrightScoutingEventGateway
+    from scoutmb.features.acquisition.retry import RetryPolicy
+    from scoutmb.features.acquisition.service import AcquisitionConfig, AcquisitionService
+    from scoutmb.ports.clock import MonotonicSleeper, SeededJitter
 
-    async def post(page, aid, cpid):
-        return requirement_payload()
-
-    monkeypatch.setattr(cli, "discover_name", name)
-    monkeypatch.setattr(cli, "post_requirement", post)
-
-    async def run(attendee_id):
-        async def nav(page, url, t):
-            return _Resp(schedule_payload(), post_data=f"attendeeID={attendee_id}")
-
-        monkeypatch.setattr(cli, "navigate_and_trigger_schedule", nav)
-        scout = cli.ScoutInput(name="Avery Archer", url="https://example.invalid/?t=TESTTOKEN0001")
-        args = __import__("argparse").Namespace(
-            timeout=45, request_delay_ms=0, allow_dead_assets=True, headed=False, channel=None
+    async def run(attendee_id: str) -> None:
+        script = StrictScript(
+            (
+                (
+                    ExpectedRequest("schedule", attendee_id),
+                    ScriptedResponse(value={"status": {"status": 1}, "data": []}),
+                ),
+            )
         )
-        browser = StrictFakeBrowser(StrictScript(()), FakeClock())
-        await cli.process_scout(browser, scout, args, tmp_path)
+        browser = StrictFakeBrowser(script, FakeClock())
+        gateway = PlaywrightScoutingEventGateway(browser, allow_dead_assets=True)  # type: ignore[arg-type]
+        retry_policy = RetryPolicy(sleeper=MonotonicSleeper(), jitter=SeededJitter(), breaker_threshold=99)
+        service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
+        scout = ScoutInput(name="Avery Archer", url="https://127.0.0.1/mobile/x?t=TESTTOKEN0001")
+        await service.process(
+            scout=scout,
+            config=AcquisitionConfig(timeout_seconds=45, request_delay_ms=0),
+            raw_dir=tmp_path,
+            run_identity=RunIdentity(),
+        )
+        script.assert_consumed()
 
     asyncio.run(run("90000001"))
     asyncio.run(run("90000002"))

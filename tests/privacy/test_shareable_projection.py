@@ -37,15 +37,19 @@ def _embedded(report_html: str) -> dict:
 @pytest.fixture()
 def rendered(tmp_path: Path) -> dict:
     """Render the SENTINEL fixture, not the clean golden fixture."""
-    import scout_schedule_cli as legacy
     from tests.goldens.fixture import sentinel_results
 
-    legacy.write_outputs(
+    from scoutmb.core.identity import RunIdentity
+    from scoutmb.interfaces.cli.composition import build_reporting_service
+
+    build_reporting_service().publish(
         tmp_path,
         sentinel_results(),
+        generated_at_local="2026-01-01 00:00:00",
+        generated_at_iso="2026-01-01T00:00:00",
         generate_html=True,
         generate_email_report=True,
-        run_identity=legacy.RunIdentity(),
+        run_identity=RunIdentity(),
     )
     return _embedded((tmp_path / "report.html").read_text(encoding="utf-8"))
 
@@ -105,9 +109,9 @@ def test_unresolved_attempt_carries_null_output_id(rendered: dict) -> None:
 
 def test_two_unresolved_attempts_do_not_merge(tmp_path: Path) -> None:
     """Null identity must not become a grouping key: two unreached attendees stay two rows."""
-    import scout_schedule_cli as legacy
-
+    from scoutmb.core.identity import RunIdentity
     from scoutmb.core.models import ScoutResult
+    from scoutmb.interfaces.cli.composition import build_reporting_service
 
     results = [
         ScoutResult(
@@ -117,7 +121,14 @@ def test_two_unresolved_attempts_do_not_merge(tmp_path: Path) -> None:
             name="B Unreached", qr_url="https://x.invalid/b", attendee_id="", errors=("t",)
         ),
     ]
-    legacy.write_outputs(tmp_path, results, generate_html=True, run_identity=legacy.RunIdentity())
+    build_reporting_service().publish(
+        tmp_path,
+        results,
+        generated_at_local="2026-01-01 00:00:00",
+        generated_at_iso="2026-01-01T00:00:00",
+        generate_html=True,
+        run_identity=RunIdentity(),
+    )
     rows = _embedded((tmp_path / "report.html").read_text(encoding="utf-8"))["scouts"]
 
     assert len(rows) == 2
@@ -140,9 +151,9 @@ def test_two_blank_identity_attendees_with_requirements_fail_loudly(tmp_path: Pa
     the write BEFORE those functions execute (and that nothing is partially written). It is a
     regression test for the guard itself, not a demonstration of the merge it prevents.
     """
-    import scout_schedule_cli as legacy
-
+    from scoutmb.core.identity import RunIdentity
     from scoutmb.core.models import RequirementRecord, ScoutResult
+    from scoutmb.interfaces.cli.composition import build_reporting_service
 
     def _requirement(number: str) -> RequirementRecord:
         return RequirementRecord(
@@ -179,30 +190,38 @@ def test_two_blank_identity_attendees_with_requirements_fail_loudly(tmp_path: Pa
     ]
 
     with pytest.raises(AssertionError, match="blank attendee_id"):
-        legacy.write_outputs(
-            tmp_path, results, generate_html=True, run_identity=legacy.RunIdentity()
+        build_reporting_service().publish(
+            tmp_path,
+            results,
+            generated_at_local="2026-01-01 00:00:00",
+            generated_at_iso="2026-01-01T00:00:00",
+            generate_html=True,
+            run_identity=RunIdentity(),
         )
 
     # Nothing partially written: the assertion fires before any file is created.
     assert not (tmp_path / "report.html").exists()
 
 
-def test_two_blank_identity_scout_dicts_fail_loudly_via_legacy_write_email_reports(
+def test_two_blank_identity_scout_dicts_fail_loudly_via_write_email_reports(
     tmp_path: Path,
 ) -> None:
-    """Reproduces the actual live gap this round closes: ui/server.py's
-    `POST /api/runs/{run_id}/generate-emails` calls `scout_schedule_cli.write_email_reports`
-    directly with `scouts` loaded straight off disk from a prior run's scouts.json (which may
-    have been written by pre-fix code, or hand-edited) -- it never goes through
-    ReportingService.publish, so that guard never runs on this path. `write_email_reports` ->
-    `build_missing_requirements` operates on the nested dict shape (not ScoutResult objects),
-    so it needed its own guard (`_assert_blank_identity_scouts_have_no_records`) rather than
-    reusing `ReportingService.publish`'s. This test drives the REAL `write_email_reports`
-    directly (the same call ui/server.py makes) with two same-named blank-attendee_id scout
-    dicts that each carry a real requirement record, and proves it now fails loudly instead of
+    """Reproduces the actual live gap this round closes:
+    `scoutmb.interfaces.web.routes.generate_emails` calls
+    `ReportingService._write_email_reports` directly with `scouts` loaded straight off disk from
+    a prior run's scouts.json (which may have been written by pre-fix code, or hand-edited) --
+    it never goes through `ReportingService.publish`, so that guard never runs on this path.
+    `_write_email_reports` -> `_build_missing_requirements` operates on the nested dict shape
+    (not ScoutResult objects), so it needs its own guard
+    (`_assert_blank_identity_scouts_have_no_records`, added to service.py in Slice 2b B10.4
+    alongside this route's cutover off scout_schedule_cli.write_email_reports) rather than
+    reusing `ReportingService.publish`'s. This test drives the REAL `_write_email_reports`
+    directly (the same call the web route makes) with two same-named blank-attendee_id scout
+    dicts that each carry a real requirement record, and proves it fails loudly instead of
     silently merging them under `_attendee_key_for`'s `f"name:{scout_name}"` fallback.
     """
-    import scout_schedule_cli as legacy
+    from scoutmb.core.identity import RunIdentity
+    from scoutmb.interfaces.cli.composition import build_reporting_service
 
     def _scout(requirement_number: str) -> dict[str, Any]:
         return {
@@ -232,7 +251,9 @@ def test_two_blank_identity_scout_dicts_fail_loudly_via_legacy_write_email_repor
     scouts = [_scout("1"), _scout("2")]
 
     with pytest.raises(AssertionError, match="blank attendee_id"):
-        legacy.write_email_reports(tmp_path, scouts)
+        build_reporting_service()._write_email_reports(
+            tmp_path, scouts, run_identity=RunIdentity()
+        )
 
     # No email content written: the guard fires inside build_missing_requirements, before any
     # per-scout .txt/.html or the combined missing_requirements.csv is produced. (write_email_
