@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from tests.factories.records import make_requirement
 
 from scoutmb.core.identity import RunIdentity, attendee_filename_stem
@@ -12,12 +13,17 @@ def test_stem_hides_the_raw_id_and_carries_the_full_uuid():
     assert stem == "avery-archer-1234abcdef0040008000000000000000"  # full 32 hex, no hyphens
 
 
+@pytest.mark.matrix_case(case_id="ART-NAME-008", context_id="filename", lane="default")
 def test_stem_distinct_for_distinct_output_ids():
+    """Two DIFFERENT attendees with the EXACT SAME display name still yield two different
+    filename stems, because the per-run UUID is keyed on attendee_id (via RunIdentity.output_id),
+    not on name."""
     assert attendee_filename_stem(
         "Avery Archer", "aaaaaaaa-0000-4000-8000-000000000000"
     ) != attendee_filename_stem("Avery Archer", "bbbbbbbb-0000-4000-8000-000000000000")
 
 
+@pytest.mark.matrix_case(case_id="ART-EMAIL-004", context_id="email", lane="default")
 def test_email_reports_do_not_collide_for_same_named_attendees(tmp_path):
     """write_email_reports must produce distinct .txt/.html for two same-named attendees."""
 

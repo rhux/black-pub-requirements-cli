@@ -16,12 +16,14 @@ def test_loopback_is_allowed():
     s.close()
 
 
+@pytest.mark.matrix_case(case_id="NET-POLICY-002", context_id="net-policy", lane="default")
 def test_live_gateway_requires_two_part_opt_in(monkeypatch):
     monkeypatch.delenv("SCOUTMB_ALLOW_LIVE_SERVICE", raising=False)
     with pytest.raises(ExternalNetworkBlocked):
         assert_egress_allowed("scoutingevent.com")
 
 
+@pytest.mark.matrix_case(case_id="NET-POLICY-003", context_id="net-policy", lane="default")
 def test_opt_in_allows_the_real_host(monkeypatch):
     monkeypatch.setenv("SCOUTMB_ALLOW_LIVE_SERVICE", "1")
     assert assert_egress_allowed("scoutingevent.com") is None  # noqa: B015 - documents the None return
