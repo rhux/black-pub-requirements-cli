@@ -36,6 +36,27 @@ def test_wheel_contains_py_typed(built_wheel: Path) -> None:
     assert "scoutmb/py.typed" in names, sorted(n for n in names if n.startswith("scoutmb/"))
 
 
+def test_archives_exclude_private_tests_logs_and_secrets(built_wheel: Path) -> None:
+    """[tool.hatch.build] exclude already keeps bootstrap/raw_data/docs/tests out of the sdist
+    source tree hatchling builds the wheel from -- this proves that holds in the actual built
+    ARTIFACT (not just the config declaring intent), and adds a private-data-shaped filename
+    scan as a second, independent check that doesn't rely on the exclude list naming every
+    private path by name."""
+    with zipfile.ZipFile(built_wheel) as archive:
+        names = archive.namelist()
+
+    excluded_prefixes = ("tests/", "raw_data/", "docs/", "bootstrap/")
+    offenders = [n for n in names if n.startswith(excluded_prefixes)]
+    assert offenders == []
+
+    secret_shaped = [
+        n
+        for n in names
+        if any(marker in n.lower() for marker in (".env", "secret", "token", ".key", ".pem"))
+    ]
+    assert secret_shaped == [], secret_shaped
+
+
 def test_coverage_include_reaches_nested_modules() -> None:
     """`src/scoutmb/*.py` does NOT match a nested module: coverage's `*` never crosses `/`."""
     import tomllib

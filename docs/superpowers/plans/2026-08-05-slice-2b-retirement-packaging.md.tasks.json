@@ -50,23 +50,24 @@
     {
       "id": 5,
       "subject": "B11.1: bootstrap/ syncs src/scoutmb instead of loose files",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [
         4
       ],
       "description": "**Goal:** bootstrap/source_sync.py copies src/scoutmb into <app_dir>/scoutmb; bootstrap/build.spec bundles src/scoutmb as package data.\n\n**Files:**\n- Modify: `bootstrap/source_sync.py` (_DIRS gains src/scoutmb -> scoutmb), `bootstrap/build.spec` (datas gains src/scoutmb)\n- Test: `tests/packaging/test_distribution_contents.py` (extend)\n\n**Acceptance Criteria:**\n- [ ] sync_app_source copies src/scoutmb's full tree (including resources/ and py.typed) to <app_dir>/scoutmb, leaving scouts.csv/pdf-uploads/runs untouched\n- [ ] build.spec's datas includes src/scoutmb\n- [ ] A test proves scoutmb importable from a copied root through the existing .pth mechanism\n\n**Verify:** `uv run pytest tests/packaging -q` \u2192 PASS\n\nSee plan doc Task B11.1 for the full _DIRS (source,dest) pair implementation and the .pth-simulation test's documented scope limit.\n\n```json:metadata\n{\"files\": [\"bootstrap/source_sync.py\", \"bootstrap/build.spec\", \"tests/packaging/test_distribution_contents.py\"], \"verifyCommand\": \"uv run pytest tests/packaging -q\", \"acceptanceCriteria\": [\"scoutmb tree synced to app_dir\", \"build.spec bundles src/scoutmb\", \"import-from-copied-root proven\"], \"modelTier\": \"standard\"}\n```",
       "activeForm": "Syncing src/scoutmb into the release root",
-      "lastUpdated": "2026-08-11T10:39:38.482409"
+      "lastUpdated": "2026-08-11T10:42:36.718285"
     },
     {
       "id": 6,
       "subject": "B11.2: Release-root acceptance sequence",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         5
       ],
       "description": "**Goal:** The specific sequence Gate 2 requires: copy the release root to a directory outside the repository, remove the repository from the environment, launch under conditions matching the embedded interpreter configuration, and confirm the health endpoint responds and one report renders.\n\n**Files:**\n- Test: `tests/packaging/test_release_root.py`\n\n**Acceptance Criteria:**\n- [ ] The copied root (outside the repo, repo path removed from sys.path/PYTHONPATH) starts the package's create_app and answers GET /api/health\n- [ ] The archive excludes private tests, logs, and secrets (test_archives_exclude_private_tests_logs_and_secrets, already named in the preliminary plan's Named Tests -- implement it here since B11 is where the archive contents are finalized)\n- [ ] py.typed and resources/ are present INSIDE the built wheel's contents, not merely the source tree (re-verifies 2a's own wheel test still holds once the package sync changed)\n\n**Verify:** `uv run pytest tests/packaging -q` \u2192 PASS\n\nSee plan doc Task B11.2. The acceptance-sequence test also proves a real report.html renders through ReportingService.publish from the copied root -- that's part of the health/render probe in Step 1, not a separate criterion the archive-exclusion bullet replaces.\n\n```json:metadata\n{\"files\": [\"tests/packaging/test_release_root.py\"], \"verifyCommand\": \"uv run pytest tests/packaging -q\", \"acceptanceCriteria\": [\"health responds from copied root outside repo\", \"archive excludes private tests/logs/secrets\", \"py.typed/resources present in built wheel\"], \"modelTier\": \"standard\"}\n```",
-      "activeForm": "Proving the release-root acceptance sequence"
+      "activeForm": "Proving the release-root acceptance sequence",
+      "lastUpdated": "2026-08-11T10:45:05.127248"
     }
   ],
   "lastUpdated": "2026-08-11T10:30:00Z"
