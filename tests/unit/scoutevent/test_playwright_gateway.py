@@ -81,6 +81,7 @@ async def test_blocked_host_raises_and_never_navigates(monkeypatch: pytest.Monke
     assert page.goto_calls == []
 
 
+@pytest.mark.matrix_case(case_id="NET-POLICY-001", context_id="net-policy", lane="default")
 async def test_loopback_host_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SCOUTMB_ALLOW_LIVE_SERVICE", raising=False)
     page = _AllowedHostStubPage()
