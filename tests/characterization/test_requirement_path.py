@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from scout_schedule_cli import requirement_path
+from scoutmb.core.inference.numbering import requirement_path
 
 
 @pytest.mark.parametrize(

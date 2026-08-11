@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import scout_schedule_cli as cli
-from scout_schedule_cli import attendee_filename_stem
+from scoutmb.core.identity import attendee_filename_stem
 from tests.factories.records import make_requirement
 
 

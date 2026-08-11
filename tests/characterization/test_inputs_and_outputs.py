@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import csv
 
-from scout_schedule_cli import ClassRecord, RequirementRecord, write_csv
+from scoutmb.adapters.files.atomic import write_csv
+from scoutmb.core.models import ClassRecord, RequirementRecord
 from tests.factories.records import make_class, make_requirement
 
 CLASS_HEADER = [

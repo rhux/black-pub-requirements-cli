@@ -1,7 +1,7 @@
 import os
 
 import pytest
-from scout_schedule_cli import atomic_write_text
+from scoutmb.adapters.files.atomic import atomic_write_text
 
 
 def test_success_replaces_and_roundtrips_encoding(tmp_path):
@@ -36,7 +36,8 @@ def test_failure_during_replace_preserves_original(tmp_path, monkeypatch):
 def test_write_attendees_csv_header_unchanged_after_atomic_routing(tmp_path):
     import csv
 
-    from pdf_to_scouts import ExtractedAttendee, write_attendees_csv
+    from scoutmb.core.models import ExtractedAttendee
+    from scoutmb.features.ingest.pdf_extract import write_attendees_csv
 
     a = ExtractedAttendee(
         attendee_name="Avery Archer",

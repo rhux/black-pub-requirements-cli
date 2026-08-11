@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from scout_schedule_cli import AttendeeId, MissingAttendeeId, RunIdentity
+from scoutmb.core.identity import AttendeeId, MissingAttendeeId, RunIdentity
 
 
 def test_blank_attendee_id_fails_closed():
