@@ -6,19 +6,22 @@ stages through ONE flow test each --
 1. A generated PDF (Task 18's real ``tests.factories.pdf_builder.build_pdf``).
 2. The REAL ``pdf_to_scouts.main`` (extraction + attendee CSV writing).
 3. The REAL ``scout_schedule_cli.load_inputs``.
-4. The REAL ``scout_schedule_cli.main`` -> ``async_main`` -> ``process_scout`` /
-   ``navigate_and_trigger_schedule`` / ``post_requirement`` -- driven by Task 19's strict
-   fake Browser/Context/Page (``tests/fakes/browser.py``, ``tests/fakes/acquisition.py``,
-   ``tests/fakes/clock.py``). Only ``cli.async_playwright`` is monkeypatched, to a fake context
-   manager whose ``chromium.launch(...)`` returns a ``StrictFakeBrowser`` -- the acquisition
-   functions themselves (``navigate_and_trigger_schedule``, ``discover_name``,
-   ``post_requirement``, ``process_scout``) are never monkeypatched here, unlike
-   ``tests/matrix/cases/cli_cases.py``'s CLI-SCHED catalog: this file exists specifically to
-   prove those real functions work end to end against the strict fakes, one layer above where
-   ``tests/characterization/test_acquisition_matrix.py`` already proves it for a single scout.
-5. The REAL ``annotate_requirement_statuses``/``write_outputs`` (invoked internally by
-   ``async_main``) and the REAL UI read routes (Task 21's ``tests.harnesses.legacy.load_legacy_ui``
-   harness) reading the generated output directory.
+4. The REAL ``scout_schedule_cli.main`` -> ``async_main`` -> ``run()`` ->
+   ``run_schedule_pipeline`` -> ``process_scout``-equivalent acquisition -- driven by Task 19's
+   strict fake Browser/Context/Page (``tests/fakes/browser.py``, ``tests/fakes/acquisition.py``,
+   ``tests/fakes/clock.py``). B10.2 moved browser construction into
+   ``scoutmb.interfaces.cli.composition.build_launched_browser``, so that -- not
+   ``cli.async_playwright`` -- is what this file monkeypatches now, to a fake async context
+   manager yielding a ``StrictFakeBrowser`` directly; the acquisition machinery itself is never
+   monkeypatched here, unlike ``tests/matrix/cases/cli_cases.py``'s CLI-SCHED catalog: this file
+   exists specifically to prove the real pipeline works end to end against the strict fakes, one
+   layer above where ``tests/characterization/test_acquisition_matrix.py`` already proves it for
+   a single scout.
+5. The REAL ``annotate_requirement_statuses``/``write_outputs`` (invoked internally by the
+   pipeline) and the REAL UI read routes (the package's own
+   ``scoutmb.interfaces.web.app.create_app``, B10.3 -- replacing Task 21's
+   ``tests.harnesses.legacy.load_legacy_ui`` harness, deleted alongside ui/server.py itself)
+   reading the generated output directory.
 
 No test writes outside ``tmp_path`` and no test performs real network I/O.
 """
@@ -30,8 +33,8 @@ import csv
 import io
 import json
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -40,7 +43,6 @@ from tests.factories.pdf_builder import build_pdf
 from tests.fakes.acquisition import StrictScript
 from tests.fakes.browser import StrictFakeBrowser
 from tests.fakes.clock import FakeClock
-from tests.harnesses.legacy import load_legacy_ui
 from tests.matrix.cases.acquisition_cases import ExpectedRequest, ScriptedResponse
 from tests.matrix.cases.pdf_cases import PdfPageSpec
 
@@ -89,25 +91,6 @@ def _requirement_row(**overrides: object) -> dict[str, object]:
     return row
 
 
-class _FakePlaywrightCM:
-    """Stands in for ``async_playwright()``'s real context manager (same shape as
-    ``tests/matrix/cases/cli_cases.py``'s ``_FakePlaywrightCM``) -- implements only
-    ``__aenter__``/``__aexit__`` and the single ``chromium.launch(...)`` call ``async_main``
-    makes on the object it yields. Never a real Chromium subprocess."""
-
-    def __init__(self, browser: StrictFakeBrowser) -> None:
-        self._browser = browser
-
-    async def __aenter__(self) -> SimpleNamespace:
-        async def _launch(**kwargs: object) -> StrictFakeBrowser:
-            return self._browser
-
-        return SimpleNamespace(chromium=SimpleNamespace(launch=_launch))
-
-    async def __aexit__(self, *exc_info: object) -> bool:
-        return False
-
-
 def _build_pdf(pdf_path: Path, attendees: tuple[tuple[str, str, str], ...]) -> None:
     pages = tuple(
         PdfPageSpec(name, registrant_type, qr_url, "embedded")
@@ -124,7 +107,20 @@ def _read_attendee_csv(csv_path: Path) -> list[dict[str, str]]:
 def _run_cli(
     monkeypatch: pytest.MonkeyPatch, argv: list[str], browser: StrictFakeBrowser
 ) -> tuple[int, str]:
-    monkeypatch.setattr(cli, "async_playwright", lambda: _FakePlaywrightCM(browser))
+    # B10.2 moved browser construction into
+    # scoutmb.interfaces.cli.composition.build_launched_browser -- the function's SOURCE module,
+    # looked up fresh by run()'s own function-local import every call, so patching it here (not
+    # cli.async_playwright, which nothing calls anymore) is picked up correctly.
+    @asynccontextmanager
+    async def fake_launched_browser(*, headed: bool, channel: str | None):
+        try:
+            yield browser
+        finally:
+            await browser.close()
+
+    monkeypatch.setattr(
+        "scoutmb.interfaces.cli.composition.build_launched_browser", fake_launched_browser
+    )
     monkeypatch.setattr(sys, "argv", ["scout_schedule_cli.py", *argv])
     stderr = io.StringIO()
     import contextlib
@@ -134,15 +130,17 @@ def _run_cli(
     return code, stderr.getvalue()
 
 
-def _client(module: object) -> httpx.AsyncClient:
-    transport = httpx.ASGITransport(app=module.app, raise_app_exceptions=False)  # type: ignore[attr-defined]
-    return httpx.AsyncClient(transport=transport, base_url="http://testserver")
-
-
 async def _list_runs(data_root: Path) -> tuple[int, object]:
-    async with load_legacy_ui(data_root) as module, _client(module) as client:
-        resp = await client.get("/api/runs")
-        return resp.status_code, resp.json()
+    from scoutmb.config import UiSettings
+    from scoutmb.interfaces.web.app import create_app
+
+    settings = UiSettings(data_root=data_root)
+    app = create_app(settings)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            resp = await client.get("/api/runs")
+            return resp.status_code, resp.json()
 
 
 # ---------------------------------------------------------------------------------------------
