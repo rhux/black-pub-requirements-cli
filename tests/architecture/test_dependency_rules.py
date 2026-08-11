@@ -315,29 +315,117 @@ def test_no_first_party_sys_path_mutation() -> None:
     assert offenders == [], "\n".join(offenders)
 
 
+def test_shape_check_special_cases_only_the_canonical_main_guard(tmp_path: Path) -> None:
+    """The canonical `if __name__ == "__main__": raise SystemExit(main())` guard must NOT trip
+    the shape check. A structurally different top-level `if` (e.g. a real conditional branch)
+    still must -- this proves the special case is narrow, not a blanket ast.If allowance."""
+    canonical = tmp_path / "canonical_shim.py"
+    canonical.write_text(
+        "from scoutmb.core.models import ScoutInput  # noqa: F401\n"
+        'if __name__ == "__main__":\n'
+        "    raise SystemExit(0)\n"
+    )
+    assert _shape_check_offenders(canonical) == []
+
+    real_conditional = tmp_path / "not_a_shim.py"
+    real_conditional.write_text(
+        "import sys\n"
+        "if sys.platform == 'win32':\n"
+        "    import winreg  # noqa: F401\n"
+    )
+    assert _shape_check_offenders(real_conditional) != []
+
+
+def test_shape_check_ignores_union_type_annotations_but_not_body_binops(tmp_path: Path) -> None:
+    """PEP 604 `X | None` parameter annotations parse to ast.BinOp -- structurally identical to
+    a real arithmetic/bitwise expression, but not business logic. A clean-bodied shim using this
+    (extremely common) modern annotation style must still pass; a function whose BODY actually
+    contains a BinOp must still fail -- this proves the fix narrows scope to annotations, it
+    does not blanket-disable BinOp detection."""
+    clean_shim = tmp_path / "clean_shim.py"
+    clean_shim.write_text(
+        "from typing import Any\n"
+        "def process(name: str, config: Any | None = None) -> str:\n"
+        "    return name\n"
+    )
+    assert _shape_check_offenders(clean_shim) == []
+
+    dirty_body = tmp_path / "dirty_body.py"
+    dirty_body.write_text(
+        "def compute(a: int, b: int) -> int:\n"
+        "    return a | b\n"
+    )
+    assert _shape_check_offenders(dirty_body) != []
+
+
+def _is_canonical_main_guard(node: ast.If) -> bool:
+    """`if __name__ == "__main__": raise SystemExit(main())` -- exactly this shape, nothing
+    looser. Matched structurally (comparison target/operator/value, and the body being exactly
+    one `raise SystemExit(<call>)` statement) rather than by source-text comparison, so
+    formatting differences (quotes, spacing) don't matter but a semantically different guard
+    still fails to match."""
+    test = node.test
+    if not (
+        isinstance(test, ast.Compare)
+        and isinstance(test.left, ast.Name)
+        and test.left.id == "__name__"
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], ast.Eq)
+        and len(test.comparators) == 1
+        and isinstance(test.comparators[0], ast.Constant)
+        and test.comparators[0].value == "__main__"
+    ):
+        return False
+    if node.orelse:
+        return False
+    if len(node.body) != 1:
+        return False
+    (stmt,) = node.body
+    return (
+        isinstance(stmt, ast.Raise)
+        and isinstance(stmt.exc, ast.Call)
+        and isinstance(stmt.exc.func, ast.Name)
+        and stmt.exc.func.id == "SystemExit"
+    )
+
+
+def _shape_check_offenders(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    offenders: list[str] = []
+    for node in tree.body:
+        if isinstance(node, ast.If) and _is_canonical_main_guard(node):
+            continue
+        if isinstance(node, (ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign, ast.Expr)):
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # Walk each BODY STATEMENT individually, never the FunctionDef/ClassDef node
+            # itself -- ast.walk(node) would also descend into node.args (parameter
+            # annotations/defaults), and a PEP 604 `X | None` annotation parses to ast.BinOp,
+            # indistinguishable from a real arithmetic expression to this check. Scoping the
+            # walk to node.body excludes annotations entirely while still catching a genuine
+            # BinOp INSIDE the body (e.g. `return a | b`).
+            for stmt in node.body:
+                for inner in ast.walk(stmt):
+                    if isinstance(inner, (ast.If, ast.For, ast.While, ast.Try, ast.BinOp)):
+                        offenders.append(f"{path}:{inner.lineno} {type(inner).__name__}")
+            continue
+        offenders.append(f"{path}:{node.lineno} {type(node).__name__}")
+    return offenders
+
+
 # Task 24, step 5: once a legacy flat module becomes pure delegation to the package, its
 # coverage floor proves nothing (every line is a forwarding import/call), so it gets a shape
 # check here instead. `scout_schedule_cli.py` is NOT pure delegation at the end of Slice 2a --
 # acquisition still lives there -- so this stays empty until 2b; the parametrization exists so
 # the machinery is armed the moment a module qualifies, per this plan's "Deferred to Slice 2b"
 # section.
-SHIMMED_MODULES: tuple[str, ...] = ()
+SHIMMED_MODULES: tuple[str, ...] = ("pdf_to_scouts.py",)
 
 
 @pytest.mark.parametrize("relative", SHIMMED_MODULES)
 def test_shimmed_module_contains_no_business_logic(relative: str) -> None:
     """Once a module is pure delegation its coverage floor proves nothing, so it gets a shape
-    check instead. Permitted: imports, literal/imported-name bindings, and forwarding calls."""
+    check instead. Permitted: imports, literal/imported-name bindings, forwarding calls, and the
+    canonical main-guard."""
     path = Path(__file__).resolve().parents[2] / relative
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    offenders: list[str] = []
-    for node in tree.body:
-        if isinstance(node, (ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign, ast.Expr)):
-            continue
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            for inner in ast.walk(node):
-                if isinstance(inner, (ast.If, ast.For, ast.While, ast.Try, ast.BinOp)):
-                    offenders.append(f"{relative}:{inner.lineno} {type(inner).__name__}")
-            continue
-        offenders.append(f"{relative}:{node.lineno} {type(node).__name__}")
-    assert offenders == [], "\n".join(offenders)
+    assert _shape_check_offenders(path) == []
