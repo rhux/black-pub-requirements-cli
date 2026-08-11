@@ -12,13 +12,9 @@ def app_src(*parts: str) -> str:
 
 
 datas = [
-    (app_src("run_app.py"), "app_src"),
     (app_src("pdf_to_scouts.py"), "app_src"),
     (app_src("scout_schedule_cli.py"), "app_src"),
     (app_src("requirements.txt"), "app_src"),
-    (app_src("ui", "__init__.py"), os.path.join("app_src", "ui")),
-    (app_src("ui", "server.py"), os.path.join("app_src", "ui")),
-    (app_src("ui", "static"), os.path.join("app_src", "ui", "static")),
     (app_src("bootstrap", "probe_msedge.py"), os.path.join("app_src", "_bootstrap_support")),
 ]
 

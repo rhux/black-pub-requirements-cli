@@ -15,16 +15,11 @@ from bootstrap.paths import AppPaths
 
 # (relative source path, is_directory)
 _FILES = [
-    "run_app.py",
     "pdf_to_scouts.py",
     "scout_schedule_cli.py",
     "requirements.txt",
-    "ui/__init__.py",
-    "ui/server.py",
 ]
-_DIRS = [
-    "ui/static",
-]
+_DIRS: list[str] = []
 
 
 def _source_root() -> Path:
