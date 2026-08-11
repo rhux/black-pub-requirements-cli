@@ -23,6 +23,7 @@ ALLOWED: dict[str, set[str]] = {
         "errors",
         "adapters",
         "network_policy",
+        "runtime",
     },
     "features": {"features", "core", "ports", "config", "errors"},
     "adapters": {"adapters", "core", "ports", "config", "errors", "network_policy"},
