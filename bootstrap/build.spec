@@ -13,6 +13,7 @@ def app_src(*parts: str) -> str:
 
 datas = [
     (app_src("requirements.txt"), "app_src"),
+    (app_src("src", "scoutmb"), os.path.join("app_src", "scoutmb")),
     (app_src("bootstrap", "probe_msedge.py"), os.path.join("app_src", "_bootstrap_support")),
 ]
 

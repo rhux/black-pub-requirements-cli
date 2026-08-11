@@ -13,9 +13,11 @@ from pathlib import Path
 
 from bootstrap.paths import AppPaths
 
-# (relative source path, is_directory)
 _FILES = ["requirements.txt"]
-_DIRS: list[str] = []
+# (source relative path, dest relative path under app_dir)
+_DIRS: list[tuple[str, str]] = [
+    ("src/scoutmb", "scoutmb"),
+]
 
 
 def _source_root() -> Path:
@@ -42,9 +44,9 @@ def sync_app_source(paths: AppPaths) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
 
-    for relative in _DIRS:
-        src = source_root / relative
-        dest = paths.app_dir / relative
+    for src_relative, dest_relative in _DIRS:
+        src = source_root / src_relative
+        dest = paths.app_dir / dest_relative
         shutil.copytree(src, dest, dirs_exist_ok=True)
 
     support_dest = paths.app_dir / "_bootstrap_support" / "probe_msedge.py"

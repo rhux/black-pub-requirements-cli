@@ -130,13 +130,15 @@ def test_boot_marker_execution(
 # frozen-vs-unfrozen resolution. Every synthetic source tree mirrors the REAL _FILES/_DIRS
 # entries read from bootstrap/source_sync.py (imported here, in the runner, never guessed).
 # ==================================================================================================
-def _write_synthetic_source_tree(root: Path, files: tuple[str, ...], dirs: tuple[str, ...]) -> None:
+def _write_synthetic_source_tree(
+    root: Path, files: tuple[str, ...], dirs: tuple[tuple[str, str], ...]
+) -> None:
     for relative in files:
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(f"synthetic content: {relative}\n".encode())
-    for relative in dirs:
-        base = root / relative
+    for src_relative, _dest_relative in dirs:
+        base = root / src_relative
         base.mkdir(parents=True, exist_ok=True)
         (base / "top-level.txt").write_bytes(b"synthetic dir file: top-level\n")
         (base / "nested").mkdir(parents=True, exist_ok=True)
@@ -193,17 +195,10 @@ def test_boot_sync_execution(
             assert actual_bytes == expected_bytes
         else:
             assert case.scenario == "whole-directory"
-            if not dirs:
-                # B10.3/B10.4 interim state: _DIRS is temporarily empty (the flat ui/static
-                # entry retired with ui/server.py, and B11.1 hasn't repopulated it with
-                # src/scoutmb yet). This case is data-driven off the real _DIRS, so it
-                # re-activates automatically the moment B11.1 lands -- no further change needed
-                # here.
-                pytest.skip("_DIRS is temporarily empty between B10.3 and B11.1")
-            relative_dir = dirs[0]
+            src_relative_dir, dest_relative_dir = dirs[0]
             for leaf in ("top-level.txt", "nested/leaf.txt"):
-                expected_bytes = (fake_repo / relative_dir / leaf).read_bytes()
-                actual_bytes = (dest_paths.app_dir / relative_dir / leaf).read_bytes()
+                expected_bytes = (fake_repo / src_relative_dir / leaf).read_bytes()
+                actual_bytes = (dest_paths.app_dir / dest_relative_dir / leaf).read_bytes()
                 assert actual_bytes == expected_bytes
     else:
         assert case.scenario == "frozen-vs-unfrozen"
@@ -236,10 +231,8 @@ def test_boot_sync_execution(
         assert (unfrozen_dest.app_dir / files[0]).read_bytes() == (
             unfrozen_repo / files[0]
         ).read_bytes()
-        # _DIRS is temporarily empty between B10.3 and B11.1 -- see the "whole-directory" skip
-        # above for why this is data-driven and self-reactivating, not hardcoded.
-        if dirs:
-            assert (unfrozen_dest.app_dir / dirs[0] / "top-level.txt").exists()
+        _unfrozen_src_dir, unfrozen_dest_dir = dirs[0]
+        assert (unfrozen_dest.app_dir / unfrozen_dest_dir / "top-level.txt").exists()
 
         # --- Frozen run: _source_root() == Path(sys._MEIPASS) / "app_src" ---
         frozen_meipass = tmp_path / "frozen-meipass"
@@ -268,8 +261,8 @@ def test_boot_sync_execution(
         assert (frozen_dest.app_dir / files[0]).read_bytes() == (
             frozen_app_src / files[0]
         ).read_bytes()
-        if dirs:
-            assert (frozen_dest.app_dir / dirs[0] / "top-level.txt").exists()
+        _frozen_src_dir, frozen_dest_dir = dirs[0]
+        assert (frozen_dest.app_dir / frozen_dest_dir / "top-level.txt").exists()
 
 
 def test_bootstrap_registry_is_structurally_valid() -> None:

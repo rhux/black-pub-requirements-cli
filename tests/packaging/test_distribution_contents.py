@@ -46,3 +46,32 @@ def test_coverage_include_reaches_nested_modules() -> None:
     include = config["tool"]["coverage"]["run"]["include"]
     pattern = globs_to_regex(include, case_insensitive=False, partial=False)
     assert pattern.match("src/scoutmb/core/inference/tree.py"), include
+
+
+def test_copied_release_root_scoutmb_is_importable_via_the_dot_pth_entry(tmp_path: Path) -> None:
+    """bootstrap/python_env.py's .pth entry already appends app_dir to the embedded
+    interpreter's sys.path (unchanged by this task, per the Phase B spec's own note that this
+    dependency is load-bearing but pre-existing). This proves scoutmb -- not just its
+    resources/, which tests/packaging/test_mechanisms.py already covers -- imports from a
+    directory laid out exactly like a synced app_dir, with no repository present."""
+    import shutil
+    import subprocess
+    import sys
+
+    app_dir = tmp_path / "app_dir"
+    app_dir.mkdir()
+    shutil.copytree("src/scoutmb", app_dir / "scoutmb")
+
+    pth_file = app_dir / "_app_dir.pth"
+    pth_file.write_text(str(app_dir) + "\n", encoding="utf-8")
+
+    probe = (
+        "import sys; sys.path.insert(0, %r)\n"
+        "import scoutmb.core.models\n"
+        "print('SCOUTMB_IMPORT_OK')\n"
+    ) % str(app_dir)
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", probe], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stderr
+    assert "SCOUTMB_IMPORT_OK" in result.stdout
