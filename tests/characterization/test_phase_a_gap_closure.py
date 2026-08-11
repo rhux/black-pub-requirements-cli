@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pdf_to_scouts
 import pytest
-import run_app
 import scout_schedule_cli as cli
 from tests.factories.pdf_builder import build_pdf
 from tests.matrix.cases.pdf_cases import PdfPageSpec
@@ -941,22 +940,10 @@ def test_bootstrap_marker_write_marker_writes_a_valid_marker(
     assert marker["browser_channel"] == "chrome"
 
 
-# =================================================================================================
-# run_app.py -- start_server_on_free_port actually starting a real (loopback-only) uvicorn
-# server, never exercised for real by the DESK-MODE catalog (which always monkeypatches
-# start_server_on_free_port to a no-op so main()'s dispatch logic can be pinned without touching
-# a real socket/thread). B9.1 merged the old free_port()/start_server(port) two-step dance into
-# one race-free start_server_on_free_port() seam; this test's own assertion (a real server
-# becomes reachable) is unchanged, only the call shape.
-# =================================================================================================
-
-
-def test_start_server_actually_serves_the_real_health_route() -> None:
-    _thread, port = run_app.start_server_on_free_port()
-    try:
-        run_app.wait_until_ready(f"http://127.0.0.1:{port}/api/health", timeout_seconds=5.0)
-    finally:
-        pass  # the server thread is a daemon; it is reaped at interpreter exit, not here
+# run_app.py's own start_server_on_free_port/wait_until_ready gap (a real server actually
+# serving through the race-free bind) was deleted here alongside run_app.py itself (B10.3) --
+# tests/integration/test_rendezvous.py::test_a_real_uvicorn_app_actually_serves_on_the_bound_socket
+# now proves the equivalent guarantee against the package's own create_app/bind_loopback_socket.
 
 
 # =================================================================================================
