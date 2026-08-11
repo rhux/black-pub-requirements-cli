@@ -419,7 +419,7 @@ def _shape_check_offenders(path: Path) -> list[str]:
 # acquisition still lives there -- so this stays empty until 2b; the parametrization exists so
 # the machinery is armed the moment a module qualifies, per this plan's "Deferred to Slice 2b"
 # section.
-SHIMMED_MODULES: tuple[str, ...] = ("pdf_to_scouts.py",)
+SHIMMED_MODULES: tuple[str, ...] = ("pdf_to_scouts.py", "scout_schedule_cli.py")
 
 
 @pytest.mark.parametrize("relative", SHIMMED_MODULES)

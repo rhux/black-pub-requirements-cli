@@ -11,16 +11,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import csv
-import html
-import io
-import json
-import random
-import re
 import sys
 import time
-from collections.abc import Mapping, Sequence
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -42,10 +34,9 @@ from scoutmb.adapters.files.tabular import (  # noqa: F401 - legacy public surfa
     norm_header,
 )
 
-from playwright.async_api import Browser, BrowserContext, Page, Response, async_playwright
+from playwright.async_api import Browser, Page, Response
 
 from scoutmb.adapters.files.atomic import atomic_write_text, write_csv  # noqa: F401
-from scoutmb.adapters.html.report import render_report
 from scoutmb.core.identity import (  # noqa: F401 - re-exported for the legacy public surface
     AttendeeId,
     MissingAttendeeId,
@@ -58,9 +49,6 @@ from scoutmb.core.inference.numbering import (  # noqa: F401 - legacy public sur
     choice_requirement_count,
     requirement_path,
 )
-from scoutmb.core.inference.missing import group_missing_requirements
-from scoutmb.core.inference.status import calculate_statuses
-from scoutmb.core.inference.tree import build_group_tree
 from scoutmb.core.models import (  # noqa: F401 - legacy surface
     ClassRecord,
     RequirementRecord,
@@ -222,51 +210,8 @@ def form_values(post_data: str | None) -> dict[str, str]:
     return {key: values[-1] if values else "" for key, values in parsed.items()}
 
 
-def is_schedule_response(response: Response) -> bool:
-    if "ajax_mobile.php" not in response.url:
-        return False
-    values = form_values(response.request.post_data)
-    return values.get("getUnitClass", "").lower() == "true"
-
-
-def clean_html_description(value: str) -> str:
-    value = re.sub(r"<br\s*/?>", "\n", value or "", flags=re.IGNORECASE)
-    value = re.sub(r"<[^>]+>", "", value)
-    value = html.unescape(value)
-    value = re.sub(r"[ \t]+\n", "\n", value)
-    value = re.sub(r"\n{3,}", "\n\n", value)
-    return value.strip()
-
-
 def truthy(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
-
-
-def days_from_class_name(class_name: str) -> str:
-    if " - " in class_name:
-        return class_name.split(" - ", 1)[0].strip()
-    return ""
-
-
-async def discover_name(page: Page, fallback: str) -> str:
-    if fallback:
-        return fallback
-    selectors = [
-        "#scoutPage h1",
-        "#scoutPage .ui-title",
-        ".ui-page-active .ui-title",
-        "h1.ui-title",
-    ]
-    for selector in selectors:
-        locator = page.locator(selector)
-        try:
-            if await locator.count():
-                text = (await locator.first.inner_text()).strip()
-                if text and text.lower() not in {"schedule", "event", "menu"}:
-                    return text
-        except Exception:
-            pass
-    return "Unknown Scout"
 
 
 async def navigate_and_trigger_schedule(page: Page, qr_url: str, timeout_seconds: int) -> Response:
@@ -310,319 +255,6 @@ async def process_scout(
     )
 
 
-def _assert_blank_identity_results_have_no_records(results: Sequence[ScoutResult]) -> None:
-    """Fail loudly if a blank-identity ScoutResult carries class/requirement data.
-
-    Legacy-copy sibling of scoutmb.features.reporting.service._assert_blank_identity_has_no_
-    records, kept in lockstep by inspection per this module's docstring. `_attendee_key_for`'s
-    `f"name:{scout_name}"` fallback is only safe because process_scout always sets attendee_id
-    BEFORE populating classes/requirements (a ScoutResult that failed before identity
-    resolution is assumed to always have empty collections). If that invariant were ever
-    violated, two different same-named attendees with blank identity would silently merge
-    into one inferred requirement structure in report.html, with no exception and no warning.
-    Called by write_html_report, which -- unlike write_outputs -- does not route through
-    ReportingService.publish and so does not inherit its guard.
-    """
-    for result in results:
-        if str(result.attendee_id or "").strip():
-            continue
-        if result.classes or result.requirements:
-            raise AssertionError(
-                f"ScoutResult for {result.name!r} has a blank attendee_id but "
-                f"{len(result.classes)} class record(s) and {len(result.requirements)} "
-                "requirement record(s). _attendee_key_for's name-based fallback would group "
-                "this with any other blank-identity attendee sharing the same name, silently "
-                "merging their data -- refusing to write the report instead."
-            )
-
-
-def _assert_blank_identity_scouts_have_no_records(scouts: list[dict[str, Any]]) -> None:
-    """Fail loudly if a blank-identity scout dict carries class/requirement data.
-
-    Dict-shape sibling of `_assert_blank_identity_results_have_no_records`, for the nested
-    `scouts.json` shape (`{name, attendee_id, classes, requirements, errors}`) that
-    build_missing_requirements/write_email_reports consume. This is the guard that actually
-    closes the live gap: ui/server.py's `POST /api/runs/{run_id}/generate-emails` calls
-    write_email_reports directly with scouts loaded straight off disk from a prior run's
-    scouts.json (possibly written by pre-fix code, or hand-edited), never going through
-    ReportingService.publish and so never hitting its guard. Without this check,
-    `_attendee_key_for`'s name-based fallback would silently merge two same-named
-    blank-identity scouts' requirement data with no exception and no warning.
-    """
-    for scout in scouts:
-        attendee_id = str(scout.get("attendee_id") or "").strip()
-        if attendee_id:
-            continue
-        classes = scout.get("classes") or []
-        requirements = scout.get("requirements") or []
-        if classes or requirements:
-            raise AssertionError(
-                f"Scout {scout.get('name')!r} has a blank attendee_id but "
-                f"{len(classes)} class record(s) and {len(requirements)} requirement "
-                "record(s). _attendee_key_for's name-based fallback would group this with any "
-                "other blank-identity scout sharing the same name, silently merging their "
-                "data -- refusing to build missing-requirement groupings instead."
-            )
-
-
-def _attendee_key_for(item: Mapping[str, Any]) -> str:
-    """Grouping identity: the attendee ID, never the display name. Two attendees can
-    share a name; merging them silently corrupts both.
-
-    A blank attendee_id cannot occur through the production path (process_scout fails a
-    scout closed at :482 when the schedule request has no attendeeID), so the blank branch
-    is defensive only. It keys on scout_name — which does not fragment a single scout across
-    its requirements the way requirement_id would, and does not depend on id(item), which is
-    unstable across the dict copies this function makes.
-    """
-    attendee_id = str(item.get("attendee_id") or "").strip()
-    if attendee_id:
-        return attendee_id
-    return f"name:{str(item.get('scout_name') or '')}"
-
-
-def annotate_requirement_statuses(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Add inferred display status fields used only by the HTML report.
-
-    The API frequently leaves parent rows incomplete even when every child row is
-    complete. Parent status is therefore calculated recursively. Choice parents
-    such as 'Do ONE of the following' are marked as completed-but-review when the
-    minimum number of alternatives appears complete.
-    """
-    annotated = [dict(item) for item in requirements]
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for item in annotated:
-        grouped.setdefault((_attendee_key_for(item), str(item.get("class_p4_id") or "")), []).append(item)
-
-    for group in grouped.values():
-        tree = build_group_tree(
-            tuple(str(item.get("requirement_number") or "") for item in group),
-            tuple(str(item.get("requirement_type_id") or "") for item in group),
-        )
-        for item, path in zip(group, tree.paths, strict=True):
-            item["requirement_path"] = list(path)
-        for index, parent_index in enumerate(tree.parent_index):
-            if parent_index is not None:
-                group[index]["parent_requirement_number"] = group[parent_index].get(
-                    "requirement_number"
-                )
-
-        statuses = calculate_statuses(
-            tree=tree,
-            completed=tuple(bool(item.get("completed_requirement")) for item in group),
-            descriptions=tuple(str(item.get("description") or "") for item in group),
-        )
-        for item, row_status in zip(group, statuses, strict=True):
-            item["calculated_status"] = row_status.status
-            item["calculated_status_reason"] = row_status.reason
-            # Presence, not value: is_actionable_leaf gates on `"total_subrequirements" not in item`.
-            if row_status.total_subrequirements is not None:
-                item["completed_subrequirements"] = row_status.completed_subrequirements
-                item["total_subrequirements"] = row_status.total_subrequirements
-                item["choice_required_count"] = row_status.choice_required_count
-
-    return annotated
-
-
-def build_missing_requirements(scouts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Group incomplete, actionable requirements by scout name and merit badge.
-
-    `scouts` is the same nested shape written to scouts.json: a list of
-    {name, attendee_id, classes, requirements, errors} dicts. Leaf requirements
-    (no children) left 'incomplete' by annotate_requirement_statuses are the
-    actionable items; section headers and parent rollups aren't actionable on
-    their own, but when a leaf is missing, its still-incomplete ancestors (e.g.
-    "3" when "3b"/"3c" are missing) are included too for context -- a scout
-    seeing "3b" in isolation has no idea what "3" actually asked for.
-    """
-    _assert_blank_identity_scouts_have_no_records(scouts)
-    flattened = [dict(req) for scout in scouts for req in scout.get("requirements", [])]
-    annotated = annotate_requirement_statuses(flattened)
-    return group_missing_requirements(
-        annotated,
-        attendee_key_of=_attendee_key_for,
-        clean_description=clean_html_description,
-    )
-
-
-def email_subject(scout_name: str) -> str:
-    return f"Merit Badge Requirements Still Needed - {scout_name}"
-
-
-def render_email_text(scout_name: str, badge_groups: dict[str, list[dict[str, Any]]]) -> str:
-    lines = [f"Hi {scout_name},", "", "Here are the merit badge requirements you still need to complete:"]
-    for badge_name, items in badge_groups.items():
-        lines.append("")
-        lines.append(badge_name)
-        lines.append("-" * len(badge_name))
-        for item in items:
-            indent = "  " * (item["depth"] + 1)
-            prefix = f"{indent}{item['requirement_number']}. " if item["requirement_number"] else indent
-            body = item["description"].replace("\n", "\n" + " " * len(prefix))
-            line = f"{prefix}{body}"
-            if item["is_prereq"]:
-                line += " (complete before the event)"
-            lines.append(line)
-    lines.append("")
-    lines.append("Please work with your merit badge counselor to complete these. Reach out if you have questions.")
-    return "\n".join(lines)
-
-
-def render_email_html(scout_name: str, badge_groups: dict[str, list[dict[str, Any]]]) -> str:
-    sections = []
-    for badge_name, items in badge_groups.items():
-        rows = []
-        for item in items:
-            number = html.escape(item["requirement_number"])
-            description = html.escape(item["description"]).replace("\n", "<br>")
-            prereq_badge = (
-                ' <span class="prereq">complete before the event</span>' if item["is_prereq"] else ""
-            )
-            indent = f' style="margin-left: {item["depth"] * 1.25}rem"' if item["depth"] else ""
-            rows.append(f"<li{indent}><strong>{number}.</strong> {description}{prereq_badge}</li>")
-        sections.append(f"<h2>{html.escape(badge_name)}</h2><ul>{''.join(rows)}</ul>")
-
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Merit Badge Requirements Still Needed - {html.escape(scout_name)}</title>
-<style>
-body {{ font-family: Arial, Helvetica, sans-serif; color: #17212b; max-width: 640px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; }}
-h1 {{ font-size: 1.4rem; }}
-h2 {{ font-size: 1.1rem; margin-top: 1.5rem; border-bottom: 2px solid #245b78; padding-bottom: .25rem; }}
-ul {{ padding-left: 1.25rem; }}
-li {{ margin-bottom: .5rem; }}
-.prereq {{ display: inline-block; font-size: .75rem; font-weight: bold; color: #8a4b08; background: #fff0d8; border-radius: 4px; padding: .05rem .4rem; }}
-</style>
-</head>
-<body>
-<h1>Hi {html.escape(scout_name)},</h1>
-<p>Here are the merit badge requirements you still need to complete:</p>
-{"".join(sections)}
-<p>Please work with your merit badge counselor to complete these. Reach out if you have questions.</p>
-</body>
-</html>
-"""
-
-
-def write_email_reports(
-    output_dir: Path,
-    scouts: list[dict[str, Any]],
-    *,
-    run_identity: RunIdentity | None = None,
-) -> Path:
-    """Write per-scout missing-requirement emails plus a combined mail-merge CSV."""
-    emails_dir = output_dir / "emails"
-    emails_dir.mkdir(parents=True, exist_ok=True)
-    missing = build_missing_requirements(scouts)
-    # One identity per run. A fresh instance here would mint UUIDs unrelated to the ones the
-    # rest of the run already used for this attendee's raw/ files.
-    run_identity = run_identity or RunIdentity()
-
-    fieldnames = [
-        "scout_name", "attendee_id", "status", "merit_badge_count",
-        "missing_requirement_count", "subject", "body_text", "body_html",
-    ]
-    csv_rows = []
-    for scout in scouts:
-        scout_name = str(scout.get("name") or "")
-        attendee_id = str(scout.get("attendee_id") or "")
-        attendee_key = attendee_id.strip() or f"unresolved-{scout_name}"
-        bucket = missing.get(attendee_key) or {"display_name": scout_name, "badges": {}}
-        badge_groups = bucket["badges"]
-        missing_count = sum(1 for items in badge_groups.values() for item in items if item["is_leaf"])
-
-        if missing_count:
-            status = "missing_requirements"
-        elif not scout.get("requirements") and scout.get("errors"):
-            status = "no_data_scraped"
-        else:
-            status = "all_complete"
-
-        subject = email_subject(scout_name)
-        body_text = render_email_text(scout_name, badge_groups) if missing_count else ""
-        body_html = render_email_html(scout_name, badge_groups) if missing_count else ""
-
-        if missing_count:
-            output_id = run_identity.output_id(AttendeeId.parse(attendee_id, scout_name))
-            slug = attendee_filename_stem(scout_name, output_id)
-            atomic_write_text(emails_dir / f"{slug}.txt", body_text, encoding="utf-8")
-            atomic_write_text(emails_dir / f"{slug}.html", body_html, encoding="utf-8")
-
-        csv_rows.append(
-            {
-                "scout_name": scout_name,
-                "attendee_id": attendee_id,
-                "status": status,
-                "merit_badge_count": len(badge_groups),
-                "missing_requirement_count": missing_count,
-                "subject": subject,
-                "body_text": body_text,
-                "body_html": body_html,
-            }
-        )
-
-    buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(csv_rows)
-    atomic_write_text(emails_dir / "missing_requirements.csv", buffer.getvalue())
-
-    return emails_dir
-
-
-def write_html_report(
-    path: Path,
-    results: list[ScoutResult],
-    generated_at_local: str,
-    generated_at_iso: str,
-    run_id: str = "",
-) -> None:
-    """DEAD in production as of Slice 2a Task 22: `write_outputs` no longer calls this,
-    routing report.html through `ReportingService.publish` instead (see that class's module
-    docstring). This copy is kept alive only because the frozen ART-*/REQ-B-* characterization
-    catalog still calls it directly.
-
-    Do NOT call this from new code and do NOT copy it as a template for a new HTML-writing
-    path: unlike `ReportingService`, this embeds `scouts[i]["attendee_id"]` verbatim below,
-    never substituting the shareable `output_id` -- the exact PII this slice exists to keep out
-    of report.html. It has already silently diverged from the live path on this one property;
-    nothing catches a further divergence except a human reading both copies side by side.
-    """
-    _assert_blank_identity_results_have_no_records(results)
-    classes = [asdict(item) for result in results for item in result.classes]
-    requirements = annotate_requirement_statuses(
-        [asdict(item) for result in results for item in result.requirements]
-    )
-    errors = [
-        {"scout_name": result.name, "attendee_id": result.attendee_id, "error": error}
-        for result in results
-        for error in result.errors
-    ]
-    scouts = [
-        {
-            "name": result.name,
-            "attendee_id": result.attendee_id,
-            "class_count": len(result.classes),
-            "requirement_count": len(result.requirements),
-            "error_count": len(result.errors),
-        }
-        for result in results
-    ]
-    report_data = {
-        "generated_at_local": generated_at_local,
-        "generated_at_iso": generated_at_iso,
-        "run_id": run_id,
-        "scouts": scouts,
-        "classes": classes,
-        "requirements": requirements,
-        "errors": errors,
-    }
-
-    atomic_write_text(path, render_report(report_data), encoding="utf-8")
-
-
 def write_outputs(
     output_dir: Path,
     results: list[ScoutResult],
@@ -634,10 +266,7 @@ def write_outputs(
 ) -> None:
     """Form-2 shim: compute the two wall-clock timestamps, then delegate the actual record
     composition and file writes to ReportingService.publish (features/reporting/service.py),
-    built through the composition root. write_html_report/write_email_reports and their
-    helpers stay defined below, unchanged and still directly tested -- ReportingService owns
-    its own equivalent logic since it (a package module) cannot import back from this script.
-    """
+    built through the composition root."""
     # One identity per run. A fresh instance here would mint UUIDs unrelated to the ones the
     # rest of the run already used for this attendee's raw/ files.
     run_identity = run_identity or RunIdentity()
