@@ -3,15 +3,16 @@ session context manager's body completes."""
 
 from __future__ import annotations
 
+from tests.fakes.acquisition import StrictScript
+from tests.fakes.browser import StrictFakeBrowser
+from tests.fakes.clock import FakeClock
+
 from scoutmb.adapters.files.atomic import AtomicFileSink
 from scoutmb.adapters.scoutevent.playwright_gateway import PlaywrightScoutingEventGateway
 from scoutmb.core.identity import RunIdentity
 from scoutmb.core.models import ScoutInput
 from scoutmb.features.acquisition.retry import RetryPolicy
 from scoutmb.features.acquisition.service import AcquisitionConfig, AcquisitionService
-from tests.fakes.acquisition import StrictScript
-from tests.fakes.browser import StrictFakeBrowser
-from tests.fakes.clock import FakeClock
 
 
 class _RecordingSleeper:

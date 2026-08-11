@@ -7,6 +7,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from tests.fakes.acquisition import StrictScript
+from tests.fakes.browser import StrictFakeBrowser
+from tests.fakes.clock import FakeClock
+from tests.matrix.cases.acquisition_cases import ExpectedRequest, ScriptedResponse
 
 from scoutmb.adapters.files.atomic import AtomicFileSink
 from scoutmb.adapters.files.checkpoint import AtomicFileCheckpointStore
@@ -17,10 +21,6 @@ from scoutmb.features.acquisition.batch import run_batch
 from scoutmb.features.acquisition.retry import BreakerOpen, RetryPolicy
 from scoutmb.features.acquisition.service import AcquisitionConfig, AcquisitionService
 from scoutmb.ports.checkpoint_store import Checkpoint
-from tests.fakes.acquisition import StrictScript
-from tests.fakes.browser import StrictFakeBrowser
-from tests.fakes.clock import FakeClock
-from tests.matrix.cases.acquisition_cases import ExpectedRequest, ScriptedResponse
 
 
 def _sched(attendee_id: str, payload: object) -> tuple[ExpectedRequest, ScriptedResponse]:

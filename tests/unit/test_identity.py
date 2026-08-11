@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+
 from scoutmb.core.identity import AttendeeId, MissingAttendeeId, RunIdentity
 
 

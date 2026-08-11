@@ -55,7 +55,7 @@ class _AllowedHostStubPage:
     async def wait_for_timeout(self, milliseconds: int) -> None:
         pass
 
-    def locator(self, selector: str) -> "_EmptyLocator":
+    def locator(self, selector: str) -> _EmptyLocator:
         return _EmptyLocator()
 
     async def evaluate(self, script: str) -> None:
@@ -111,7 +111,7 @@ class _FakeLocator:
         self.clicked = False
 
     @property
-    def first(self) -> "_FakeLocator":
+    def first(self) -> _FakeLocator:
         return self
 
     async def count(self) -> int:

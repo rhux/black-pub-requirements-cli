@@ -155,6 +155,7 @@ def extract_pdf_aggregate(
     """Aggregate-only PDF extraction facts. Imports the optional PDF stack lazily so the
     default lane never needs PyMuPDF/opencv. Never returns a name, value, or decoded URL."""
     import fitz
+
     from scoutmb.adapters.pdf.pages import extract_pdf
 
     with _redact_read_failures():  # PyMuPDF/pdf_to_scouts errors embed the real PDF path

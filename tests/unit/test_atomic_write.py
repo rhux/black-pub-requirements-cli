@@ -1,6 +1,7 @@
 import os
 
 import pytest
+
 from scoutmb.adapters.files.atomic import atomic_write_text
 
 

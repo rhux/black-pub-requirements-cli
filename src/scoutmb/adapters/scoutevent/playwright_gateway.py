@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 from scoutmb.network_policy import assert_egress_allowed
 from scoutmb.ports.scoutevent import RequirementFetchResult, ScheduleFetchResult
@@ -36,13 +37,13 @@ def form_values(post_data: str | None) -> dict[str, str]:
     return {key: values[-1] if values else "" for key, values in parsed.items()}
 
 
-def is_schedule_response(response: "Response") -> bool:
+def is_schedule_response(response: Response) -> bool:
     if "ajax_mobile.php" not in response.url:
         return False
     return form_values(response.request.post_data).get("getUnitClass", "").lower() == "true"
 
 
-async def discover_name(page: "Page", fallback: str) -> str:
+async def discover_name(page: Page, fallback: str) -> str:
     """Exact mirror of scout_schedule_cli.discover_name (lines 227-245) -- moved here because
     the gateway is now what calls it, right after the attendee ID is known, matching
     process_scout's existing ordering."""
@@ -67,7 +68,7 @@ async def discover_name(page: "Page", fallback: str) -> str:
 
 
 class _PlaywrightSession:
-    def __init__(self, context: "BrowserContext", page: "Page") -> None:
+    def __init__(self, context: BrowserContext, page: Page) -> None:
         self._context = context
         self._page = page
 
@@ -109,12 +110,12 @@ class _PlaywrightSession:
 class PlaywrightScoutingEventGateway:
     """ScoutingEventGateway over one already-launched Browser. One instance per run."""
 
-    def __init__(self, browser: "Browser", *, allow_dead_assets: bool = False) -> None:
+    def __init__(self, browser: Browser, *, allow_dead_assets: bool = False) -> None:
         self._browser = browser
         self._allow_dead_assets = allow_dead_assets
 
     @staticmethod
-    async def _fetch_schedule_on_page(page: Any, qr_url: str, timeout_seconds: int) -> "Response":
+    async def _fetch_schedule_on_page(page: Any, qr_url: str, timeout_seconds: int) -> Response:
         """The exact navigate_and_trigger_schedule body, with one addition: the egress check
         below runs before page.goto and nowhere else navigates. A staticmethod (not a bare
         module function) so the unit test can call it directly against a stub page with no real

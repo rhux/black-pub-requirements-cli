@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from scoutmb.core.inference.missing import group_missing_requirements, is_not_used, select_actionable
+from scoutmb.core.inference.missing import (
+    group_missing_requirements,
+    is_not_used,
+    select_actionable,
+)
 
 
 def _row(**overrides):

@@ -42,11 +42,12 @@ dev = [
 packages = ["src/scoutmb"]
 # Explicit (not detected): an editable install's sys.path normally gets only "src" (derived
 # from `packages` above), which is all a real, fully-package-native install would ever need.
-# Task B9.2's troop349-schedule console script still delegates to the repo-root flat
-# scout_schedule_cli.py (no package-native replacement exists yet -- Slice 2b sub-plan 4's
-# job), so an editable install -- the only supported install mode for this tool, per CLAUDE.md's
-# git-clone-and-run setup -- also needs the repo root itself on sys.path for that import to
-# succeed when the console script is invoked from outside the repository.
+# Historically also carried "." because troop349-schedule delegated to the repo-root flat
+# scout_schedule_cli.py -- that flat module (and pdf_to_scouts.py) are both deleted as of
+# Slice 2b B10.4, and all three console scripts are now pure scoutmb.interfaces.* entry points
+# needing only "src". Left as ["src", "."] rather than narrowed in this same commit: narrowing
+# an editable-install sys.path is a behavior change to this repo's own dev environment, not a
+# reference cleanup, and deserves its own verified change rather than riding along here.
 dev-mode-dirs = ["src", "."]
 
 [tool.hatch.build.targets.wheel.force-include]
@@ -59,14 +60,12 @@ exclude = ["bootstrap", "raw_data", "docs", "tests"]
 target-version = "py312"
 line-length = 100
 src = ["src", "tests", "tools"]
-# The legacy flat scripts are characterized in Slice 1 and moved/rewritten in Slice 2; the
-# bootstrap package is stdlib-only legacy rewritten in Slice 3/4. Excluding both keeps ruff
-# from reformatting code about to move, preserves the line numbers this plan references, and
-# avoids failing on pre-existing PTH violations (open()/os.replace in bootstrap). They
-# re-enter ruff in their owning slice. New Slice-1 code (src/scoutmb, tools, tests) is linted.
-extend-exclude = [
-    "scout_schedule_cli.py", "pdf_to_scouts.py", "ui/server.py", "run_app.py", "bootstrap",
-]
+# All four legacy flat/interim modules this list once excluded (scout_schedule_cli.py,
+# pdf_to_scouts.py, ui/server.py, run_app.py) are deleted as of Slice 2b B10.3/B10.4 --
+# scoutmb is now the sole implementation. Only the stdlib-only bootstrap package (rewritten in
+# a later slice) still needs excluding, to avoid failing on its pre-existing PTH violations
+# (open()/os.replace).
+extend-exclude = ["bootstrap"]
 exclude = [".venv", "raw_data"]
 
 [tool.ruff.lint]
@@ -100,12 +99,6 @@ warn_unused_ignores = true
 module = "tests.matrix.model"
 disable_error_code = ["misc"]
 
-# pdf_to_scouts is legacy (excluded from ruff, rewritten in a later slice); the corpus harness
-# imports it lazily for the authentic PDF aggregate. Don't type-check the legacy module here.
-[[tool.mypy.overrides]]
-module = "pdf_to_scouts"
-ignore_errors = true
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
@@ -133,13 +126,11 @@ xfail_strict = true
 
 [tool.coverage.run]
 branch = true
-# `include` (not `source`) so coverage does not import ui.server at startup before the pytest
-# data sandbox from tests/conftest.py is installed.
+# `include` (not `source`) so coverage does not import modules at startup before the pytest
+# data sandbox from tests/conftest.py is installed. The four legacy flat/interim modules this
+# list once covered (scout_schedule_cli.py, pdf_to_scouts.py, ui/server.py, run_app.py) are all
+# deleted as of Slice 2b B10.3/B10.4.
 include = [
-    "scout_schedule_cli.py",
-    "pdf_to_scouts.py",
-    "ui/server.py",
-    "run_app.py",
     "bootstrap/paths.py",
     "bootstrap/marker.py",
     "bootstrap/source_sync.py",

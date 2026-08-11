@@ -4,7 +4,9 @@ from dataclasses import asdict
 
 from tests.factories.records import make_requirement
 
-from scoutmb.features.reporting.service import _build_missing_requirements as build_missing_requirements
+from scoutmb.features.reporting.service import (
+    _build_missing_requirements as build_missing_requirements,
+)
 
 
 def _scout(aid, rid, num):

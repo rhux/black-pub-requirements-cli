@@ -14,11 +14,7 @@ from pathlib import Path
 from bootstrap.paths import AppPaths
 
 # (relative source path, is_directory)
-_FILES = [
-    "pdf_to_scouts.py",
-    "scout_schedule_cli.py",
-    "requirements.txt",
-]
+_FILES = ["requirements.txt"]
 _DIRS: list[str] = []
 
 

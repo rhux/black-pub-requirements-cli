@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from tests.factories.records import make_requirement
+
 from scoutmb.core.identity import RunIdentity, attendee_filename_stem
 from scoutmb.core.models import ScoutInput
 from scoutmb.interfaces.cli.composition import build_reporting_service
-from tests.factories.records import make_requirement
 
 
 def test_stem_hides_the_raw_id_and_carries_the_full_uuid():

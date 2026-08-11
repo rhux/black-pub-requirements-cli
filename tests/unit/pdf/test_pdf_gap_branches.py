@@ -12,14 +12,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
-
-from scoutmb.adapters.pdf.extract import add_quiet_zone, decode_variants, render_page
-from scoutmb.adapters.pdf.pages import extract_pdf, value_after_label
-from scoutmb.adapters.pdf.extract import decode_embedded_qr_from_page as decode_embedded_qr
-from scoutmb.features.ingest.pdf_extract import expand_pdf_inputs
-from scoutmb.interfaces.cli.pdf import main as pdf_main
 from tests.factories.pdf_builder import build_pdf
 from tests.matrix.cases.pdf_cases import PdfPageSpec
+
+from scoutmb.adapters.pdf.extract import add_quiet_zone, decode_variants, render_page
+from scoutmb.adapters.pdf.extract import decode_embedded_qr_from_page as decode_embedded_qr
+from scoutmb.adapters.pdf.pages import extract_pdf, value_after_label
+from scoutmb.features.ingest.pdf_extract import expand_pdf_inputs
+from scoutmb.interfaces.cli.pdf import main as pdf_main
 
 pytestmark = pytest.mark.filterwarnings("ignore")
 
