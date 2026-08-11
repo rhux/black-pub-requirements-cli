@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import socket
 import threading
 import time
 import urllib.error
@@ -19,26 +18,27 @@ import urllib.request
 
 import uvicorn
 
+from scoutmb.interfaces.web.rendezvous import bind_loopback_socket
 from ui import server
 
 
-def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-def start_server(port: int) -> None:
+def start_server_on_free_port() -> tuple[threading.Thread, int]:
+    sock = bind_loopback_socket()
+    port = sock.getsockname()[1]
     config = uvicorn.Config(app=server.app, host="127.0.0.1", port=port, log_level="warning")
     uvicorn_server = uvicorn.Server(config)
 
     def run() -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(uvicorn_server.serve())
+        # uvicorn.Server.serve(sockets=[...]) binds no NEW socket of its own -- it accepts
+        # connections on the one already bound above, closing the probe-bind-close-then-rebind
+        # gap the old free_port()/start_server(port) two-step dance had.
+        loop.run_until_complete(uvicorn_server.serve(sockets=[sock]))
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
+    return thread, port
 
 
 def wait_until_ready(url: str, timeout_seconds: float = 5.0) -> None:
@@ -61,8 +61,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    port = free_port()
-    start_server(port)
+    _thread, port = start_server_on_free_port()
     base_url = f"http://127.0.0.1:{port}/"
     wait_until_ready(base_url + "api/health")
 

@@ -21,6 +21,7 @@ pdf = ["PyMuPDF>=1.24,<2", "opencv-python-headless>=4.10,<5"]
 
 [project.scripts]
 troop349-pdf = "scoutmb.interfaces.cli.pdf:main"
+troop349 = "scoutmb.interfaces.desktop.app:main"
 
 [dependency-groups]
 dev = [

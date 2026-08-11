@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from tests.matrix.model import CaseMetadata, Classification, Domain, EvidenceKind
 
 _EVIDENCE_PORT = "run_app.py:25-28 free_port"
+_EVIDENCE_PORT_RACE_FREE = "src/scoutmb/interfaces/web/rendezvous.py bind_loopback_socket"
 _EVIDENCE_READY = "run_app.py:44-52 wait_until_ready"
 _EVIDENCE_MODE = "run_app.py:55-85 main"
 
@@ -62,17 +63,28 @@ class DesktopModeCase:
     expect_propagated_exception: type[BaseException] | None
 
 
-def _meta(case_id: str, axis_id: str, member: str, rationale: str, evidence: str) -> CaseMetadata:
+def _meta(
+    case_id: str,
+    axis_id: str,
+    member: str,
+    rationale: str,
+    evidence: str,
+    classification: Classification = Classification.PRESERVE,
+    target_owner: str | None = None,
+    target_observation: str | None = None,
+) -> CaseMetadata:
     return CaseMetadata(
         case_id=case_id,
         axis_id=axis_id,
         member=member,
         domain=Domain.PLATFORM,
-        classification=Classification.PRESERVE,
+        classification=classification,
         evidence=EvidenceKind.CURRENT_BRANCH,
         rationale=rationale,
         contexts=(axis_id.lower(),),
         evidence_reference=evidence,
+        target_owner=target_owner,
+        target_observation=target_observation,
     )
 
 
@@ -85,12 +97,22 @@ DESKTOP_PORT_CASES: tuple[DesktopPortCase, ...] = (
             "DESK-PORT-001",
             "DESK-PORT",
             "free-port-closed-cleanly",
-            "free_port binds an ephemeral port with the `with socket.socket(...) as probe:` "
-            "context manager, so the probe socket is guaranteed closed (via __exit__) the "
-            "instant getsockname()[1] is read and returned -- no descriptor is held open past "
-            "the function's own body, and the returned port number must be immediately "
-            "re-bindable by a second, independent socket.",
-            _EVIDENCE_PORT,
+            "INTENTIONAL_CHANGE (B9.1): the old free_port() closed its probe socket immediately "
+            "after reading the assigned port, making that port number immediately re-bindable by "
+            "a second, independent socket -- exactly the probe-bind-close-then-rebind gap B9.1 "
+            "exists to remove. bind_loopback_socket() (its race-free replacement) does the "
+            "opposite on purpose: it keeps the bound, listening socket OPEN and hands that same "
+            "socket to the server, so the port is NOT independently re-bindable while the "
+            "original socket is still held -- there is no window between discovery and use for "
+            "another process to steal the port.",
+            _EVIDENCE_PORT_RACE_FREE,
+            classification=Classification.INTENTIONAL_CHANGE,
+            target_owner="Slice 2",
+            target_observation=(
+                "bind_loopback_socket() returns an open, listening socket bound to an "
+                "OS-assigned loopback port; a second, independent socket attempting to bind to "
+                "that same port while the first is still open raises OSError (EADDRINUSE)."
+            ),
         ),
         scenario="free-port",
     ),

@@ -1,13 +1,18 @@
 """Typed matrix execution of the desktop-launcher characterization catalog (Task 21, final
-slice): ``run_app.py``'s ``free_port``, ``wait_until_ready``, and ``main`` dispatch.
+slice): ``run_app.py``'s port-bind seam, ``wait_until_ready``, and ``main`` dispatch.
 
-``DESK-PORT-*`` drive a REAL loopback socket bind/close -- fast, safe, and exactly what
-``free_port``'s contract is about. Every other case here injects at ``run_app``'s real current
-seams (the plain module-level ``time.monotonic``/``time.sleep``/``urllib.request.urlopen``
-names it binds via its own ``import time`` / ``import urllib.request`` statements, plus
+``DESK-PORT-*`` drive a REAL loopback socket bind -- fast, safe, and exactly what the port-zero
+rendezvous contract is about. As of B9.1, DESK-PORT-001 exercises
+``scoutmb.interfaces.web.rendezvous.bind_loopback_socket`` (the race-free replacement for
+``run_app.py``'s old, now-removed ``free_port``) rather than ``run_app`` directly -- see
+``tests/matrix/cases/desktop_cases.py``'s DESK-PORT-001 for why this is an intentional-change
+row, not a preserved one. Every other case here injects at ``run_app``'s real current seams (the
+plain module-level ``time.monotonic``/``time.sleep``/``urllib.request.urlopen`` names it binds
+via its own ``import time`` / ``import urllib.request`` statements, plus
 ``webbrowser.open``/``webview.create_window``/``webview.start`` for the two deferred imports
-inside ``main()``) via ``pytest.MonkeyPatch`` -- never a real sleep, never a real HTTP request,
-never a real browser tab or native window.
+inside ``main()``, and ``start_server_on_free_port`` for the merged port-bind-and-serve seam)
+via ``pytest.MonkeyPatch`` -- never a real sleep, never a real HTTP request, never a real
+browser tab or native window.
 """
 
 from __future__ import annotations
@@ -35,15 +40,19 @@ from tests.matrix.pytest_support import assert_platform_domain_registry_valid, e
 def test_desktop_port_execution(case: DesktopPortCase, context_id: str) -> None:
     del context_id
     if case.scenario == "free-port":
-        import run_app
+        from scoutmb.interfaces.web.rendezvous import bind_loopback_socket
 
-        port = run_app.free_port()
-        # If free_port's `with socket.socket(...) as probe:` had leaked the probe's file
-        # descriptor (or left it bound), a second, independent socket binding to the exact
-        # same port would raise OSError (EADDRINUSE) here.
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as rebinder:
-            rebinder.bind(("127.0.0.1", port))
-            rebinder.listen(1)
+        sock = bind_loopback_socket()
+        try:
+            port = sock.getsockname()[1]
+            # DESK-PORT-001 (INTENTIONAL_CHANGE, B9.1): unlike the old free_port(), which closed
+            # its probe socket before returning (making the port immediately re-bindable),
+            # bind_loopback_socket() keeps the socket open -- a second, independent socket
+            # attempting to bind to the SAME port while the first is still held must fail.
+            with pytest.raises(OSError), socket.socket(socket.AF_INET, socket.SOCK_STREAM) as rebinder:
+                rebinder.bind(("127.0.0.1", port))
+        finally:
+            sock.close()
     else:
         assert case.scenario == "bind-conflict"
         holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -111,9 +120,12 @@ def test_desktop_ready_execution(
 
 
 # ==================================================================================================
-# DESK-MODE -- main()'s post-readiness dispatch. free_port/start_server/wait_until_ready are all
-# patched so no real server, socket, or sleep is ever touched; webbrowser and webview are
-# patched so no real browser tab or native window is ever opened.
+# DESK-MODE -- main()'s post-readiness dispatch. start_server_on_free_port/wait_until_ready are
+# both patched so no real server, socket, or sleep is ever touched; webbrowser and webview are
+# patched so no real browser tab or native window is ever opened. (B9.1: free_port/start_server
+# merged into one start_server_on_free_port() seam -- this case's OWN observed behavior --
+# browser vs. native dispatch, return codes, exception propagation -- is unchanged, only the
+# driving mechanics of what gets monkeypatched.)
 # ==================================================================================================
 @pytest.mark.parametrize(("case", "context_id"), execution_params(DESKTOP_MODE_CASES))
 def test_desktop_mode_execution(
@@ -122,8 +134,7 @@ def test_desktop_mode_execution(
     del context_id
     import run_app
 
-    monkeypatch.setattr(run_app, "free_port", lambda: 55555)
-    monkeypatch.setattr(run_app, "start_server", lambda port: None)
+    monkeypatch.setattr(run_app, "start_server_on_free_port", lambda: (None, 55555))
 
     if case.server_becomes_ready:
         monkeypatch.setattr(run_app, "wait_until_ready", lambda url: None)
