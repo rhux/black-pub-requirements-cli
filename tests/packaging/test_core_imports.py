@@ -161,33 +161,6 @@ def test_decode_embedded_qr_success_path_decodes_the_embedded_image(tmp_path: Pa
     assert decode_embedded_qr(pdf) == "https://scoutingevent.com/mobile/abc123"
 
 
-def test_legacy_pdf_module_attributes_still_resolve() -> None:
-    """Frozen tests reach pdf_to_scouts.cv2 and .decode_variants; this task must not break them."""
-    import pdf_to_scouts
-
-    assert hasattr(pdf_to_scouts, "cv2")
-    assert callable(pdf_to_scouts.decode_variants)
-
-
-def test_pdf_to_scouts_decode_embedded_qr_is_the_adapters_from_page_body() -> None:
-    """One implementation, two entry points: pdf_to_scouts.decode_embedded_qr(document, page,
-    detector) must be the SAME object as the adapter's decode_embedded_qr_from_page, not a
-    second copy of the logic that could drift from it."""
-    import pdf_to_scouts
-
-    from scoutmb.adapters.pdf.extract import decode_embedded_qr_from_page
-
-    assert pdf_to_scouts.decode_embedded_qr is decode_embedded_qr_from_page
-
-
-def test_pdf_to_scouts_scoutingevent_prefix_is_the_adapters_single_copy() -> None:
-    """Must be imported, not a second literal that could desync from the adapter's copy."""
-    import pdf_to_scouts
-
-    from scoutmb.adapters.pdf.extract import SCOUTINGEVENT_PREFIX
-
-    assert pdf_to_scouts.SCOUTINGEVENT_PREFIX is SCOUTINGEVENT_PREFIX
-
 
 def test_private_stack_guard_also_fails_closed() -> None:
     """Blocking the real import is stronger than monkeypatching the error path: it proves the

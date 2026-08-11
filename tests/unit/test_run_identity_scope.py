@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import scout_schedule_cli as legacy
+from scoutmb.core.identity import AttendeeId, RunIdentity, attendee_filename_stem
+from scoutmb.interfaces.cli.composition import build_reporting_service
 
 
 def _nested(attendee_id: str, scout_name: str) -> list[dict[str, object]]:
@@ -40,20 +41,20 @@ def _nested(attendee_id: str, scout_name: str) -> list[dict[str, object]]:
 
 
 def test_email_filenames_use_the_supplied_run_identity(tmp_path: Path) -> None:
-    identity = legacy.RunIdentity()
-    expected = identity.output_id(legacy.AttendeeId.parse("90000001"))
+    identity = RunIdentity()
+    expected = identity.output_id(AttendeeId.parse("90000001"))
 
-    legacy.write_email_reports(
+    build_reporting_service()._write_email_reports(
         tmp_path, _nested("90000001", "Avery Example"), run_identity=identity
     )
 
     stems = {p.stem for p in (tmp_path / "emails").glob("*.txt")}
-    assert stems == {legacy.attendee_filename_stem("Avery Example", expected)}
+    assert stems == {attendee_filename_stem("Avery Example", expected)}
 
 
 def test_write_email_reports_creates_no_identity_of_its_own(tmp_path: Path) -> None:
-    identity = legacy.RunIdentity()
-    legacy.write_email_reports(
+    identity = RunIdentity()
+    build_reporting_service()._write_email_reports(
         tmp_path, _nested("90000001", "Avery Example"), run_identity=identity
     )
     # The map now holds exactly the one attendee the writer resolved.

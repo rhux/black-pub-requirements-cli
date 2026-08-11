@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from scout_schedule_cli import (
-    annotate_requirement_statuses,
-    build_missing_requirements,
-    choice_requirement_count,
-)
 from tests.factories.records import make_requirement
+
+from scoutmb.core.inference.numbering import choice_requirement_count
+from scoutmb.features.reporting.service import _annotate_requirement_statuses as annotate_requirement_statuses
+from scoutmb.features.reporting.service import _build_missing_requirements as build_missing_requirements
 
 
 def test_annotate_does_not_mutate_input():

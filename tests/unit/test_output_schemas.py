@@ -84,13 +84,14 @@ def test_to_row_preserves_declaration_order() -> None:
         (None, False),
     ],
 )
-def test_flag_coercion_matches_legacy_truthy(raw: object, expected: bool) -> None:
-    """bool("0") is True; truthy("0") is False. The legacy uses truthy()."""
-    import scout_schedule_cli as legacy
-
+def test_flag_coercion_pins_legacy_truthy_semantics(raw: object, expected: bool) -> None:
+    """bool("0") is True; truthy("0") is False. This table was originally proven equal to
+    scout_schedule_cli.truthy() (retired in Slice 2b B10.4, along with `truthy` itself, which
+    had no package equivalent to compare against) -- the expected values below are that
+    once-proven parity, now pinned directly."""
     from scoutmb.core.output_schemas import _flag
 
-    assert _flag(raw) is expected is legacy.truthy(raw)
+    assert _flag(raw) is expected
 
 
 def test_text_coercion_does_not_strip() -> None:

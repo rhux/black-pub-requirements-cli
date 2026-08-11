@@ -113,20 +113,25 @@ def build(kind: str) -> dict[str, object]:
     label, which is always self-consistent and so can never catch a real reshape. Use --force
     to re-baseline intentionally.
     """
-    import scout_schedule_cli as legacy
+    import time
+    from datetime import datetime
+
     from tests.goldens.fixture import golden_results
 
+    from scoutmb.core.identity import AttendeeId, RunIdentity
+    from scoutmb.interfaces.cli.composition import build_reporting_service
+
     results = golden_results()
-    identity = legacy.RunIdentity()
+    identity = RunIdentity()
     uuid_map: dict[str, str] = {}
 
     with tempfile.TemporaryDirectory() as raw_dir:
         out = Path(raw_dir) / "run"
-        legacy.write_outputs(
+        build_reporting_service().publish(
             out,
-            results,  # type: ignore[arg-type]  # ScoutResult twin types are duck-type
-            # compatible; real alias deferred to Slice 2b (see class ScoutResult comment in
-            # scout_schedule_cli.py)
+            results,
+            generated_at_local=time.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            generated_at_iso=datetime.now().astimezone().isoformat(timespec="seconds"),
             generate_html=True,
             generate_email_report=True,
             run_identity=identity,
@@ -156,7 +161,7 @@ def build(kind: str) -> dict[str, object]:
         attendee_id = (result.attendee_id or "").strip()
         if not attendee_id:
             continue  # pre-identity failure: never had an output id to seed
-        output_id = identity.output_id(legacy.AttendeeId.parse(attendee_id, result.name))
+        output_id = identity.output_id(AttendeeId.parse(attendee_id, result.name))
         uuid_map.setdefault(output_id.replace("-", ""), f"OUTPUT_ID_{len(uuid_map):02d}")
 
     # `emails` is a gen_golden-only construct (write_outputs has no equivalent single dict to

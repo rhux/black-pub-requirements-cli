@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from scout_schedule_cli import build_missing_requirements
 from tests.factories.records import make_requirement
+
+from scoutmb.features.reporting.service import _build_missing_requirements as build_missing_requirements
 
 
 def _scout(aid, rid, num):
