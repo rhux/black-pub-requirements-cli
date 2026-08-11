@@ -81,6 +81,7 @@ async def test_blocked_host_raises_and_never_navigates(monkeypatch: pytest.Monke
     assert page.goto_calls == []
 
 
+@pytest.mark.matrix_case(case_id="NET-POLICY-001", context_id="net-policy", lane="default")
 async def test_loopback_host_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SCOUTMB_ALLOW_LIVE_SERVICE", raising=False)
     page = _AllowedHostStubPage()
@@ -329,3 +330,47 @@ async def test_block_dead_assets_recovers_when_url_is_unparseable() -> None:
     route = _BadRoute()
     await browser.context.route_handler(route)
     assert route.continued is True
+
+
+class _ParsedRouteRequest:
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+
+class _ParsedRoute:
+    def __init__(self, url: str) -> None:
+        self.request = _ParsedRouteRequest(url)
+        self.aborted = False
+        self.continued = False
+
+    async def abort(self) -> None:
+        self.aborted = True
+
+    async def continue_(self) -> None:
+        self.continued = True
+
+
+async def test_block_dead_assets_aborts_a_known_dead_host() -> None:
+    browser = _RoutingBrowser()
+    gateway = PlaywrightScoutingEventGateway(browser, allow_dead_assets=False)  # type: ignore[arg-type]
+
+    async with gateway.open_session():
+        pass
+
+    route = _ParsedRoute("https://mike.dev.scoutingevent.com/asset.js")
+    await browser.context.route_handler(route)
+    assert route.aborted is True
+    assert route.continued is False
+
+
+async def test_block_dead_assets_continues_a_live_host() -> None:
+    browser = _RoutingBrowser()
+    gateway = PlaywrightScoutingEventGateway(browser, allow_dead_assets=False)  # type: ignore[arg-type]
+
+    async with gateway.open_session():
+        pass
+
+    route = _ParsedRoute("https://scoutingevent.com/mobile/schedule.js")
+    await browser.context.route_handler(route)
+    assert route.continued is True
+    assert route.aborted is False

@@ -24,7 +24,7 @@ def test_copied_release_root_starts_and_renders_a_report(tmp_path: Path) -> None
     # not just a health check, which would only prove the app boots, not that reporting works
     # from a copied root with no repository present.
     probe = (
-        "import sys; sys.path.insert(0, %r)\n"
+        f"import sys; sys.path.insert(0, {str(release_root)!r})\n"
         "from scoutmb.interfaces.web.app import create_app\n"
         "from scoutmb.config import UiSettings\n"
         "from scoutmb.interfaces.cli.composition import build_reporting_service\n"
@@ -53,7 +53,7 @@ def test_copied_release_root_starts_and_renders_a_report(tmp_path: Path) -> None
         "        present_days=''),),\n"
         "    errors=(),\n"
         ")\n"
-        "output_dir = pathlib.Path(%r)\n"
+        f"output_dir = pathlib.Path({str(output_dir)!r})\n"
         "build_reporting_service().publish(\n"
         "    output_dir, [result], generated_at_local='2026-08-05 09:00:00 UTC',\n"
         "    generated_at_iso='2026-08-05T09:00:00+00:00', run_identity=RunIdentity(),\n"
@@ -61,7 +61,7 @@ def test_copied_release_root_starts_and_renders_a_report(tmp_path: Path) -> None
         "report_html = output_dir / 'report.html'\n"
         "assert report_html.is_file() and report_html.stat().st_size > 0, 'report.html did not render'\n"
         "print('RELEASE_ROOT_ACCEPTANCE_OK')\n"
-    ) % (str(release_root), str(output_dir))
+    )
 
     # Run from release_root itself, with REPO_ROOT absent from sys.path/PYTHONPATH/cwd --
     # the "remove the repository from the environment" half of the acceptance sequence.

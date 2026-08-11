@@ -26,6 +26,7 @@ fixes:
 from __future__ import annotations
 
 import asyncio
+import functools
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from typing import Any
@@ -43,7 +44,7 @@ class JobSupervisor:
             existing.cancel()
         task = asyncio.create_task(coro)
         self._tasks[job_id] = task
-        task.add_done_callback(lambda finished, key=job_id: self._discard_if_current(key, finished))
+        task.add_done_callback(functools.partial(self._discard_if_current, job_id))
         return task
 
     def _discard_if_current(self, job_id: str, finished_task: asyncio.Task[Any]) -> None:

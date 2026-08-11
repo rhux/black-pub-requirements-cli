@@ -38,10 +38,9 @@ def test_save_then_load_round_trips(tmp_path) -> None:
     assert loaded == checkpoint
 
 
-def test_output_ids_is_genuinely_immutable(tmp_path) -> None:
+def test_output_ids_is_genuinely_immutable() -> None:
     """A dataclass's frozen=True freezes the FIELD REFERENCE, not a mutable dict sitting behind
     it -- Checkpoint.output_ids must be an actual read-only view, not merely typed Mapping."""
-    store = AtomicFileCheckpointStore(tmp_path / "checkpoint.json")
     mutable_source = {"attendee-1": "uuid-1"}
     checkpoint = Checkpoint(version=1, completed_urls=(), output_ids=mutable_source)
     mutable_source["attendee-1"] = "mutated-after-construction"
@@ -80,6 +79,15 @@ def test_corrupt_json_fails_closed(tmp_path) -> None:
     store = AtomicFileCheckpointStore(path)
     with pytest.raises(CorruptCheckpoint):
         store.load()
+
+
+def test_non_object_json_fails_closed(tmp_path) -> None:
+    """Valid JSON that isn't a top-level object (a bare list, string, or number) must fail
+    closed the same as malformed JSON -- json.loads happily parses any of these."""
+    path = tmp_path / "checkpoint.json"
+    path.write_text("[]", encoding="utf-8")
+    with pytest.raises(CorruptCheckpoint):
+        AtomicFileCheckpointStore(path).load()
 
 
 def test_wrong_version_fails_closed(tmp_path) -> None:
