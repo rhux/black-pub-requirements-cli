@@ -53,3 +53,14 @@ def test_header_stack_fallback_keeps_searching_past_a_too_deep_entry() -> None:
     back to a shallower one ("1", depth 1)."""
     tree = build_group_tree(("1", "1a", "2a"), ("3", "3", "1"))
     assert tree.parent_index[2] == 0
+
+
+def test_blank_requirement_number_produces_an_unregistered_empty_path() -> None:
+    """A row whose number is blank (or has no alnum tokens at all) resolves to an empty path --
+    ``requirement_path``'s own no-tokens case. It must stay unlinked (no parent, no children)
+    and must NOT register itself in prior_path_indexes, so a later row can't accidentally treat
+    it as a same-path duplicate."""
+    tree = build_group_tree(("", "1"), ("1", "1"))
+    assert tree.paths == ((), ("1",))
+    assert tree.parent_index == (None, None)
+    assert tree.children == ((), ())

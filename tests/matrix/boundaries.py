@@ -703,12 +703,13 @@ BOUNDARIES: tuple[BoundarySpec, ...] = (
     + _SCALE_BOUNDARIES
     + _FLOW_BOUNDARIES
 )
-# Scoped coverage areas (Task 22, step 8): the 5 production surfaces Phase A characterizes.
+# Scoped coverage areas (Task 22, step 8): the production surfaces Phase A characterizes.
+# The four legacy flat-module areas (schedule/pdf/ui/desktop) were removed once
+# scout_schedule_cli.py, pdf_to_scouts.py, ui/server.py, and run_app.py were deleted outright in
+# Slice 2b B10.3/B10.4 -- there is no file left for coverage.py to ever report against, so
+# tools/check_phase_a_coverage.py's "file never appears in coverage report" check would fail
+# permanently, not meaningfully, if they stayed.
 COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = (
-    CoverageAreaSpec("schedule", ("scout_schedule_cli.py",)),
-    CoverageAreaSpec("pdf", ("pdf_to_scouts.py",)),
-    CoverageAreaSpec("ui", ("ui/server.py",)),
-    CoverageAreaSpec("desktop", ("run_app.py",)),
     CoverageAreaSpec(
         "bootstrap",
         ("bootstrap/paths.py", "bootstrap/marker.py", "bootstrap/source_sync.py"),
@@ -778,90 +779,20 @@ COVERAGE_AREAS: tuple[CoverageAreaSpec, ...] = (
 # branch arc -- never a range -- with an honest reason it cannot reasonably be exercised from
 # this test suite.
 EXCLUSIONS: tuple[BranchExclusion, ...] = (
-    # --- `if __name__ == "__main__": raise SystemExit(main())` entry-point guards. The `if`
-    # line itself is always executed (and covered) at import time; only the body -- reachable
-    # solely when the module is run as a script, never when pytest imports it -- is missing.
-    BranchExclusion(
-        exclusion_id="EXC-MAIN-GUARD-SCHEDULE-STMT",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=907,
-        branch_to=None,
-        rationale=(
-            '`raise SystemExit(main())` under `if __name__ == "__main__":` only runs when '
-            "the module is executed as a script; pytest always imports it as a module, so "
-            '__name__ is never "__main__" during the test suite.'
-        ),
-        review_reference=(
-            "Task 22 step 9 review: entry-point guard, structurally unreachable under pytest. "
-            "Task 24 re-pin: line drifted from 1889 to 908 as Tasks 5-23 moved code out of "
-            "scout_schedule_cli.py into the package; re-verified against the current file."
-            "Fix-wave re-pin: line drifted from 908 to 907 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them)."
-        ),
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-MAIN-GUARD-SCHEDULE-BRANCH",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=906,
-        branch_to=907,
-        rationale=(
-            'The `if __name__ == "__main__":` true-branch arc to its body is never taken '
-            "for the same reason as EXC-MAIN-GUARD-SCHEDULE-STMT."
-        ),
-        review_reference=(
-            "Task 22 step 9 review: entry-point guard, structurally unreachable under pytest. "
-            "Task 24 re-pin: line drifted from 1888->1889 to 907->908 as Tasks 5-23 moved code "
-            "out of scout_schedule_cli.py into the package; re-verified against the current file."
-            "Fix-wave re-pin: line drifted from 907->908 to 906->907 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them)."
-        ),
-    ),
-    # EXC-MAIN-GUARD-PDF-STMT / EXC-MAIN-GUARD-PDF-BRANCH removed (Task 24 re-pin review):
-    # pdf_to_scouts.py's `if __name__ == "__main__":` guard used to be structurally unreachable
-    # under pytest, like its schedule/desktop siblings below -- but fixing the pytest-cov
-    # subprocess-coverage-combining bug uncovered by this same re-pin (see pyproject.toml's
-    # `--cov-branch` addopts entry) revealed that tests/compat/test_legacy_entrypoints.py's
-    # `subprocess.run([sys.executable, "pdf_to_scouts.py", "--help"])` genuinely executes this
-    # module as `__main__` and previously had its coverage silently discarded by a crashed
-    # `coverage combine`. Verified directly against coverage.json: pdf_to_scouts.py is 11/11
-    # statements, 2/2 branches with no exclusion needed. Kept as a stale-exclusion tripwire
-    # example in the Task 24 report rather than re-added.
-    BranchExclusion(
-        exclusion_id="EXC-MAIN-GUARD-DESKTOP-STMT",
-        area_id="desktop",
-        file="run_app.py",
-        line=89,
-        branch_to=None,
-        rationale=(
-            '`raise SystemExit(main())` under `if __name__ == "__main__":` only runs when '
-            "the module is executed as a script; pytest always imports it as a module."
-        ),
-        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-MAIN-GUARD-DESKTOP-BRANCH",
-        area_id="desktop",
-        file="run_app.py",
-        line=88,
-        branch_to=89,
-        rationale=(
-            'The `if __name__ == "__main__":` true-branch arc to its body is never taken '
-            "for the same reason as EXC-MAIN-GUARD-DESKTOP-STMT."
-        ),
-        review_reference="Task 22 step 9 review: entry-point guard, structurally unreachable under pytest.",
-    ),
-    # --- expand_pdf_inputs's Windows-glob fallback: the `for match in matches:` loop only
-    # returns to its own top (rather than falling into the if/elif bodies) for a glob match that
-    # is NEITHER a file NOR a directory -- e.g. a broken symlink, or a path deleted between
-    # glob.glob() and the is_file()/is_dir() checks. Constructing that portably (broken symlinks
-    # need elevated privileges to create on Windows, which this project also targets) would
-    # trade a real, meaningful test for a platform-fragile one; a genuine TOCTOU race is not
-    # something a deterministic unit test should simulate by deleting the path mid-call.
+    # The legacy flat-module exclusions (schedule/pdf/ui/desktop areas: scout_schedule_cli.py,
+    # ui/server.py, run_app.py) were removed here when those files were deleted outright in
+    # Slice 2b B10.3/B10.4 -- an exclusion for a line in a file that no longer exists is neither
+    # reachable nor stale in the checker's sense, it's just dead weight. See git history for the
+    # original entries if a future flat-module migration needs the pattern. One package-side
+    # exclusion (below) survived from that block: it targets pdf_extract.py, not a deleted file.
     #
-    # Task 24 re-pin: the real implementation moved from pdf_to_scouts.py:157-161 into
-    # scoutmb.features.ingest.pdf_extract.expand_pdf_inputs (Task 18); pdf_to_scouts.py itself
-    # is now a 59-line re-export shim with no such loop, so the old file/line no longer resolves
-    # to anything -- relocated to the package module and its area, same defensive branch.
+    # expand_pdf_inputs's Windows-glob fallback: the `for match in matches:` loop only returns
+    # to its own top (rather than falling into the if/elif bodies) for a glob match that is
+    # NEITHER a file NOR a directory -- e.g. a broken symlink, or a path deleted between
+    # glob.glob() and the is_file()/is_dir() checks. Constructing that portably (broken symlinks
+    # need elevated privileges on Windows, which this project also targets) would trade a real,
+    # meaningful test for a platform-fragile one; a genuine TOCTOU race is not something a
+    # deterministic unit test should simulate by deleting the path mid-call.
     BranchExclusion(
         exclusion_id="EXC-PDF-GLOB-NEITHER-FILE-NOR-DIR",
         area_id="pkg-features",
@@ -879,319 +810,10 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
             "Task 22 step 9 review: defensive branch, not portably testable across Windows+"
             "macOS. Task 24 re-pin: relocated from pdf_to_scouts.py:157-161 to "
             "scoutmb.features.ingest.pdf_extract.expand_pdf_inputs:49-53 (Task 18 moved the "
-            "implementation into the package); re-verified against the current file."
+            "implementation into the package); re-verified against the current file. Restored "
+            "here after being accidentally swept up in the Slice-2b-retirement legacy-exclusion "
+            "cleanup (it shared a comment block with the legacy entries but targets the package)."
         ),
-    ),
-    # --- ui/server._platform_data_root's OS dispatch. The project's own test policy (see
-    # tests/characterization/test_platform_matrix.py's docstring) never monkeypatches
-    # sys.platform, so only the branch matching THIS host's real platform can execute in any
-    # one CI run; the other two are exercised for real on their own OS's CI job.
-    BranchExclusion(
-        exclusion_id="EXC-UI-PLATFORM-WIN32-STMT-BASE",
-        area_id="ui",
-        file="ui/server.py",
-        line=42,
-        branch_to=None,
-        rationale=(
-            '`os.environ.get("LOCALAPPDATA")` inside the `sys.platform == "win32"` branch '
-            "only runs on a real Windows host; this suite never monkeypatches sys.platform "
-            "(tests/characterization/test_platform_matrix.py's documented policy)."
-        ),
-        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-UI-PLATFORM-WIN32-STMT-IF",
-        area_id="ui",
-        file="ui/server.py",
-        line=43,
-        branch_to=None,
-        rationale="Same win32-only branch as EXC-UI-PLATFORM-WIN32-STMT-BASE.",
-        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-UI-PLATFORM-WIN32-STMT-RETURN",
-        area_id="ui",
-        file="ui/server.py",
-        line=44,
-        branch_to=None,
-        rationale="Same win32-only branch as EXC-UI-PLATFORM-WIN32-STMT-BASE.",
-        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-UI-PLATFORM-LINUX-FALLBACK-STMT",
-        area_id="ui",
-        file="ui/server.py",
-        line=47,
-        branch_to=None,
-        rationale=(
-            'The final `return Path.home() / ".local" / "share" / ...` fallback only '
-            "executes when sys.platform is neither win32 nor darwin; this host is darwin, so "
-            "the darwin branch returns first. Exercised for real on Linux CI."
-        ),
-        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-UI-PLATFORM-BRANCH-ENTER-WIN32",
-        area_id="ui",
-        file="ui/server.py",
-        line=41,
-        branch_to=42,
-        rationale="The win32-true arc of the platform dispatch; same reasoning as EXC-UI-PLATFORM-WIN32-STMT-BASE.",
-        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-UI-PLATFORM-BRANCH-LOCALAPPDATA-TRUE",
-        area_id="ui",
-        file="ui/server.py",
-        line=43,
-        branch_to=44,
-        rationale="The win32-true inner arc; same reasoning as EXC-UI-PLATFORM-WIN32-STMT-BASE.",
-        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-UI-PLATFORM-BRANCH-LOCALAPPDATA-FALSE",
-        area_id="ui",
-        file="ui/server.py",
-        line=43,
-        branch_to=47,
-        rationale=(
-            "The win32-but-no-LOCALAPPDATA arc falling through to the final fallback; only "
-            "reachable on a real Windows host with LOCALAPPDATA unset."
-        ),
-        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-UI-PLATFORM-BRANCH-DARWIN-FALSE",
-        area_id="ui",
-        file="ui/server.py",
-        line=45,
-        branch_to=47,
-        rationale=(
-            "The darwin-elif-false arc: on this host sys.platform IS darwin, so this arc "
-            "(reached only when it is neither win32 nor darwin) never taken here; exercised "
-            "for real on Linux CI."
-        ),
-        review_reference="Task 22 step 9 review: OS-dispatch branch, exercised for real on its own OS's CI job.",
-    ),
-    # --- ui.server.open_emails_folder's success path. Already pinned, not just excluded: see
-    # UI-ROUTE-023 (tests/matrix/cases/interface_cases.py), an intentional_change case that
-    # asserts the REAL current behavior on this host is an unhandled 500 (os.startfile does not
-    # exist on non-Windows Python). :387's `return {"opened": True}` is therefore reachable only
-    # on real Windows; Slice 2 owns making this route dispatch on sys.platform.
-    BranchExclusion(
-        exclusion_id="EXC-UI-OPEN-EMAILS-WINDOWS-ONLY",
-        area_id="ui",
-        file="ui/server.py",
-        line=387,
-        branch_to=None,
-        rationale=(
-            "os.startfile does not exist on macOS/Linux, so this line is only reachable on "
-            "real Windows; UI-ROUTE-023 already pins the current (non-Windows) behavior as an "
-            "unhandled 500, an intentional-change owned by Slice 2 (cross-platform folder-open)."
-        ),
-        review_reference="Task 22 step 9 review: see UI-ROUTE-023 in tests/matrix/cases/interface_cases.py.",
-    ),
-    # =========================================================================================
-    # Task 24 review: gaps found while re-deriving the baseline for the first time since Task 22
-    # made write_outputs a "Form-2 shim" delegating to ReportingService.publish, and since the
-    # four pkg-* areas above were characterized for the first time. Reviewed the same way as
-    # Task 22 step 9: a genuine attempt to close each one with a real test first; each entry
-    # below records why that attempt did not close it.
-    # =========================================================================================
-    #
-    # --- scout_schedule_cli.write_html_report and its helper
-    # _assert_blank_identity_results_have_no_records are now entirely unreached. Before Task 22
-    # (commit ef5dd77), write_outputs called write_html_report directly; write_outputs now
-    # delegates the real report-composition/write path to ReportingService.publish (its own,
-    # independently-tested equivalent logic -- see the pkg-features/service.py entries below),
-    # and no test calls scout_schedule_cli.write_html_report directly (only write_email_reports,
-    # a sibling function, is still exercised that way). A genuine attempt to close this by
-    # calling write_html_report directly is deferred: this legacy copy is slated for retirement
-    # together with the rest of tests/harnesses/legacy.py at the START of Slice 2b (see this
-    # plan's "Deferred to Slice 2b" section), so a same-slice test investment here would be
-    # thrown away almost immediately. Every statement and branch in the two functions'
-    # (unreachable) bodies is listed individually, matching this table's one-line-or-arc
-    # convention.
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-STMT-FOR",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=491,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); this is its dead helper's loop header.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 493 to 491 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-STMT-IF",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=492,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); this is its dead helper's identity check.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 494 to 492 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-STMT-CONTINUE",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=493,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); this is its dead helper's continue.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 495 to 493 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-STMT-RECORDS-IF",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=494,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); this is its dead helper's records check.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 496 to 494 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-STMT-RAISE",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=495,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); this is its dead helper's raise.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 497 to 495 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-NOENTRY",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=491,
-        branch_to=-478,
-        rationale="write_html_report is unreached (see section header); zero-entry exit of the dead helper's loop.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 493->-480 to 491->-478 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-ENTRY",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=491,
-        branch_to=492,
-        rationale="write_html_report is unreached (see section header); loop-entry arc of the dead helper.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 493->494 to 491->492 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-CONTINUE-TRUE",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=492,
-        branch_to=493,
-        rationale="write_html_report is unreached (see section header); identity-blank arc of the dead helper.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 494->495 to 492->493 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-CONTINUE-FALSE",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=492,
-        branch_to=494,
-        rationale="write_html_report is unreached (see section header); identity-present arc of the dead helper.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 494->496 to 492->494 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-NORECORDS",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=494,
-        branch_to=491,
-        rationale="write_html_report is unreached (see section header); no-records loop-back arc of the dead helper.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 496->493 to 494->491 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-BLANK-GUARD-BRANCH-HASRECORDS",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=494,
-        branch_to=495,
-        rationale="write_html_report is unreached (see section header); has-records raise arc of the dead helper.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 496->497 to 494->495 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-ASSERT-CALL",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=747,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); the assert-guard call at its top.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 749 to 747 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-CLASSES",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=748,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); the classes projection.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 750 to 748 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-REQUIREMENTS",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=749,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); the annotated-requirements projection.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 751 to 749 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-ERRORS",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=752,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); the errors projection.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 754 to 752 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-SCOUTS",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=757,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); the scouts-summary projection.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 759 to 757 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-DATA",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=767,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); the assembled report_data dict.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 769 to 767 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-DEAD-HTML-REPORT-WRITE",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=777,
-        branch_to=None,
-        rationale="write_html_report is unreached (see section header); the final render+atomic_write_text call.",
-        review_reference="Task 24 review: write_outputs no longer calls write_html_report (Task 22, commit ef5dd77). Fix-wave re-pin: line drifted from 779 to 777 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
-    ),
-    # --- scout_schedule_cli._assert_blank_identity_scouts_have_no_records IS actively exercised
-    # (write_email_reports calls it, and every ART-EMAIL-*/privacy test that constructs a
-    # blank-identity scout does so specifically to prove the guard raises), but only the
-    # has-records arc: no test constructs a blank-identity scout with genuinely empty
-    # classes/requirements (the actual common shape for a scout that failed before identity
-    # resolution), so the loop-continues-without-raising arc is never taken.
-    BranchExclusion(
-        exclusion_id="EXC-SCHEDULE-BLANK-SCOUT-GUARD-NORECORDS-CONTINUES",
-        area_id="schedule",
-        file="scout_schedule_cli.py",
-        line=523,
-        branch_to=517,
-        rationale=(
-            "Every test that builds a blank-identity scout dict for this guard gives it "
-            "non-empty classes/requirements specifically to prove the guard raises; none "
-            "exercises the passing case (blank identity, empty records) that this arc covers."
-        ),
-        review_reference="Task 24 review: genuine attempt made; every existing caller targets the raising arc only. Fix-wave re-pin: line drifted from 525->519 to 523->517 after the final-review fix wave's mypy edits to scout_schedule_cli.py (Mapping import, ScoutInput aliasing, and a type: ignore comment on the publish() call all shifted line numbers below them).",
     ),
     # --- pkg-core: core.inference.missing.select_actionable's ancestor walk. `parent_index is
     # None` fires only when a row's own `parent_requirement_number` names a number that never

@@ -87,10 +87,10 @@ def test_copied_release_root_scoutmb_is_importable_via_the_dot_pth_entry(tmp_pat
     pth_file.write_text(str(app_dir) + "\n", encoding="utf-8")
 
     probe = (
-        "import sys; sys.path.insert(0, %r)\n"
+        f"import sys; sys.path.insert(0, {str(app_dir)!r})\n"
         "import scoutmb.core.models\n"
         "print('SCOUTMB_IMPORT_OK')\n"
-    ) % str(app_dir)
+    )
     result = subprocess.run(
         [sys.executable, "-I", "-c", probe], capture_output=True, text=True, timeout=30
     )

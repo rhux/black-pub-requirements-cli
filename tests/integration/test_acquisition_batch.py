@@ -4,6 +4,7 @@ simulated process restart."""
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -368,3 +369,47 @@ async def test_run_batch_prints_legacy_style_progress(tmp_path, capsys) -> None:
     out = capsys.readouterr().out
     assert "[1/1] Avery" in out
     assert "attendeeID=90000001, classes=0, requirements=0, errors=0" in out
+
+
+async def test_pause_resume_without_a_run_state_skips_the_transition_calls(tmp_path) -> None:
+    """run_batch's own signature allows run_state=None (a standalone/test caller need not build
+    a RunStateMachine at all) -- unlike run_schedule_pipeline, which always constructs one, so
+    this is the only path that exercises the `run_state is not None` guards' FALSE arm around
+    the RunEvent.PAUSE/RESUME calls. progress_callback's paused/resumed events must still fire;
+    only the run_state.apply() calls are skipped."""
+    checkpoint_store = AtomicFileCheckpointStore(tmp_path / "checkpoint.json")
+    clock = FakeClock()
+    script = StrictScript((_sched("90000001", _schedule_payload()),))
+    browser = StrictFakeBrowser(script, clock)
+    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    service = _service(browser, retry_policy)
+
+    events: list[dict] = []
+
+    async def progress_callback(event: dict) -> None:
+        events.append(event)
+
+    resume_event = asyncio.Event()  # starts unset -> hits the "paused" branch
+
+    async def set_resume_soon() -> None:
+        await asyncio.sleep(0)
+        resume_event.set()
+
+    task = asyncio.ensure_future(set_resume_soon())
+    await run_batch(
+        [ScoutInput(name="Avery", url="https://scoutingevent.com/mobile/checkin?t=A")],
+        service=service,
+        retry_policy=retry_policy,
+        checkpoint_store=checkpoint_store,
+        run_identity=RunIdentity(),
+        config=AcquisitionConfig(timeout_seconds=5, request_delay_ms=0),
+        raw_dir=tmp_path / "raw",
+        progress_callback=progress_callback,
+        resume_event=resume_event,
+        run_state=None,
+    )
+    await task
+
+    types = [event["type"] for event in events]
+    assert "paused" in types
+    assert "resumed" in types

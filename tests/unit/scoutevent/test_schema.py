@@ -53,6 +53,20 @@ def test_sample_redacts_known_sensitive_key_names() -> None:
     assert "REDACTED" in exc_info.value.sample
 
 
+def test_flag_passes_through_a_real_bool_without_string_coercion() -> None:
+    """A row can carry an actual Python bool (not just the string flags REST/CSV sources use);
+    _flag must return it as-is rather than falling through to the string-comparison branch."""
+    row = {
+        "MDM_LKP_BADGE_REQ_ID": "77",
+        "REQ_NBR": "#1",
+        "COMPLETED_REQ_FLAG": True,
+        "COMPLETED_CLASS_FLAG": False,
+    }
+    validated = validate_requirement_row(row)
+    assert validated["completed_requirement"] is True
+    assert validated["completed_class"] is False
+
+
 def test_sample_stays_bounded_even_when_huge() -> None:
     huge_description = "x" * 5000
     with pytest.raises(ScoutingEventSchemaDrift) as exc_info:

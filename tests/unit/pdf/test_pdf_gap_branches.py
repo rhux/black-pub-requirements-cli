@@ -12,10 +12,16 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
-from tests.factories.pdf_builder import build_pdf
+from tests.factories.pdf_builder import build_corrupt_pdf, build_multi_qr_image, build_pdf
 from tests.matrix.cases.pdf_cases import PdfPageSpec
 
-from scoutmb.adapters.pdf.extract import add_quiet_zone, decode_variants, render_page
+from scoutmb.adapters.pdf.extract import (
+    add_quiet_zone,
+    choose_qr_value,
+    decode_rendered_qr,
+    decode_variants,
+    render_page,
+)
 from scoutmb.adapters.pdf.extract import decode_embedded_qr_from_page as decode_embedded_qr
 from scoutmb.adapters.pdf.pages import extract_pdf, value_after_label
 from scoutmb.features.ingest.pdf_extract import expand_pdf_inputs
@@ -44,6 +50,45 @@ def test_expand_pdf_inputs_glob_matching_a_directory_recurses(
     monkeypatch.chdir(tmp_path)
     result = expand_pdf_inputs(["sub*"], recursive=False)
     assert sorted(p.name for p in result) == ["a.pdf", "b.pdf"]
+
+
+def test_expand_pdf_inputs_ignores_a_literal_non_pdf_file(tmp_path: Path) -> None:
+    """A directly-named file that exists but isn't a .pdf takes the `expanded.is_file()` branch
+    and then skips the append -- the `if expanded.suffix.lower() == ".pdf":` FALSE arm."""
+    non_pdf = tmp_path / "notes.txt"
+    non_pdf.write_text("not a pdf")
+    result = expand_pdf_inputs([str(non_pdf)], recursive=False)
+    assert result == []
+
+
+def test_expand_pdf_inputs_accepts_a_literal_directory_path(tmp_path: Path) -> None:
+    """A directory named directly (not via a glob pattern) takes the `expanded.is_dir()`
+    branch, not the Windows-glob fallback the sibling glob-matching-a-directory test covers."""
+    (tmp_path / "a.pdf").write_bytes(b"%PDF-1.4\n%%EOF")
+    (tmp_path / "not-a-pdf.txt").write_bytes(b"ignored")
+    result = expand_pdf_inputs([str(tmp_path)], recursive=False)
+    assert [p.name for p in result] == ["a.pdf"]
+
+
+def test_expand_pdf_inputs_glob_matching_a_single_pdf_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A glob pattern that resolves to a single PDF FILE (not a directory) takes the
+    `path.is_file()` branch inside the Windows-glob fallback loop."""
+    (tmp_path / "only.pdf").write_bytes(b"%PDF-1.4\n%%EOF")
+    monkeypatch.chdir(tmp_path)
+    result = expand_pdf_inputs(["only.*"], recursive=False)
+    assert [p.name for p in result] == ["only.pdf"]
+
+
+def test_expand_pdf_inputs_deduplicates_a_path_discovered_twice(tmp_path: Path) -> None:
+    """The same PDF reachable through two distinct input values (a direct file path and the
+    directory containing it) must appear exactly once -- exercising the dedup loop's
+    already-seen skip, not just its first-time-append path."""
+    pdf_path = tmp_path / "shared.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF")
+    result = expand_pdf_inputs([str(pdf_path), str(tmp_path)], recursive=False)
+    assert [p.name for p in result] == ["shared.pdf"]
 
 
 def test_value_after_label_skips_blank_candidates_and_headers_without_a_value() -> None:
@@ -97,6 +142,46 @@ class _BoomingDetector:
 def test_decode_variants_recovers_from_detector_errors() -> None:
     image = np.zeros((40, 40), dtype=np.uint8)
     assert decode_variants(image, _BoomingDetector()) == []
+
+
+def test_decode_variants_finds_a_second_symbol_via_multi_decode() -> None:
+    """A stitched two-symbol image: single-shot detectAndDecode can resolve at most one QR, so
+    the second distinct value can only come from the detectAndDecodeMulti branch."""
+    image = build_multi_qr_image(("MULTI-VALUE-ONE", "MULTI-VALUE-TWO"))
+    detector = cv2.QRCodeDetector()
+    values = decode_variants(image, detector)
+    assert set(values) == {"MULTI-VALUE-ONE", "MULTI-VALUE-TWO"}
+
+
+def test_choose_qr_value_falls_back_to_first_non_prefixed_candidate() -> None:
+    values = ["https://example.com/other-a", "https://example.com/other-b"]
+    assert choose_qr_value(values) == "https://example.com/other-a"
+
+
+class _QrPixmap:
+    def __init__(self, image: np.ndarray) -> None:
+        rgb = np.stack([image, image, image], axis=-1)
+        self.height, self.width = image.shape
+        self.n = 3
+        self.samples = rgb.tobytes()
+
+
+class _QrRenderPage:
+    def __init__(self, image: np.ndarray) -> None:
+        self._image = image
+
+    def get_pixmap(self, dpi: int, alpha: bool = False):
+        return _QrPixmap(self._image)
+
+
+def test_decode_rendered_qr_returns_on_first_successful_region_decode() -> None:
+    image = build_multi_qr_image(("RENDERED-VALUE",))
+    page = _QrRenderPage(image)
+    detector = cv2.QRCodeDetector()
+    value, method, rendered_image = decode_rendered_qr(page, detector, dpis=(144,))
+    assert value == "RENDERED-VALUE"
+    assert method == "rendered:144dpi:full-page"
+    assert rendered_image is not None
 
 
 # =================================================================================================
@@ -210,6 +295,33 @@ def test_extract_pdf_debug_render_fallback_requires_a_non_empty_dpis(tmp_path: P
     with pytest.raises(ValueError, match="empty"):
         extract_pdf(pdf_path, dpis=(), normalize_case=True, debug_dir=debug_dir)
     assert debug_dir.is_dir()  # mkdir ran before the crash
+
+
+def test_extract_pdf_records_a_bounded_error_for_an_unopenable_pdf(tmp_path: Path) -> None:
+    pdf_path = build_corrupt_pdf(tmp_path / "corrupt.pdf")
+    attendees, errors = extract_pdf(pdf_path, dpis=(144,), normalize_case=True, debug_dir=None)
+    assert attendees == []
+    assert len(errors) == 1
+    assert errors[0].source_pdf == "corrupt.pdf"
+    assert "Could not open PDF" in errors[0].error
+
+
+def test_extract_pdf_records_missing_name_and_registrant_type(tmp_path: Path) -> None:
+    pdf_path = build_pdf(tmp_path / "blank.pdf", (PdfPageSpec("", "", "", "none"),))
+    _attendees, errors = extract_pdf(pdf_path, dpis=(144,), normalize_case=True, debug_dir=None)
+    assert len(errors) == 1
+    assert "attendee name" in errors[0].error
+    assert "registrant type" in errors[0].error
+    assert "QR code" in errors[0].error
+
+
+def test_extract_pdf_writes_a_debug_png_when_the_qr_is_genuinely_missing(tmp_path: Path) -> None:
+    pdf_path = build_pdf(tmp_path / "one.pdf", (PdfPageSpec("Avery Archer", "Youth", "", "none"),))
+    debug_dir = tmp_path / "debug"
+    extract_pdf(pdf_path, dpis=(100,), normalize_case=True, debug_dir=debug_dir)
+    written = list(debug_dir.glob("*.png"))
+    assert len(written) == 1
+    assert written[0].stat().st_size > 0
 
 
 # =================================================================================================
