@@ -11,9 +11,7 @@ no real file access outside ``tmp_path``.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
-import sys
 from pathlib import Path
 
 import pdf_to_scouts
@@ -946,137 +944,14 @@ def test_bootstrap_marker_write_marker_writes_a_valid_marker(
 # now proves the equivalent guarantee against the package's own create_app/bind_loopback_socket.
 
 
-# =================================================================================================
-# ui/server.py -- the sys.path.insert(0, ...) import-time guard's true branch, never exercised
-# because the repo root is already on sys.path by the time every other test imports ui.server.
-# =================================================================================================
-
-
-def test_ui_server_inserts_repo_root_onto_sys_path_when_absent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import ui.server as server_module
-
-    repo_root = str(server_module.REPO_ROOT)
-    had_it = repo_root in sys.path
-    if had_it:
-        monkeypatch.setattr(sys, "path", [p for p in sys.path if p != repo_root])
-    try:
-        importlib.reload(server_module)
-        assert repo_root in sys.path
-    finally:
-        importlib.reload(server_module)  # restore normal module state for later tests
-
-
-# =================================================================================================
-# ui/server.py -- _safe_run_id's SECOND check, new_run_id's real collision loop, an empty file
-# list reaching start_pdf_extract's own guard (HTTP validation rejects it first, so only a direct
-# call reaches this line), the stale-uploads cleanup branch, and the warnings-count branch --
-# none of which the existing UI-ROUTE/RUN-ID catalog needed for its own contract.
-# =================================================================================================
-
-
-async def test_safe_run_id_rejects_a_bare_dot_via_the_resolved_parent_check(tmp_path: Path) -> None:
-    """ "." contains none of '/', '\\\\', '..' (the first guard), but RUNS_DIR/"." resolves to
-    RUNS_DIR itself, whose parent is RUNS_DIR's parent, not RUNS_DIR -- exactly the mismatch the
-    second check (:106-107) exists to catch."""
-    from tests.harnesses.legacy import load_legacy_ui
-
-    async with load_legacy_ui(tmp_path) as module:
-        with pytest.raises(module.HTTPException) as excinfo:
-            module._safe_run_id(".")
-        assert excinfo.value.status_code == 400
-
-
-async def test_new_run_id_appends_a_numeric_suffix_on_collision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from tests.harnesses.legacy import load_legacy_ui
-
-    async with load_legacy_ui(tmp_path) as module:
-        fixed = "2026-07-24_1200"
-        # monkeypatch (not a raw attribute assignment) so the ORIGINAL strftime is captured and
-        # restored automatically -- module.time IS the real global time module singleton, so a
-        # bare reassignment without saving the true original first would permanently corrupt
-        # time.strftime for every other test in the session.
-        monkeypatch.setattr(module.time, "strftime", lambda fmt: fixed)
-        (module.RUNS_DIR / fixed).mkdir(parents=True)
-        assert module.new_run_id() == f"{fixed}-2"
-        (module.RUNS_DIR / f"{fixed}-2").mkdir(parents=True)
-        assert module.new_run_id() == f"{fixed}-3"
-
-
-async def test_start_pdf_extract_rejects_an_empty_file_list_directly(tmp_path: Path) -> None:
-    """FastAPI's own validation rejects a request with the 'files' field omitted entirely
-    before the route body ever runs (see UI-ROUTE-006's docstring) -- reaching the route's own
-    "if not files" guard (:157) requires calling the function directly with files=[]."""
-    from tests.harnesses.legacy import load_legacy_ui
-
-    async with load_legacy_ui(tmp_path) as module:
-        with pytest.raises(module.HTTPException) as excinfo:
-            await module.start_pdf_extract(files=[])
-        assert excinfo.value.status_code == 400
-
-
-class _FakeUpload:
-    def __init__(self, filename: str, content: bytes) -> None:
-        self.filename = filename
-        self._content = content
-
-    async def read(self) -> bytes:
-        return self._content
-
-
-async def test_start_pdf_extract_cleans_stale_uploads_and_counts_warnings(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Pre-seeds PDF_UPLOADS_DIR with a stale file from a prior run (:166-168's cleanup branch)
-    and makes pdf_to_scouts.main write an errors CSV so the worker's warnings count (:196-198)
-    is exercised, not just its errors.exists()-is-False path."""
-    from tests.harnesses.legacy import load_legacy_ui
-
-    async with load_legacy_ui(tmp_path) as module:
-        module.PDF_UPLOADS_DIR.mkdir(parents=True)
-        stale = module.PDF_UPLOADS_DIR / "old-upload.pdf"
-        stale.write_bytes(b"stale")
-
-        def fake_main(argv: list[str], *, progress_callback=None) -> int:
-            out_path = Path(argv[argv.index("-o") + 1])
-            out_path.write_text(
-                "Attendee Name,Registrant Type,QR Code Contents\r\n"
-                "Avery Archer,Youth,https://scoutingevent.com/mobile/x\r\n",
-                encoding="utf-8-sig",
-            )
-            errors_csv = out_path.with_name(f"{out_path.stem}.errors.csv")
-            errors_csv.write_text(
-                "scout_name,attendee_id,error\r\nSomeone,123,boom\r\n", encoding="utf-8-sig"
-            )
-            return 1
-
-        monkeypatch.setattr(module.pdf_to_scouts, "main", fake_main)
-        response = await module.start_pdf_extract(files=[_FakeUpload("a.pdf", b"%PDF-1.4")])
-        operation_id = json.loads(response.body)["operation_id"]
-        queue = module.operations[operation_id]
-
-        events = []
-        while True:
-            event = await asyncio.wait_for(queue.get(), timeout=5)
-            if event is None:
-                break
-            events.append(event)
-        del module.operations[operation_id]
-
-        assert not stale.exists()  # the stale upload was cleaned up before the new one was saved
-        batch_done = next(event for event in events if event["type"] == "batch_done")
-        assert batch_done["warnings"] == 1
-
-
-# ui/server.py:387 (open_emails_folder's success `return {"opened": True}`) is NOT closed with a
-# test here. UI-ROUTE-023 (tests/matrix/cases/interface_cases.py) already pins the CURRENT real
-# behavior of this route on a non-Windows host: os.startfile does not exist on macOS/Linux, so
-# the real route raises AttributeError (surfaced as an unhandled 500) whenever emails_dir exists
-# -- :387 is only reachable on real Windows, and that gap is an intentional-change already
-# deferred to Slice 2 ("dispatch on sys.platform"). Monkeypatching os.startfile here would pin
-# behavior this codebase does not actually have on this platform, which is exactly what
-# UI-ROUTE-023 already documents; see tests/matrix/boundaries.py's EXCLUSIONS for the honest
-# coverage exclusion instead.
+# ui/server.py's whole gap-closure section (the sys.path.insert import-time guard;
+# _safe_run_id's second check; new_run_id's collision loop; an empty file list reaching
+# start_pdf_extract's own guard directly; the stale-uploads-cleanup/warnings-count branches) was
+# removed here alongside ui/server.py and tests/harnesses/legacy.py themselves (B10.3). The
+# sys.path.insert guard has no package equivalent at all -- packages never need it, and
+# tests/architecture bans sys.path mutation anywhere in src/scoutmb outright. The other four gaps
+# now have package-side equivalents in tests/parity/test_local_web_parity.py:
+# test_safe_run_id_rejects_a_bare_dot_via_the_resolved_parent_check,
+# test_new_run_id_appends_a_numeric_suffix_on_collision,
+# test_start_pdf_extract_rejects_an_empty_file_list_when_called_directly, and
+# test_pdf_extract_cleans_stale_uploads_and_counts_warnings.

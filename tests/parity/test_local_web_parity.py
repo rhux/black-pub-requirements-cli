@@ -558,3 +558,104 @@ async def test_wrong_http_method_matches_legacy(
     else:
         assert response.status_code == 405
         assert response.json() == {"detail": "Method Not Allowed"}
+
+
+# --------------------------------------------------------------------------------------------
+# Package equivalents of tests/characterization/test_phase_a_gap_closure.py's ui/server.py-
+# specific gap-closure tests (deleted alongside ui/server.py in B10.3): _safe_run_id's second
+# check, _new_run_id's real collision loop, an empty file list reaching start_pdf_extract's own
+# guard directly (unreachable via a real HTTP client -- see UI-ROUTE-006's docstring, which
+# applies identically here), and the stale-uploads-cleanup/warnings-count branches.
+# --------------------------------------------------------------------------------------------
+def test_safe_run_id_rejects_a_bare_dot_via_the_resolved_parent_check(tmp_path: Path) -> None:
+    """"." contains none of '/', '\\\\', '..' (the first guard), but runs_dir/"." resolves to
+    runs_dir itself, whose parent is runs_dir's parent, not runs_dir -- exactly the mismatch the
+    second check exists to catch."""
+    from fastapi import HTTPException
+
+    settings = UiSettings(data_root=tmp_path)
+    with pytest.raises(HTTPException) as excinfo:
+        routes_module._safe_run_id(settings, ".")
+    assert excinfo.value.status_code == 400
+
+
+def test_new_run_id_appends_a_numeric_suffix_on_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = UiSettings(data_root=tmp_path)
+    settings.ensure_dirs()
+    fixed = "2026-07-24_1200"
+    monkeypatch.setattr(routes_module.time, "strftime", lambda fmt: fixed)
+    (settings.runs_dir / fixed).mkdir(parents=True)
+    assert routes_module._new_run_id(settings) == f"{fixed}-2"
+    (settings.runs_dir / f"{fixed}-2").mkdir(parents=True)
+    assert routes_module._new_run_id(settings) == f"{fixed}-3"
+
+
+def _fake_request_for(settings: UiSettings):
+    from types import SimpleNamespace
+
+    from scoutmb.runtime.jobs import JobSupervisor
+
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                settings=settings, job_registry=JobSupervisor(), operations={}
+            )
+        )
+    )
+
+
+async def test_start_pdf_extract_rejects_an_empty_file_list_when_called_directly(
+    tmp_path: Path,
+) -> None:
+    """Reaching the route's own "if not files" guard requires calling the function directly
+    with files=[] -- FastAPI's own validation always rejects an entirely-omitted field with 422
+    first when driven through a real client (see UI-ROUTE-006/
+    test_pdf_extract_with_files_field_omitted_returns_422), so this branch is otherwise dead."""
+    settings = UiSettings(data_root=tmp_path)
+    request = _fake_request_for(settings)
+    with pytest.raises(routes_module.HTTPException) as excinfo:
+        await routes_module.start_pdf_extract(request, files=[])
+    assert excinfo.value.status_code == 400
+
+
+async def test_pdf_extract_cleans_stale_uploads_and_counts_warnings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pre-seeds pdf_uploads_dir with a stale file from a prior run (the is_file()-guarded
+    cleanup branch) and makes pdf_cli.main write an errors CSV so the worker's warnings count is
+    exercised, not just its errors.exists()-is-False path."""
+
+    def fake_main(argv: list[str], *, progress_callback=None) -> int:
+        out_path = Path(argv[argv.index("-o") + 1])
+        out_path.write_text(
+            "Attendee Name,Registrant Type,QR Code Contents\r\n"
+            "Avery Archer,Youth,https://scoutingevent.com/mobile/x\r\n",
+            encoding="utf-8-sig",
+        )
+        errors_csv = out_path.with_name(f"{out_path.stem}.errors.csv")
+        errors_csv.write_text(
+            "scout_name,attendee_id,error\r\nSomeone,123,boom\r\n", encoding="utf-8-sig"
+        )
+        return 1
+
+    monkeypatch.setattr(routes_module.pdf_cli, "main", fake_main)
+    async with _client_for(tmp_path) as (client, settings):
+        settings.pdf_uploads_dir.mkdir(parents=True)
+        stale = settings.pdf_uploads_dir / "old-upload.pdf"
+        stale.write_bytes(b"stale")
+
+        before = _tasks_snapshot()
+        resp = await client.post(
+            "/api/pdf-extract", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")}
+        )
+        assert resp.status_code == 202
+        operation_id = resp.json()["operation_id"]
+        task = _only_spawned_task(before)
+        await asyncio.wait_for(task, timeout=5)
+        events = await _drain(client, operation_id)
+
+        assert not stale.exists()  # the stale upload was cleaned up before the new one was saved
+        batch_done = next(event for event in events if event["type"] == "batch_done")
+        assert batch_done["warnings"] == 1
