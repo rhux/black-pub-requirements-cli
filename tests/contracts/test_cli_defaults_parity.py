@@ -9,13 +9,13 @@ import sys
 
 import pytest
 
-import scout_schedule_cli as cli
 from scoutmb.config import ScheduleConfig
+from scoutmb.interfaces.cli.schedule import parse_args
 
 
 def test_parse_args_defaults_equal_scheduleconfig_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "argv", ["scout_schedule_cli.py", "--input", "scouts.csv"])
-    parsed = cli.parse_args()
+    monkeypatch.setattr(sys, "argv", ["troop349-schedule", "--input", "scouts.csv"])
+    parsed = parse_args()
     defaults = ScheduleConfig(input=parsed.input)
 
     for field in dataclasses.fields(ScheduleConfig):

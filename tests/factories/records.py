@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from scout_schedule_cli import ClassRecord, RequirementRecord
+from scoutmb.core.models import ClassRecord, RequirementRecord
 
 
 def make_requirement(**overrides: Any) -> RequirementRecord:

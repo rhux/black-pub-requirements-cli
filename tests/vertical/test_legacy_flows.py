@@ -4,24 +4,23 @@ Covers ``FLOW-SUCCESS-001`` and ``FLOW-PARTIAL-001``: a genuine wire-up of FIVE 
 stages through ONE flow test each --
 
 1. A generated PDF (Task 18's real ``tests.factories.pdf_builder.build_pdf``).
-2. The REAL ``pdf_to_scouts.main`` (extraction + attendee CSV writing).
-3. The REAL ``scout_schedule_cli.load_inputs``.
-4. The REAL ``scout_schedule_cli.main`` -> ``async_main`` -> ``run()`` ->
-   ``run_schedule_pipeline`` -> ``process_scout``-equivalent acquisition -- driven by Task 19's
-   strict fake Browser/Context/Page (``tests/fakes/browser.py``, ``tests/fakes/acquisition.py``,
-   ``tests/fakes/clock.py``). B10.2 moved browser construction into
-   ``scoutmb.interfaces.cli.composition.build_launched_browser``, so that -- not
-   ``cli.async_playwright`` -- is what this file monkeypatches now, to a fake async context
-   manager yielding a ``StrictFakeBrowser`` directly; the acquisition machinery itself is never
-   monkeypatched here, unlike ``tests/matrix/cases/cli_cases.py``'s CLI-SCHED catalog: this file
-   exists specifically to prove the real pipeline works end to end against the strict fakes, one
-   layer above where ``tests/characterization/test_acquisition_matrix.py`` already proves it for
-   a single scout.
-5. The REAL ``annotate_requirement_statuses``/``write_outputs`` (invoked internally by the
-   pipeline) and the REAL UI read routes (the package's own
-   ``scoutmb.interfaces.web.app.create_app``, B10.3 -- replacing Task 21's
-   ``tests.harnesses.legacy.load_legacy_ui`` harness, deleted alongside ui/server.py itself)
-   reading the generated output directory.
+2. The REAL ``scoutmb.interfaces.cli.pdf.main`` (extraction + attendee CSV writing) -- retired
+   ``pdf_to_scouts.py``'s own re-export, repointed directly at the package in Slice 2b B10.4.
+3. The REAL ``scoutmb.features.ingest.service.IngestService`` (what retired
+   ``scout_schedule_cli.load_inputs`` delegated to).
+4. The REAL ``scoutmb.interfaces.cli.schedule.main`` -> ``run()`` -> ``run_schedule_pipeline`` ->
+   acquisition -- driven by Task 19's strict fake Browser/Context/Page (``tests/fakes/
+   browser.py``, ``tests/fakes/acquisition.py``, ``tests/fakes/clock.py``). B10.2 moved browser
+   construction into ``scoutmb.interfaces.cli.composition.build_launched_browser``, so that is
+   what this file monkeypatches, to a fake async context manager yielding a ``StrictFakeBrowser``
+   directly; the acquisition machinery itself is never monkeypatched here, unlike
+   ``tests/matrix/cases/cli_cases.py``'s CLI-SCHED catalog: this file exists specifically to
+   prove the real pipeline works end to end against the strict fakes, one layer above where
+   ``tests/characterization/test_acquisition_matrix.py`` already proves it for a single scout.
+5. The REAL ``ReportingService.publish`` (invoked internally by the pipeline) and the REAL UI
+   read routes (the package's own ``scoutmb.interfaces.web.app.create_app``, B10.3 -- replacing
+   Task 21's ``tests.harnesses.legacy.load_legacy_ui`` harness, deleted alongside ui/server.py
+   itself) reading the generated output directory.
 
 No test writes outside ``tmp_path`` and no test performs real network I/O.
 """
@@ -38,13 +37,17 @@ from pathlib import Path
 
 import httpx
 import pytest
-import scout_schedule_cli as cli
 from tests.factories.pdf_builder import build_pdf
 from tests.fakes.acquisition import StrictScript
 from tests.fakes.browser import StrictFakeBrowser
 from tests.fakes.clock import FakeClock
 from tests.matrix.cases.acquisition_cases import ExpectedRequest, ScriptedResponse
 from tests.matrix.cases.pdf_cases import PdfPageSpec
+
+from scoutmb.adapters.files.tabular import TabularAttendeeSource
+from scoutmb.features.ingest.service import IngestService
+from scoutmb.interfaces.cli.pdf import main as pdf_main
+from scoutmb.interfaces.cli.schedule import main as schedule_main
 
 pytestmark = pytest.mark.vertical
 
@@ -121,12 +124,12 @@ def _run_cli(
     monkeypatch.setattr(
         "scoutmb.interfaces.cli.composition.build_launched_browser", fake_launched_browser
     )
-    monkeypatch.setattr(sys, "argv", ["scout_schedule_cli.py", *argv])
+    monkeypatch.setattr(sys, "argv", ["troop349-schedule", *argv])
     stderr = io.StringIO()
     import contextlib
 
     with contextlib.redirect_stderr(stderr):
-        code = cli.main()
+        code = schedule_main()
     return code, stderr.getvalue()
 
 
@@ -167,11 +170,9 @@ def test_flow_success_001_five_stage_end_to_end(
     assert pdf_path.exists()
     assert pdf_path.stat().st_size > 0
 
-    # -- Stage 2: real pdf_to_scouts.main (extraction + attendee CSV).
-    import pdf_to_scouts
-
+    # -- Stage 2: real scoutmb.interfaces.cli.pdf.main (extraction + attendee CSV).
     csv_path = tmp_path / "scouts.csv"
-    pdf_exit_code = pdf_to_scouts.main([str(pdf_path), "-o", str(csv_path), "--strict"])
+    pdf_exit_code = pdf_main([str(pdf_path), "-o", str(csv_path), "--strict"])
     assert pdf_exit_code == 0
 
     attendee_rows = _read_attendee_csv(csv_path)
@@ -179,9 +180,11 @@ def test_flow_success_001_five_stage_end_to_end(
     assert len(attendee_rows) == 2
     assert [row["Attendee Name"] for row in attendee_rows] == ["Avery Archer", "Bo Baker"]
 
-    # -- Stage 3: real scout_schedule_cli.load_inputs (sanity-checked directly before the CLI
-    # entry point re-runs it internally as part of async_main).
-    scouts = cli.load_inputs(csv_path, "Scouts Only", False)
+    # -- Stage 3: real IngestService (sanity-checked directly before the CLI entry point
+    # re-runs it internally as part of run_schedule_pipeline).
+    scouts = IngestService(
+        sources=(TabularAttendeeSource(sheet_name="Scouts Only"),), include_adults=False
+    ).load(csv_path)
     assert len(scouts) == 2
 
     # -- Stage 4: real cli.main() -> async_main -> process_scout, driven by Task 19's strict
@@ -280,10 +283,8 @@ def test_flow_partial_001_one_terminal_failure(
     )
     assert pdf_path.exists()
 
-    import pdf_to_scouts
-
     csv_path = tmp_path / "scouts.csv"
-    assert pdf_to_scouts.main([str(pdf_path), "-o", str(csv_path), "--strict"]) == 0
+    assert pdf_main([str(pdf_path), "-o", str(csv_path), "--strict"]) == 0
     attendee_rows = _read_attendee_csv(csv_path)
     assert len(attendee_rows) == 2
 

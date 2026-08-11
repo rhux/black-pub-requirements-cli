@@ -8,16 +8,11 @@ import dataclasses
 
 import pytest
 
-import scout_schedule_cli as legacy
-from scoutmb.core.models import ScoutResult as PackageScoutResult
-
-
-def test_scout_result_is_the_frozen_package_shape() -> None:
-    assert legacy.ScoutResult is PackageScoutResult
+from scoutmb.core.models import ScoutResult
 
 
 def test_scout_result_instances_are_frozen_and_tuple_backed() -> None:
-    result = legacy.ScoutResult(name="Avery", qr_url="https://x")
+    result = ScoutResult(name="Avery", qr_url="https://x")
     assert isinstance(result.classes, tuple)
     assert isinstance(result.requirements, tuple)
     assert isinstance(result.errors, tuple)

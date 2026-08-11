@@ -2,9 +2,19 @@
 
 Covers ``PERF-REQ-001..003`` and ``PERF-GROWTH-001..002``. Every assertion here is a
 deterministic COUNT or BOUND derived from instrumenting real production code (a real
-``StrictScript`` call ledger, or a counting monkeypatch wrapper around real
-``scout_schedule_cli`` functions) -- never a wall-clock timing threshold. Nothing here is stored
-as a benchmark baseline; these are characterization assertions like every other matrix row.
+``StrictScript`` call ledger, or a counting monkeypatch wrapper around real package inference
+functions) -- never a wall-clock timing threshold. Nothing here is stored as a benchmark
+baseline; these are characterization assertions like every other matrix row.
+
+Repointed off scout_schedule_cli.py in Slice 2b B10.4 (Step 2, one of three files an independent
+review found still importing the flat module directly): process_scout's package equivalent is
+AcquisitionService.process, a keyword-only call built through the same gateway/retry_policy/sink
+wiring tests/integration/test_acquisition_pipeline.py already uses -- not a 4-positional-arg
+call. annotate_requirement_statuses' package equivalent is
+scoutmb.features.reporting.service._annotate_requirement_statuses, which reaches
+requirement_path/choice_requirement_count through scoutmb.core.inference.tree/status's own
+bound module-level imports -- the counting monkeypatch must target THOSE modules, not
+scoutmb.core.inference.numbering itself, or the patched name is never the one actually called.
 """
 
 from __future__ import annotations
@@ -14,14 +24,35 @@ import json
 from pathlib import Path
 
 import pytest
-import scout_schedule_cli as cli
 from tests.factories.scale import SyntheticDataset, build_dataset, canonical_profile, profile
 from tests.fakes.acquisition import StrictScript
 from tests.fakes.browser import StrictFakeBrowser
 from tests.fakes.clock import FakeClock
 from tests.matrix.cases.acquisition_cases import ExpectedRequest, ScriptedResponse
 
+from scoutmb.adapters.files.atomic import AtomicFileSink
+from scoutmb.adapters.scoutevent.playwright_gateway import PlaywrightScoutingEventGateway
+from scoutmb.core.identity import RunIdentity
+from scoutmb.core.models import ClassRecord, RequirementRecord, ScoutInput, ScoutResult
+from scoutmb.features.acquisition.retry import RetryPolicy
+from scoutmb.features.acquisition.service import AcquisitionConfig, AcquisitionService
+from scoutmb.features.reporting import service as reporting_service
+from scoutmb.interfaces.cli.composition import build_reporting_service
+
 pytestmark = pytest.mark.vertical
+
+
+class _RecordingSleeper:
+    async def sleep(self, seconds: float) -> None:
+        pass
+
+    def monotonic(self) -> float:
+        return 0.0
+
+
+class _ZeroJitter:
+    def jitter(self, low: float, high: float) -> float:
+        return low
 
 
 # ---------------------------------------------------------------------------------------------
@@ -49,18 +80,18 @@ def _schedule_row_for(
     }
 
 
-def _build_full_script(dataset: SyntheticDataset) -> tuple[StrictScript, list[cli.ScoutInput]]:
+def _build_full_script(dataset: SyntheticDataset) -> tuple[StrictScript, list[ScoutInput]]:
     """Builds one StrictScript covering the ENTIRE dataset (every attendee's schedule request,
     raw duplicated rows included, followed by one requirement request per that attendee's
-    DEDUPLICATED class id) plus the matching ``ScoutInput`` list -- real process_scout dedup
-    logic (schedule_rows dict-keyed by classP4ID) is what collapses the raw duplicates back down
-    to ``len(deduped_class_ids)`` requests, exactly proving the request-count formula against
-    the real function rather than against the factory's own bookkeeping."""
-    scouts: list[cli.ScoutInput] = []
+    DEDUPLICATED class id) plus the matching ``ScoutInput`` list -- real AcquisitionService
+    dedup logic (schedule_rows dict-keyed by classP4ID) is what collapses the raw duplicates back
+    down to ``len(deduped_class_ids)`` requests, exactly proving the request-count formula
+    against the real service rather than against the factory's own bookkeeping."""
+    scouts: list[ScoutInput] = []
     pairs: list[tuple[ExpectedRequest, ScriptedResponse]] = []
     for attendee in dataset.attendees:
         scouts.append(
-            cli.ScoutInput(
+            ScoutInput(
                 name=attendee.name,
                 url=f"https://scoutingevent.com/mobile/x?t=TESTTOKEN_SYN{attendee.index:06d}",
             )
@@ -89,25 +120,19 @@ def _build_full_script(dataset: SyntheticDataset) -> tuple[StrictScript, list[cl
     return StrictScript(tuple(pairs)), scouts
 
 
-def _args() -> object:
-    import argparse
-
-    return argparse.Namespace(
-        timeout=5,
-        request_delay_ms=0,
-        allow_dead_assets=False,
-        headed=False,
-        channel=None,
-    )
-
-
 async def _run_request_count_case(dataset: SyntheticDataset, raw_dir: Path) -> int:
     script, scouts = _build_full_script(dataset)
     clock = FakeClock()
     browser = StrictFakeBrowser(script, clock)
-    run_identity = cli.RunIdentity()
+    gateway = PlaywrightScoutingEventGateway(browser, allow_dead_assets=False)  # type: ignore[arg-type]
+    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
+    config = AcquisitionConfig(timeout_seconds=5, request_delay_ms=0)
+    run_identity = RunIdentity()
     for scout in scouts:
-        result = await cli.process_scout(browser, scout, _args(), raw_dir, run_identity)
+        result = await service.process(
+            scout=scout, config=config, raw_dir=raw_dir, run_identity=run_identity
+        )
         assert not result.errors  # every scripted response is a clean success
     script.assert_consumed()
     return len(script.calls)
@@ -189,9 +214,12 @@ def _synthetic_requirement_rows(row_count: int, class_rows: int) -> list[dict[st
 def test_perf_growth_001_bounded_node_visits(
     row_count: int, class_rows: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scoutmb.core.inference import status as status_module
+    from scoutmb.core.inference import tree as tree_module
+
     visits = {"count": 0}
-    real_requirement_path = cli.requirement_path
-    real_choice_count = cli.choice_requirement_count
+    real_requirement_path = tree_module.requirement_path
+    real_choice_count = status_module.choice_requirement_count
 
     def counting_requirement_path(number: str, current_top_level: str | None):
         visits["count"] += 1
@@ -201,11 +229,16 @@ def test_perf_growth_001_bounded_node_visits(
         visits["count"] += 1
         return real_choice_count(description)
 
-    monkeypatch.setattr(cli, "requirement_path", counting_requirement_path)
-    monkeypatch.setattr(cli, "choice_requirement_count", counting_choice_count)
+    # These monkeypatches must target scoutmb.core.inference.tree/status's OWN bound names, not
+    # scoutmb.core.inference.numbering -- both modules import requirement_path/
+    # choice_requirement_count at module scope (`from ... import name`), which binds the name
+    # into their own namespace at import time. Patching numbering.py's copy would leave the name
+    # tree.py/status.py actually call untouched.
+    monkeypatch.setattr(tree_module, "requirement_path", counting_requirement_path)
+    monkeypatch.setattr(status_module, "choice_requirement_count", counting_choice_count)
 
     rows = _synthetic_requirement_rows(row_count, class_rows)
-    annotated = cli.annotate_requirement_statuses(rows)
+    annotated = reporting_service._annotate_requirement_statuses(rows)
     assert len(annotated) == row_count
 
     bound = 6 * row_count + 2 * class_rows
@@ -220,12 +253,12 @@ def test_perf_growth_001_bounded_node_visits(
 
 @pytest.mark.matrix_case(case_id="PERF-GROWTH-002", context_id="run", lane="default")
 def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
-    scout_a = cli.ScoutResult(
+    scout_a = ScoutResult(
         name="Avery Archer",
         qr_url="https://scoutingevent.com/mobile/x?t=TESTTOKEN_A",
         attendee_id="90000001",
         classes=[
-            cli.ClassRecord(
+            ClassRecord(
                 scout_name="Avery Archer",
                 attendee_id="90000001",
                 class_number="26MB1",
@@ -242,7 +275,7 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
             )
         ],
         requirements=[
-            cli.RequirementRecord(
+            RequirementRecord(
                 scout_name="Avery Archer",
                 attendee_id="90000001",
                 class_number="26MB1",
@@ -257,7 +290,7 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
                 requirement_on_event=True,
                 present_days="MoTuWeTh",
             ),
-            cli.RequirementRecord(
+            RequirementRecord(
                 scout_name="Avery Archer",
                 attendee_id="90000001",
                 class_number="26MB1",
@@ -275,12 +308,12 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
         ],
         errors=[],
     )
-    scout_b = cli.ScoutResult(
+    scout_b = ScoutResult(
         name="Bo Baker",
         qr_url="https://scoutingevent.com/mobile/x?t=TESTTOKEN_B",
         attendee_id="90000002",
         classes=[
-            cli.ClassRecord(
+            ClassRecord(
                 scout_name="Bo Baker",
                 attendee_id="90000002",
                 class_number="26MB2",
@@ -297,7 +330,7 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
             )
         ],
         requirements=[
-            cli.RequirementRecord(
+            RequirementRecord(
                 scout_name="Bo Baker",
                 attendee_id="90000002",
                 class_number="26MB2",
@@ -315,7 +348,7 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
         ],
         errors=[],
     )
-    scout_c = cli.ScoutResult(
+    scout_c = ScoutResult(
         name="Casey Carter",
         qr_url="https://scoutingevent.com/mobile/x?t=TESTTOKEN_C",
         attendee_id="90000003",
@@ -331,7 +364,15 @@ def test_perf_growth_002_artifact_row_and_file_counts(tmp_path: Path) -> None:
     errors = sum(len(r.errors) for r in results)
 
     output_dir = tmp_path / "run-perf-growth-002"
-    cli.write_outputs(output_dir, results, generate_html=False, generate_email_report=True)
+    build_reporting_service().publish(
+        output_dir,
+        results,
+        generated_at_local="2026-01-01 00:00:00",
+        generated_at_iso="2026-01-01T00:00:00",
+        run_identity=RunIdentity(),
+        generate_html=False,
+        generate_email_report=True,
+    )
 
     scouts_json = json.loads((output_dir / "scouts.json").read_text(encoding="utf-8"))
     assert len(scouts_json) == attendees
