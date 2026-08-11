@@ -278,3 +278,62 @@ def test_bootstrap_registry_is_structurally_valid() -> None:
     # test_platform_matrix.py/test_desktop_matrix.py, kept as a thin per-file wrapper here so
     # this catalog stays covered even if one of the other two files is ever deleted.
     assert_platform_domain_registry_valid()
+
+
+# =================================================================================================
+# Migrated from tests/characterization/test_phase_a_gap_closure.py (retired in Slice 2b B10.4):
+# bootstrap.paths.ensure_dirs/get_paths and bootstrap.marker.write_marker, never directly called
+# by the resolve_root-only BOOT-PATH catalog or the is_environment_valid-only BOOT-MARK catalog
+# above.
+# =================================================================================================
+
+
+def test_bootstrap_paths_ensure_dirs_creates_expected_directories(tmp_path: Path) -> None:
+    from bootstrap.paths import AppPaths
+
+    root = tmp_path / "app-root"
+    paths = AppPaths(
+        root=root,
+        python_dir=root / "python",
+        app_dir=root / "app",
+        state_dir=root / "state",
+        logs_dir=root / "logs",
+        marker_path=root / "state" / "marker.json",
+        lock_path=root / "state" / "lock",
+        browser_channel_path=root / "state" / "channel.json",
+        data_dir=root / "data",
+    )
+    paths.ensure_dirs()
+    assert paths.root.is_dir()
+    assert paths.python_dir.is_dir()
+    assert paths.app_dir.is_dir()
+    assert paths.state_dir.is_dir()
+    assert paths.logs_dir.is_dir()
+
+
+def test_bootstrap_paths_get_paths_builds_from_resolve_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bootstrap.paths import get_paths
+
+    monkeypatch.setenv("SCOUTMB_BOOTSTRAP_ROOT", str(tmp_path / "app-root"))
+    paths = get_paths()
+    assert paths.root == tmp_path / "app-root"
+    assert paths.state_dir == paths.root / "state"
+    assert paths.marker_path == paths.state_dir / "bootstrap_marker.json"
+
+
+def test_bootstrap_marker_write_marker_writes_a_valid_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bootstrap.marker import read_marker, write_marker
+    from bootstrap.paths import get_paths
+
+    monkeypatch.setenv("SCOUTMB_BOOTSTRAP_ROOT", str(tmp_path / "app-root"))
+    paths = get_paths()
+    paths.ensure_dirs()
+    write_marker(paths, requirements_hash="abc123", browser_channel="chrome")
+    marker = read_marker(paths)
+    assert marker is not None
+    assert marker["requirements_hash"] == "abc123"
+    assert marker["browser_channel"] == "chrome"
