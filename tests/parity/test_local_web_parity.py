@@ -319,3 +319,11 @@ async def test_open_emails_folder_success_calls_open_folder(
     assert resp.status_code == 200
     assert resp.json() == {"opened": True}
     assert opened_paths
+
+
+async def test_root_serves_the_frontend(tmp_path: Path) -> None:
+    async with _client_for(tmp_path) as (client, _settings):
+        response = await client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "<html" in response.text.lower()

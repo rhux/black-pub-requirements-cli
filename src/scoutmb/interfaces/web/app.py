@@ -16,8 +16,10 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib.resources import as_file, files
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from scoutmb.config import UiSettings
 from scoutmb.runtime.jobs import JobSupervisor
@@ -46,5 +48,16 @@ def create_app(settings: UiSettings) -> FastAPI:
     from scoutmb.interfaces.web.routes import router
 
     app.include_router(router)
+
+    # `as_file`'s context manager materializes a real filesystem path even if the package were
+    # ever read from a zip (untested/unused per the Phase B spec's own scope note) -- for the
+    # copied-release-root and installed-wheel cases this targets, static_root is already a real
+    # directory and as_file is a cheap no-op wrapper, not a temp-extraction cost. Exiting the
+    # `with` block immediately here is safe: for a real (non-zip) package, as_file yields the
+    # underlying path directly, with no extraction and therefore no cleanup-on-exit hazard.
+    static_root = files("scoutmb.resources").joinpath("web_static")
+    with as_file(static_root) as static_path:
+        app.mount("/runs", StaticFiles(directory=settings.runs_dir), name="runs")
+        app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
 
     return app

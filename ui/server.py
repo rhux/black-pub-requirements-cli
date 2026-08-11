@@ -44,7 +44,11 @@ SETTINGS = UiSettings.resolve(dev_mode=bool(os.environ.get("SCOUTMB_DEV")))
 SCOUTS_CSV = SETTINGS.scouts_csv
 PDF_UPLOADS_DIR = SETTINGS.pdf_uploads_dir
 RUNS_DIR = SETTINGS.runs_dir
-STATIC_DIR = Path(__file__).resolve().parent / "static"  # locates CODE, not data — OK to keep
+STATIC_DIR = (
+    Path(__file__).resolve().parent.parent / "src" / "scoutmb" / "resources" / "web_static"
+)  # locates CODE, not data — OK to keep. B10.0 moved these files under scoutmb.resources so the
+# package's own create_app can serve them via importlib.resources; ui/server.py (deleted in
+# B10.3) points at the same real files at their new location in the meantime.
 BROWSER_CHANNEL = os.environ.get("SCOUTMB_BROWSER_CHANNEL") or None
 
 SETTINGS.ensure_dirs()

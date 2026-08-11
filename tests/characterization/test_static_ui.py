@@ -39,7 +39,10 @@ from tests.harnesses.browser import GuardedContext, install_egress_guard
 pytestmark = pytest.mark.playwright
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_STATIC_DIR = _REPO_ROOT / "ui" / "static"
+# B10.0 moved the real static files from ui/static/ to src/scoutmb/resources/web_static/ (now
+# served via importlib.resources by scoutmb.interfaces.web.app:create_app) -- same files,
+# unchanged content, this test just needs the new location.
+_STATIC_DIR = _REPO_ROOT / "src" / "scoutmb" / "resources" / "web_static"
 
 _STATIC_FILES: dict[str, tuple[bytes, str]] = {
     "/": ((_STATIC_DIR / "index.html").read_bytes(), "text/html; charset=utf-8"),
