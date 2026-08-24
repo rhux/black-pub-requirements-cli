@@ -160,6 +160,9 @@ def test_cli_sched_002_empty_scout_list_fails_closed_with_exit_2(
 def test_cli_sched_003_one_scout_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The real gateway's egress check runs before every navigation, even against a fake page --
+    # opt in the same way tests/vertical/conftest.py does for its synthetic scoutingevent.com URLs.
+    monkeypatch.setenv("SCOUTMB_ALLOW_LIVE_SERVICE", "1")
     csv_path = tmp_path / "scouts.csv"
     _write_scouts_csv(
         csv_path, [("Avery Archer", "https://scoutingevent.com/mobile/x?t=TESTTOKEN0001")]
@@ -216,6 +219,7 @@ def test_cli_sched_003_one_scout_success(
 
 @pytest.mark.matrix_case(case_id="CLI-SCHED-004", context_id="run", lane="default")
 def test_cli_sched_004_partial_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCOUTMB_ALLOW_LIVE_SERVICE", "1")
     csv_path = tmp_path / "scouts.csv"
     _write_scouts_csv(
         csv_path,
