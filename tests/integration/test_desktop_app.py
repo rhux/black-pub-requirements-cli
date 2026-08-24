@@ -17,6 +17,8 @@ import sys
 import urllib.error
 
 import pytest
+from tests.matrix.cases.desktop_cases import DESKTOP_MODE_CASES, DESKTOP_READY_CASES
+from tests.matrix.pytest_support import execution_params
 
 import scoutmb.interfaces.desktop.app as desktop_app
 
@@ -33,22 +35,18 @@ class _FakeUrlopenResult:
         return None
 
 
-@pytest.mark.parametrize(
-    ("failures_before_success", "timeout_seconds", "expect_ready", "expect_urlopen_calls", "expect_sleep_calls"),
-    [
-        (0, 5.0, True, 1, 0),  # DESK-READY-001: immediate-success
-        (2, 5.0, True, 3, 2),  # DESK-READY-002: retries-then-success
-        (10_000, 0.3, False, 3, 3),  # DESK-READY-003: timeout-gives-up
-    ],
-)
+@pytest.mark.parametrize(("case", "context_id"), execution_params(DESKTOP_READY_CASES))
 def test_wait_until_ready(
-    failures_before_success: int,
-    timeout_seconds: float,
-    expect_ready: bool,
-    expect_urlopen_calls: int,
-    expect_sleep_calls: int,
+    case,
+    context_id: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    failures_before_success = case.failures_before_success
+    timeout_seconds = case.timeout_seconds
+    expect_ready = case.expect_ready
+    expect_urlopen_calls = case.expect_urlopen_calls
+    expect_sleep_calls = case.expect_sleep_calls
+
     clock = {"now": 0.0}
     calls = {"urlopen": 0, "sleep": 0}
 
@@ -85,33 +83,20 @@ def test_wait_until_ready(
 # is ever touched; webbrowser and webview are patched so no real browser tab or native window is
 # ever opened.
 # ==================================================================================================
-@pytest.mark.parametrize(
-    (
-        "browser_flag",
-        "server_becomes_ready",
-        "raise_keyboard_interrupt_in_wait_loop",
-        "expect_webbrowser_opened",
-        "expect_webview_used",
-        "expect_return_code",
-        "expect_propagated_exception",
-    ),
-    [
-        (True, True, True, True, False, 0, None),  # DESK-MODE-001: browser-mode
-        (False, True, False, False, True, 0, None),  # DESK-MODE-002: native-mode
-        (False, False, False, False, False, None, RuntimeError),  # DESK-MODE-003: server-start-failure
-        (True, True, True, True, False, 0, None),  # DESK-MODE-004: keyboard-interrupt-during-browser-wait
-    ],
-)
+@pytest.mark.parametrize(("case", "context_id"), execution_params(DESKTOP_MODE_CASES))
 def test_main_dispatch(
-    browser_flag: bool,
-    server_becomes_ready: bool,
-    raise_keyboard_interrupt_in_wait_loop: bool,
-    expect_webbrowser_opened: bool,
-    expect_webview_used: bool,
-    expect_return_code: int | None,
-    expect_propagated_exception: type[BaseException] | None,
+    case,
+    context_id: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    browser_flag = case.browser_flag
+    server_becomes_ready = case.server_becomes_ready
+    raise_keyboard_interrupt_in_wait_loop = case.raise_keyboard_interrupt_in_wait_loop
+    expect_webbrowser_opened = case.expect_webbrowser_opened
+    expect_webview_used = case.expect_webview_used
+    expect_return_code = case.expect_return_code
+    expect_propagated_exception = case.expect_propagated_exception
+
     real_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     real_sock.bind(("127.0.0.1", 0))
     real_sock.listen()
