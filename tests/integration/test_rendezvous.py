@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 import uvicorn
 
 from scoutmb.config import UiSettings
@@ -16,6 +17,7 @@ from scoutmb.interfaces.web.app import create_app
 from scoutmb.interfaces.web.rendezvous import bind_loopback_socket
 
 
+@pytest.mark.matrix_case(case_id="DESK-PORT-001", context_id="desk-port", lane="default")
 def test_bind_loopback_socket_returns_a_working_bound_socket() -> None:
     sock = bind_loopback_socket()
     try:
