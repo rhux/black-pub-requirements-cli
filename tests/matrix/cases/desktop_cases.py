@@ -18,8 +18,8 @@ via its ``import time`` / ``import urllib.request`` / (deferred) ``import webbro
 (deferred) ``import webview`` statements -- these are the actual, only injectable seams in the
 real code today; nothing here invents a parameter or refactor that doesn't already exist).
 
-``DESK-PORT-001``/``002`` exercise a REAL loopback socket bind/close (fast, safe, and exactly
-what free_port's contract is about) -- every other case in this catalog performs no real
+``DESK-PORT-001`` exercises a REAL loopback socket bind/close (fast, safe, and exactly what
+bind_loopback_socket's contract is about) -- every other case in this catalog performs no real
 socket/HTTP I/O, no real sleep, and opens no real browser/webview window.
 """
 
@@ -29,7 +29,6 @@ from dataclasses import dataclass
 
 from tests.matrix.model import CaseMetadata, Classification, Domain, EvidenceKind
 
-_EVIDENCE_PORT = "run_app.py:25-28 free_port"
 _EVIDENCE_PORT_RACE_FREE = "src/scoutmb/interfaces/web/rendezvous.py bind_loopback_socket"
 _EVIDENCE_READY = "run_app.py:44-52 wait_until_ready"
 _EVIDENCE_MODE = "run_app.py:55-85 main"
@@ -89,7 +88,15 @@ def _meta(
 
 
 # ==================================================================================================
-# DESK-PORT-001..002 -- free_port's real socket bind/close contract (REAL loopback socket).
+# DESK-PORT-001 -- bind_loopback_socket's real socket bind/close contract (REAL loopback socket).
+#
+# DESK-PORT-002 ("bind-conflict-surfaces") is RETIRED (Gate 2 close-out): it pinned a
+# `probe.bind(<specific already-taken port>)` raising OSError, which was a property of the old
+# free_port()'s two-step probe-then-bind dance. free_port() was deleted in B10.3 and replaced by
+# bind_loopback_socket(), which only ever binds to port 0 (OS-assigned) and takes no port
+# argument -- there is no code path left in this repo that attempts a specific-port bind that
+# could collide, so this scenario cannot be genuinely exercised against current code. DESK-PORT-001
+# was rewritten to match the new function when B9.1 landed; -002 was missed at the time.
 # ==================================================================================================
 DESKTOP_PORT_CASES: tuple[DesktopPortCase, ...] = (
     DesktopPortCase(
@@ -115,20 +122,6 @@ DESKTOP_PORT_CASES: tuple[DesktopPortCase, ...] = (
             ),
         ),
         scenario="free-port",
-    ),
-    DesktopPortCase(
-        meta=_meta(
-            "DESK-PORT-002",
-            "DESK-PORT",
-            "bind-conflict-surfaces",
-            "free_port itself never collides (the OS assigns an ephemeral port via bind to "
-            "port 0), but the SAME `probe.bind(...)` call, when aimed at a port already held "
-            "open by another live socket instead of port 0, raises a real, catchable OSError "
-            "(EADDRINUSE) -- pinning that a bind conflict on this exact code shape is never "
-            "silently swallowed.",
-            _EVIDENCE_PORT,
-        ),
-        scenario="bind-conflict",
     ),
 )
 
