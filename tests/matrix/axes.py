@@ -294,14 +294,8 @@ _INPUT_AXES: tuple[AxisSpec, ...] = (
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"IN-B-LOAD-INPUTS"}),
     ),
-    AxisSpec(
-        axis_id="IN-IMPORT",
-        domain=Domain.INPUT,
-        members=frozenset({"base", "pdf", "acquisition", "all"}),
-        min_focused_cases=4,
-        interactions=_NO_INTERACTIONS,
-        boundaries=frozenset(),
-    ),
+    # IN-IMPORT axis is RETIRED (Gate 2 close-out) along with its cases -- see
+    # tests/matrix/cases/input_cases.py's comment where _IMPORT_CASES stood.
 )
 
 # PDF-domain axes (Task 18). Each member set is exhaustive for the behavior it names, and
@@ -431,22 +425,8 @@ _PDF_AXES: tuple[AxisSpec, ...] = (
 # new-acceptance placeholders owned by Slice 2 -- they carry no current boundary since nothing
 # in the current branch implements a breaker, a resumable checkpoint, or an extracted gateway.
 _ACQUISITION_AXES: tuple[AxisSpec, ...] = (
-    AxisSpec(
-        axis_id="ACQ-RESP",
-        domain=Domain.ACQUISITION,
-        members=frozenset({"correct", "wrong-url", "wrong-method", "wrong-body"}),
-        min_focused_cases=4,
-        interactions=_NO_INTERACTIONS,
-        boundaries=frozenset({"ACQ-B-IS-SCHEDULE-RESPONSE", "ACQ-B-NAVIGATE"}),
-    ),
-    AxisSpec(
-        axis_id="ACQ-ID",
-        domain=Domain.ACQUISITION,
-        members=frozenset({"present", "absent", "blank", "repeated-last-wins"}),
-        min_focused_cases=4,
-        interactions=_NO_INTERACTIONS,
-        boundaries=frozenset({"ACQ-B-FORM-VALUES"}),
-    ),
+    # ACQ-RESP / ACQ-ID axes are RETIRED (Gate 2 close-out) along with their cases -- see
+    # tests/matrix/cases/acquisition_cases.py's comment where _RESP_CASES/_ID_CASES stood.
     AxisSpec(
         axis_id="ACQ-SCHED",
         domain=Domain.ACQUISITION,
@@ -476,25 +456,28 @@ _ACQUISITION_AXES: tuple[AxisSpec, ...] = (
     AxisSpec(
         axis_id="ACQ-HASREQ",
         domain=Domain.ACQUISITION,
-        members=frozenset({"has-req-1", "has-req-0", "blank-class-id"}),
-        min_focused_cases=3,
+        # "has-req-0" (ACQ-HASREQ-002) is RETIRED (Gate 2 close-out) -- INTENTIONAL_CHANGE, can
+        # never pass the parity harness by design; see acquisition_cases.py's comment there.
+        members=frozenset({"has-req-1", "blank-class-id"}),
+        min_focused_cases=2,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"ACQ-B-PROCESS-SCOUT"}),
     ),
     AxisSpec(
         axis_id="ACQ-REQ",
         domain=Domain.ACQUISITION,
+        # "missing-fields" (ACQ-REQ-004) is RETIRED (Gate 2 close-out) -- INTENTIONAL_CHANGE, can
+        # never pass the parity harness by design; see acquisition_cases.py's comment there.
         members=frozenset(
             {
                 "success",
                 "failed-status",
                 "empty-data",
-                "missing-fields",
                 "unknown-fields",
                 "non-list-data",
             }
         ),
-        min_focused_cases=6,
+        min_focused_cases=5,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"ACQ-B-POST-REQUIREMENT"}),
     ),
@@ -530,19 +513,15 @@ _ACQUISITION_AXES: tuple[AxisSpec, ...] = (
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"ACQ-B-PROCESS-SCOUT", "ACQ-B-ASYNC-MAIN"}),
     ),
-    AxisSpec(
-        axis_id="ACQ-ASSET",
-        domain=Domain.ACQUISITION,
-        members=frozenset({"dead-asset-aborted", "allowed-dead-asset"}),
-        min_focused_cases=2,
-        interactions=_NO_INTERACTIONS,
-        boundaries=frozenset({"ACQ-B-PROCESS-SCOUT"}),
-    ),
+    # ACQ-ASSET axis is RETIRED (Gate 2 close-out) along with its cases -- see
+    # tests/matrix/cases/acquisition_cases.py's comment where _ASSET_CASES stood.
     AxisSpec(
         axis_id="ACQ-IDENTITY",
         domain=Domain.ACQUISITION,
-        members=frozenset({"missing-id-fails-closed", "uuidv4-stable", "runs-unlinkable"}),
-        min_focused_cases=3,
+        # "uuidv4-stable"/"runs-unlinkable" (ACQ-IDENTITY-002/003) are RETIRED (Gate 2
+        # close-out); see acquisition_cases.py's comment there.
+        members=frozenset({"missing-id-fails-closed"}),
+        min_focused_cases=1,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"ACQ-B-OUTPUT-ID"}),
     ),
@@ -1103,8 +1082,8 @@ _DESKTOP_AXES: tuple[AxisSpec, ...] = (
     AxisSpec(
         axis_id="DESK-PORT",
         domain=Domain.PLATFORM,
-        members=frozenset({"free-port-closed-cleanly", "bind-conflict-surfaces"}),
-        min_focused_cases=2,
+        members=frozenset({"free-port-closed-cleanly"}),
+        min_focused_cases=1,
         interactions=_NO_INTERACTIONS,
         boundaries=frozenset({"DESK-B-PORT"}),
     ),

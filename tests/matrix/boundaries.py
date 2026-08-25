@@ -286,25 +286,14 @@ _PDF_BOUNDARIES: tuple[BoundarySpec, ...] = (
 # scout_schedule_cli, plus the network-policy boundary created in Slice 1a. Each
 # ``required_case_ids`` names acquisition-domain cases that drive the seam.
 _ACQUISITION_BOUNDARIES: tuple[BoundarySpec, ...] = (
-    BoundarySpec(
-        boundary_id="ACQ-B-FORM-VALUES",
-        qualified_name="scout_schedule_cli.form_values",
-        domain=Domain.ACQUISITION,
-        required_case_ids=frozenset({"ACQ-ID-001", "ACQ-ID-002", "ACQ-ID-003", "ACQ-ID-004"}),
-    ),
-    BoundarySpec(
-        boundary_id="ACQ-B-IS-SCHEDULE-RESPONSE",
-        qualified_name="scout_schedule_cli.is_schedule_response",
-        domain=Domain.ACQUISITION,
-        required_case_ids=frozenset(
-            {"ACQ-RESP-001", "ACQ-RESP-002", "ACQ-RESP-003", "ACQ-RESP-004"}
-        ),
-    ),
+    # ACQ-B-FORM-VALUES / ACQ-B-IS-SCHEDULE-RESPONSE are RETIRED (Gate 2 close-out): every
+    # case_id that satisfied them (ACQ-ID-*/ACQ-RESP-*) was itself retired -- see
+    # tests/matrix/cases/acquisition_cases.py's comment where _ID_CASES/_RESP_CASES stood.
     BoundarySpec(
         boundary_id="ACQ-B-NAVIGATE",
         qualified_name="scout_schedule_cli.navigate_and_trigger_schedule",
         domain=Domain.ACQUISITION,
-        required_case_ids=frozenset({"ACQ-RESP-001", "ACQ-SCHED-002", "ACQ-IDENTITY-001"}),
+        required_case_ids=frozenset({"ACQ-SCHED-002", "ACQ-IDENTITY-001"}),
     ),
     BoundarySpec(
         boundary_id="ACQ-B-POST-REQUIREMENT",
@@ -315,7 +304,6 @@ _ACQUISITION_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "ACQ-REQ-001",
                 "ACQ-REQ-002",
                 "ACQ-REQ-003",
-                "ACQ-REQ-004",
                 "ACQ-REQ-005",
                 "ACQ-REQ-006",
                 "ACQ-RETRY-001",
@@ -343,13 +331,10 @@ _ACQUISITION_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "ACQ-DEDUP-004",
                 "ACQ-DEDUP-005",
                 "ACQ-HASREQ-001",
-                "ACQ-HASREQ-002",
                 "ACQ-HASREQ-003",
                 "ACQ-CLEAN-001",
                 "ACQ-CLEAN-002",
                 "ACQ-CLEAN-003",
-                "ACQ-ASSET-001",
-                "ACQ-ASSET-002",
             }
         ),
     ),
@@ -363,8 +348,6 @@ _ACQUISITION_BOUNDARIES: tuple[BoundarySpec, ...] = (
                 "ACQ-RAW-002",
                 "ACQ-RAW-003",
                 "ACQ-IDENTITY-001",
-                "ACQ-IDENTITY-002",
-                "ACQ-IDENTITY-003",
             }
         ),
         package_qualified_name="scoutmb.core.identity.RunIdentity.output_id",
@@ -593,7 +576,7 @@ _DESKTOP_BOUNDARIES: tuple[BoundarySpec, ...] = (
         boundary_id="DESK-B-PORT",
         qualified_name="run_app.free_port",
         domain=Domain.PLATFORM,
-        required_case_ids=frozenset({"DESK-PORT-001", "DESK-PORT-002"}),
+        required_case_ids=frozenset({"DESK-PORT-001"}),
     ),
     BoundarySpec(
         boundary_id="DESK-B-READY",

@@ -943,70 +943,12 @@ _EMPTY_CASES: tuple[InputCase, ...] = (
     ),
 )
 
-_IMPORT_CASES: tuple[InputCase, ...] = (
-    InputCase(
-        _meta(
-            "IN-IMPORT-001",
-            "IN-IMPORT",
-            "base",
-            ("subprocess",),
-            "With no dependency blocked, importing scout_schedule_cli succeeds and pulls in "
-            "openpyxl and playwright.",
-            "scout_schedule_cli top-level imports lines 30-31",
-        ),
-        InputSpec(format="import", variant="import-base", profile="base"),
-        InputObservation(
-            exception_type=None,
-            message="profile=base returncode=0 imported=openpyxl,playwright",
-        ),
-    ),
-    InputCase(
-        _meta(
-            "IN-IMPORT-002",
-            "IN-IMPORT",
-            "pdf",
-            ("subprocess",),
-            "Blocking the PDF stack (fitz, cv2) does not affect the scout_schedule_cli import.",
-            "scout_schedule_cli does not import PyMuPDF or opencv",
-        ),
-        InputSpec(format="import", variant="import-pdf", profile="pdf"),
-        InputObservation(
-            exception_type=None,
-            message="profile=pdf returncode=0 imported=openpyxl,playwright",
-        ),
-    ),
-    InputCase(
-        _meta(
-            "IN-IMPORT-003",
-            "IN-IMPORT",
-            "acquisition",
-            ("subprocess",),
-            "Blocking playwright makes the scout_schedule_cli import fail with ImportError, "
-            "since it is a top-level dependency.",
-            "scout_schedule_cli imports playwright at module scope line 31",
-        ),
-        InputSpec(format="import", variant="import-acquisition", profile="acquisition"),
-        InputObservation(
-            exception_type="ImportError",
-            message="profile=acquisition returncode=0 imported=openpyxl",
-        ),
-    ),
-    InputCase(
-        _meta(
-            "IN-IMPORT-004",
-            "IN-IMPORT",
-            "all",
-            ("subprocess",),
-            "Blocking every heavy dependency fails the import at openpyxl before playwright.",
-            "scout_schedule_cli imports openpyxl at module scope line 30",
-        ),
-        InputSpec(format="import", variant="import-all", profile="all"),
-        InputObservation(
-            exception_type="ImportError",
-            message="profile=all returncode=0 imported=",
-        ),
-    ),
-)
+# IN-IMPORT-001..004 are RETIRED (Gate 2 close-out): their sole context, "subprocess",
+# characterizes a subprocess import probe against scout_schedule_cli.py itself, and
+# test_package_parsers_match_expectations has always unconditionally skipped every "subprocess"
+# context case, by design (see that module's docstring) -- these could never have a passing
+# package-side test. scout_schedule_cli.py has since been retired entirely, so the legacy import
+# behavior they pinned is no longer reachable at all.
 
 INPUT_CASES: tuple[InputCase, ...] = (
     *_FORMAT_CASES,
@@ -1021,5 +963,4 @@ INPUT_CASES: tuple[InputCase, ...] = (
     *_FILTER_CASES,
     *_DEDUP_CASES,
     *_EMPTY_CASES,
-    *_IMPORT_CASES,
 )

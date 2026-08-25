@@ -44,7 +44,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from tests.fakes.acquisition import AJAX_URL
 from tests.matrix.model import (
     CaseMetadata,
     Classification,
@@ -206,159 +205,14 @@ def _wait(ms: int) -> tuple[ExpectedRequest, ScriptedResponse]:
 
 
 # --------------------------------------------------------------------------------------------
-# ACQ-RESP / ACQ-ID: form_values + is_schedule_response, called directly (no browser).
+# ACQ-RESP / ACQ-ID (form_values + is_schedule_response, called directly with no browser) are
+# RETIRED (Gate 2 close-out): their sole context, "form", characterizes scout_schedule_cli's own
+# module-level functions directly and AcquisitionService never re-exposed that surface (see
+# tests/parity/test_acquisition_parity.py's module docstring) -- test_package_runner_matches_
+# expected_legacy has always unconditionally skipped every "form" context case, by design, so
+# these 8 cases could never have a passing package-side test. The legacy behavior they pinned
+# is no longer reachable at all now that scout_schedule_cli.py itself has been retired.
 # --------------------------------------------------------------------------------------------
-_RESP_CASES: tuple[AcquisitionCase, ...] = (
-    AcquisitionCase(
-        _meta(
-            "ACQ-RESP-001",
-            "ACQ-RESP",
-            "correct",
-            "form",
-            "The real ajax_mobile.php URL with getUnitClass=true is recognized as the schedule "
-            "response.",
-            "scout_schedule_cli.is_schedule_response lines 358-362",
-        ),
-        NAME_A,
-        AJAX_URL,
-        (_sched(ATTENDEE_A, "getUnitClass=true&attendeeID=" + ATTENDEE_A),),
-        AcquisitionObservation(
-            result=(
-                ("form", (("attendeeID", ATTENDEE_A), ("getUnitClass", "true"))),
-                ("is_schedule_response", True),
-            )
-        ),
-    ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-RESP-002",
-            "ACQ-RESP",
-            "wrong-url",
-            "form",
-            "A response whose URL is not ajax_mobile.php is never the schedule response, "
-            "regardless of its form body.",
-            "scout_schedule_cli.is_schedule_response line 359 URL guard",
-        ),
-        NAME_A,
-        "https://scoutingevent.com/mobile/other.php",
-        (
-            (
-                ExpectedRequest("schedule", ATTENDEE_A),
-                ScriptedResponse(value="getUnitClass=true&attendeeID=" + ATTENDEE_A),
-            ),
-        ),
-        AcquisitionObservation(
-            result=(
-                ("form", (("attendeeID", ATTENDEE_A), ("getUnitClass", "true"))),
-                ("is_schedule_response", False),
-            )
-        ),
-    ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-RESP-003",
-            "ACQ-RESP",
-            "wrong-method",
-            "form",
-            "A getUnitClass value other than 'true' (case-insensitively) is not the schedule "
-            "response even at the right URL.",
-            "scout_schedule_cli.is_schedule_response line 362 value guard",
-        ),
-        NAME_A,
-        AJAX_URL,
-        (_sched(ATTENDEE_A, "getUnitClass=false&attendeeID=" + ATTENDEE_A),),
-        AcquisitionObservation(
-            result=(
-                ("form", (("attendeeID", ATTENDEE_A), ("getUnitClass", "false"))),
-                ("is_schedule_response", False),
-            )
-        ),
-    ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-RESP-004",
-            "ACQ-RESP",
-            "wrong-body",
-            "form",
-            "A form body missing getUnitClass entirely defaults to an empty string, which fails "
-            "the schedule-response check.",
-            "scout_schedule_cli.is_schedule_response line 362 .get default",
-        ),
-        NAME_A,
-        AJAX_URL,
-        (_sched(ATTENDEE_A, "foo=bar"),),
-        AcquisitionObservation(
-            result=(("form", (("foo", "bar"),)), ("is_schedule_response", False))
-        ),
-    ),
-)
-
-_ID_CASES: tuple[AcquisitionCase, ...] = (
-    AcquisitionCase(
-        _meta(
-            "ACQ-ID-001",
-            "ACQ-ID",
-            "present",
-            "form",
-            "A present attendeeID key parses to its value.",
-            "scout_schedule_cli.form_values lines 353-355",
-        ),
-        NAME_A,
-        URL_A,
-        (_sched(ATTENDEE_A, "attendeeID=" + ATTENDEE_A),),
-        AcquisitionObservation(
-            result=(("form", (("attendeeID", ATTENDEE_A),)), ("is_schedule_response", False))
-        ),
-    ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-ID-002",
-            "ACQ-ID",
-            "absent",
-            "form",
-            "A form body with no attendeeID key at all yields an empty parsed mapping.",
-            "scout_schedule_cli.form_values parse_qs over a key-less body",
-        ),
-        NAME_A,
-        URL_A,
-        (_sched("", "foo=bar"),),
-        AcquisitionObservation(
-            result=(("form", (("foo", "bar"),)), ("is_schedule_response", False))
-        ),
-    ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-ID-003",
-            "ACQ-ID",
-            "blank",
-            "form",
-            "A blank attendeeID value is kept (keep_blank_values=True) rather than dropped.",
-            "scout_schedule_cli.form_values line 354 keep_blank_values=True",
-        ),
-        NAME_A,
-        URL_A,
-        (_sched("", "attendeeID="),),
-        AcquisitionObservation(
-            result=(("form", (("attendeeID", ""),)), ("is_schedule_response", False))
-        ),
-    ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-ID-004",
-            "ACQ-ID",
-            "repeated-last-wins",
-            "form",
-            "A repeated attendeeID key resolves to the LAST value, not the first.",
-            "scout_schedule_cli.form_values line 355 values[-1]",
-        ),
-        NAME_A,
-        URL_A,
-        (_sched("", "attendeeID=111&attendeeID=222"),),
-        AcquisitionObservation(
-            result=(("form", (("attendeeID", "222"),)), ("is_schedule_response", False))
-        ),
-    ),
-)
 
 
 # --------------------------------------------------------------------------------------------
@@ -660,31 +514,12 @@ _HASREQ_CASES: tuple[AcquisitionCase, ...] = (
             )
         ),
     ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-HASREQ-002",
-            "ACQ-HASREQ",
-            "has-req-0",
-            "process",
-            "HAS_REQ=0 now skips the requirement fetch entirely, instead of the legacy "
-            "behavior of issuing it regardless and relying on the response to be empty.",
-            "scout_schedule_cli.process_scout lines 567,573-582 -- has_requirements is stored "
-            "on ClassRecord but never read before the requirement fetch",
-            classification=Classification.INTENTIONAL_CHANGE,
-            target_owner="Slice 2",
-            target_observation="Slice 2 will skip the requirement request entirely when "
-            "HAS_REQ='0', instead of issuing it and relying on the response to be empty.",
-        ),
-        NAME_A,
-        URL_A,
-        (_sched(ATTENDEE_A, _schedule_payload((_class_row(CLASS_A, has_req="0"),))),),
-        AcquisitionObservation(
-            result=(
-                ("attendee_id", ATTENDEE_A),
-                ("class", "26MB1", CLASS_A, False, False),
-            )
-        ),
-    ),
+    # ACQ-HASREQ-002 ("has-req-0") is RETIRED (Gate 2 close-out): classification=
+    # INTENTIONAL_CHANGE cases are unconditionally skipped by test_package_runner_matches_
+    # expected_legacy (tests/parity/test_acquisition_parity.py) -- AcquisitionService is
+    # deliberately built to skip the requirement fetch on HAS_REQ='0' instead of matching the
+    # legacy expected_legacy pinned here, so this case could never pass. The real behavior is
+    # proven directly by that same file's test_has_req_zero_skips_the_requirement_fetch.
     AcquisitionCase(
         _meta(
             "ACQ-HASREQ-003",
@@ -776,44 +611,12 @@ _REQ_CASES: tuple[AcquisitionCase, ...] = (
             result=(("attendee_id", ATTENDEE_A), ("class", "26MB1", CLASS_A, True, False))
         ),
     ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-REQ-004",
-            "ACQ-REQ",
-            "missing-fields",
-            "process",
-            "A requirement row missing every optional field is now validated against a schema "
-            "and flagged as a row-level error, instead of the legacy silent coercion to blank "
-            "strings and false flags (str(x.get(k) or '') / truthy(None) is False).",
-            "scout_schedule_cli.process_scout lines 605-622 str(...or '') / truthy(...) coercion",
-            classification=Classification.INTENTIONAL_CHANGE,
-            target_owner="Slice 2",
-            target_observation="Slice 2 will validate requirement rows against a schema and "
-            "flag/reject rows missing required fields instead of silently coercing them to "
-            "blank strings and false flags.",
-        ),
-        NAME_A,
-        URL_A,
-        (
-            _sched(ATTENDEE_A, _schedule_payload((_class_row(CLASS_A),))),
-            _req(
-                ATTENDEE_A,
-                CLASS_A,
-                _requirement_payload(({"MERIT_BADGE_NAME": "Chess"},)),
-            ),
-        ),
-        AcquisitionObservation(
-            result=(
-                ("attendee_id", ATTENDEE_A),
-                ("class", "26MB1", CLASS_A, True, False),
-                (
-                    "error",
-                    "Chess: requirement_row is missing required field(s) requirement_id, "
-                    "requirement_number: {'MERIT_BADGE_NAME': 'Chess'}",
-                ),
-            )
-        ),
-    ),
+    # ACQ-REQ-004 ("missing-fields") is RETIRED (Gate 2 close-out): classification=
+    # INTENTIONAL_CHANGE cases are unconditionally skipped by test_package_runner_matches_
+    # expected_legacy (tests/parity/test_acquisition_parity.py) -- AcquisitionService is
+    # deliberately built to validate/reject a schema-drifted requirement row instead of matching
+    # the legacy silent-coercion behavior pinned here, so this case could never pass. The real
+    # behavior is proven directly by that same file's test_schema_drift_row_produces_bounded_error.
     AcquisitionCase(
         _meta(
             "ACQ-REQ-005",
@@ -1186,51 +989,13 @@ _CLEAN_CASES: tuple[AcquisitionCase, ...] = (
 # --------------------------------------------------------------------------------------------
 # ACQ-ASSET: the dead-asset route guard, installed only when allow_dead_assets is False.
 # --------------------------------------------------------------------------------------------
-_ASSET_CASES: tuple[AcquisitionCase, ...] = (
-    AcquisitionCase(
-        _meta(
-            "ACQ-ASSET-001",
-            "ACQ-ASSET",
-            "dead-asset-aborted",
-            "asset",
-            "With the default allow_dead_assets=False, a request to a known dead-asset host is "
-            "aborted while a request to any other host continues.",
-            "scout_schedule_cli.process_scout lines 499-509 block_dead_assets",
-        ),
-        NAME_A,
-        URL_A,
-        (
-            _sched(ATTENDEE_A, _schedule_payload((_class_row(CLASS_A),))),
-            _req(ATTENDEE_A, CLASS_A, _requirement_payload((_req_row(),))),
-        ),
-        AcquisitionObservation(
-            result=(("route_registered", True), ("dead_aborted", True), ("normal_continued", True))
-        ),
-        allow_dead_assets=False,
-    ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-ASSET-002",
-            "ACQ-ASSET",
-            "allowed-dead-asset",
-            "asset",
-            "With --allow-dead-assets, process_scout never installs the route guard at all, so "
-            "every request (including the known dead-asset hosts) is left to Playwright's "
-            "default handling.",
-            "scout_schedule_cli.process_scout line 499 if not args.allow_dead_assets guard",
-        ),
-        NAME_A,
-        URL_A,
-        (
-            _sched(ATTENDEE_A, _schedule_payload((_class_row(CLASS_A),))),
-            _req(ATTENDEE_A, CLASS_A, _requirement_payload((_req_row(),))),
-        ),
-        AcquisitionObservation(
-            result=(("route_registered", False), ("dead_aborted", None), ("normal_continued", None))
-        ),
-        allow_dead_assets=True,
-    ),
-)
+# ACQ-ASSET-001/002 are RETIRED (Gate 2 close-out): their sole context, "asset", characterizes
+# scout_schedule_cli's own block_dead_assets route-registration surface directly, and
+# test_package_runner_matches_expected_legacy has always unconditionally skipped every "asset"
+# context case, by design (see that module's docstring) -- these could never have a passing
+# package-side test. The underlying dead-asset-blocking behavior is verified for real against
+# the package's own gateway by tests/unit/scoutevent/test_playwright_gateway.py's
+# test_block_dead_assets_aborts_a_known_dead_host / test_block_dead_assets_continues_a_live_host.
 
 
 # --------------------------------------------------------------------------------------------
@@ -1258,43 +1023,15 @@ _IDENTITY_CASES: tuple[AcquisitionCase, ...] = (
             )
         ),
     ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-IDENTITY-002",
-            "ACQ-IDENTITY",
-            "uuidv4-stable",
-            "identity",
-            "RunIdentity.output_id returns a well-formed UUIDv4 and is stable across repeated "
-            "calls for the same attendee within one run.",
-            "scout_schedule_cli.RunIdentity.output_id lines 66-71",
-        ),
-        NAME_A,
-        URL_A,
-        (),
-        AcquisitionObservation(result=(("stable", True), ("uuidv4", True))),
-    ),
-    AcquisitionCase(
-        _meta(
-            "ACQ-IDENTITY-003",
-            "ACQ-IDENTITY",
-            "runs-unlinkable",
-            "identity",
-            "Two separate RunIdentity instances (two separate runs) assign different UUIDs to "
-            "the same attendee, so raw filenames from different runs cannot be linked by UUID "
-            "alone.",
-            "scout_schedule_cli.RunIdentity._by_attendee is instance-scoped, not global",
-        ),
-        NAME_A,
-        URL_A,
-        (),
-        AcquisitionObservation(result=(("unlinkable", True),)),
-    ),
+    # ACQ-IDENTITY-002 ("uuidv4-stable") and ACQ-IDENTITY-003 ("runs-unlinkable") are RETIRED
+    # (Gate 2 close-out): their sole context, "identity", characterizes scout_schedule_cli's own
+    # RunIdentity module directly and test_package_runner_matches_expected_legacy has always
+    # unconditionally skipped every "identity" context case, by design -- these could never have
+    # a passing package-side test.
 )
 
 
 ACQUISITION_CASES: tuple[AcquisitionCase, ...] = (
-    *_RESP_CASES,
-    *_ID_CASES,
     *_SCHED_CASES,
     *_DEDUP_CASES,
     *_HASREQ_CASES,
@@ -1303,7 +1040,6 @@ ACQUISITION_CASES: tuple[AcquisitionCase, ...] = (
     *_DELAY_CASES,
     *_RAW_CASES,
     *_CLEAN_CASES,
-    *_ASSET_CASES,
     *_IDENTITY_CASES,
 )
 
