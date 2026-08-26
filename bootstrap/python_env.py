@@ -7,13 +7,13 @@ everything lives under paths.python_dir.
 from __future__ import annotations
 
 import subprocess
-import zipfile
 from pathlib import Path
 from typing import Callable
 
 from bootstrap.config import GET_PIP_URL, PYTHON_EMBED_URL, PYTHON_VERSION
 from bootstrap.downloader import download
 from bootstrap.paths import AppPaths
+from bootstrap.safe_extract import safe_extract_zip
 
 PTH_FILENAME = "python" + "".join(PYTHON_VERSION.split(".")[:2]) + "._pth"
 
@@ -39,8 +39,7 @@ def _download_and_extract_python(paths: AppPaths, log: ProgressFn | None) -> Non
     download(PYTHON_EMBED_URL, zip_path)
 
     _log(log, "Extracting Python runtime...")
-    with zipfile.ZipFile(zip_path) as archive:
-        archive.extractall(paths.python_dir)
+    safe_extract_zip(zip_path, paths.python_dir)
     zip_path.unlink(missing_ok=True)
 
 
