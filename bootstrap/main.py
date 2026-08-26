@@ -59,7 +59,7 @@ def _launch_app(paths: AppPaths, channel: str | None) -> None:
     with open(log_path, "ab") as log_fh:
         subprocess.Popen(
             [str(python_env.pythonw_exe(paths)), "-m", "scoutmb.interfaces.desktop.app"],
-            cwd=str(paths.app_dir),
+            cwd=str(release_module.active_app_dir(paths)),
             env=env,
             stdout=log_fh,
             stderr=subprocess.STDOUT,

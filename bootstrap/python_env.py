@@ -56,9 +56,14 @@ def _patch_pth_file(paths: AppPaths, log: ProgressFn | None) -> None:
             text += "\n"
         text += "Lib\\site-packages\n"
     # The embeddable distribution's isolated path mode does NOT auto-add the
-    # launched script's own directory to sys.path (unlike a normal Python
-    # install), so run_app.py's `from ui import server` would otherwise fail.
-    app_dir_str = str(paths.app_dir)
+    # active release's directory to sys.path (unlike a normal Python install),
+    # so `-m scoutmb.interfaces.desktop.app` would otherwise fail to import.
+    # Deferred import: bootstrap.release -> ... -> bootstrap.marker imports
+    # this module at load time, so importing it back at module scope here
+    # would be circular.
+    from bootstrap import release
+
+    app_dir_str = str(release.active_app_dir(paths))
     if app_dir_str not in text:
         if not text.endswith("\n"):
             text += "\n"
