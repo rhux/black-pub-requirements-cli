@@ -21,8 +21,23 @@ class AppPaths:
     browser_channel_path: Path
     data_dir: Path
 
+    @property
+    def releases_dir(self) -> Path:
+        return self.root / "releases"
+
+    @property
+    def current_pointer_path(self) -> Path:
+        return self.state_dir / "current.json"
+
     def ensure_dirs(self) -> None:
-        for path in (self.root, self.python_dir, self.app_dir, self.state_dir, self.logs_dir):
+        for path in (
+            self.root,
+            self.python_dir,
+            self.app_dir,
+            self.state_dir,
+            self.logs_dir,
+            self.releases_dir,
+        ):
             path.mkdir(parents=True, exist_ok=True)
 
 

@@ -14,11 +14,12 @@ gap; it is cheap and idempotent, so calling it twice (here and in the lifespan) 
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.resources import as_file, files
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
 from scoutmb.config import UiSettings
@@ -42,7 +43,10 @@ def create_app(settings: UiSettings) -> FastAPI:
     app = FastAPI(title="Troop 349 Summer Camp Command Program UI", lifespan=lifespan)
 
     @app.get("/api/health")
-    async def health() -> dict[str, str]:
+    async def health(nonce: str | None = None) -> dict[str, str]:
+        configured_nonce = os.environ.get("SCOUTMB_READINESS_NONCE")
+        if configured_nonce is not None and nonce != configured_nonce:
+            raise HTTPException(status_code=401, detail="readiness nonce mismatch")
         return {"status": "ok"}
 
     from scoutmb.interfaces.web.routes import router

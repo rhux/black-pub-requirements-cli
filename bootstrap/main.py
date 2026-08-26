@@ -5,11 +5,14 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 import time
 import traceback
+from pathlib import Path
 
-from bootstrap import browser_setup, marker, migrate, python_env, source_sync, webview2
-from bootstrap.config import LOCK_STALE_SECONDS
+from bootstrap import browser_setup, marker, migrate, python_env, webview2
+from bootstrap import release as release_module
+from bootstrap.config import DURABLE_STATE_SCHEMA_VERSION, LOCK_STALE_SECONDS
 from bootstrap.paths import AppPaths, get_paths
 from bootstrap.ui import ProgressWindow
 
@@ -66,15 +69,25 @@ def _launch_app(paths: AppPaths, channel: str | None) -> None:
     time.sleep(APP_LAUNCH_SETTLE_SECONDS)
 
 
-def _run(window: ProgressWindow, paths: AppPaths, logger: logging.Logger) -> None:
-    requirements_path = paths.app_dir / "requirements.txt"
+def _bootstrap_source_root() -> Path:
+    """Where the bundled app source lives: PyInstaller's temp extraction dir when frozen, or
+    the real repo root when running unfrozen for local testing (same resolution source_sync.py
+    used, preserved here since stage_release needs the same distinction)."""
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "app_src"  # type: ignore[attr-defined]
+    return Path(__file__).resolve().parent.parent
 
+
+def _run(window: ProgressWindow, paths: AppPaths, logger: logging.Logger) -> None:
     def status(text: str) -> None:
         logger.info(text)
         window.set_status(text)
 
     status("Checking previous setup...")
-    source_sync.sync_app_source(paths)
+    source_root = _bootstrap_source_root()
+    requirements_path = source_root / "requirements.txt"
+    manifest = release_module.stage_release(paths, source_root, requirements_path)
+    release_module.activate(paths, manifest, state_generation=DURABLE_STATE_SCHEMA_VERSION)
 
     migration_report = migrate.migrate_legacy_data(paths.app_dir, paths.data_dir)
     if migration_report is not None:

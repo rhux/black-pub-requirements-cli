@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import os
 import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import uvicorn
 import webview
@@ -54,6 +57,12 @@ def main() -> int:
     threading.Thread(target=run, daemon=True).start()
     base_url = f"http://127.0.0.1:{port}/"
     _wait_until_ready(base_url + "api/health")
+
+    readiness_file = os.environ.get("SCOUTMB_READINESS_FILE")
+    if readiness_file:
+        Path(readiness_file).write_text(
+            json.dumps({"port": port, "pid": os.getpid()}), encoding="utf-8"
+        )
 
     if args.browser:
         import webbrowser
