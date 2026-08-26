@@ -35,3 +35,9 @@ SMOKE_TEST_IMPORTS = [
 MARKER_SCHEMA_VERSION = 1
 
 LOCK_STALE_SECONDS = 30 * 60
+
+# Bumped whenever scoutmb.core.run_state.RUN_STATE_VERSION,
+# scoutmb.ports.checkpoint_store.CHECKPOINT_VERSION, or bootstrap.marker.MARKER_SCHEMA_VERSION
+# changes -- the single aggregate durable-state generation a release manifest declares support
+# for (see bootstrap/release_manifest.py, bootstrap/activation.py).
+DURABLE_STATE_SCHEMA_VERSION = 1
