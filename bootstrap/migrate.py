@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 MIGRATION_MARKER = ".migrated"
+MANIFEST_FILE = "migration_manifest.json"
 _ITEMS = [("scouts.csv", False), ("pdf-uploads", True), ("runs", True)]
 
 
@@ -51,6 +52,24 @@ def _stage_item(src: Path, staging: Path, name: str, is_dir: bool) -> Path:
         if _sha256(src) != _sha256(staged_path):
             raise RuntimeError(f"migration hash verify failed for {name}")
     return staged_path
+
+
+def _relative_file_hashes(src: Path, root_name: str) -> list[dict[str, object]]:
+    """Walks a to-be-staged item and records path-relative-to-app_dir + hash + size for every
+    file -- reuses _sha256 (already proven correct by C3's verification) rather than inventing
+    a second hashing routine. Called against the SOURCE before staging, so the manifest
+    reflects the source as it existed when migration started."""
+    if src.is_file():
+        return [{"path": root_name, "sha256": _sha256(src), "size": src.stat().st_size}]
+    return [
+        {
+            "path": f"{root_name}/{f.relative_to(src)}".replace("\\", "/"),
+            "sha256": _sha256(f),
+            "size": f.stat().st_size,
+        }
+        for f in sorted(src.rglob("*"))
+        if f.is_file()
+    ]
 
 
 def _promote_staged_item(staged_path: Path, data_dir: Path, name: str) -> str:
@@ -96,12 +115,13 @@ def migrate_legacy_data(
     # data at that path would look identical to "already promoted by a prior interrupted
     # attempt", and the two must never be conflated (a real collision still needs its own
     # staging+promote+.legacy pass; only a marker proves this exact migration already did it).
-    copied, collisions = [], []
+    copied, collisions, manifest_files = [], [], []
     for name, is_dir in present:
         marker = staging / f".{name}.promoted"
         if marker.is_file():
             continue  # resumed run: this item was already promoted in a prior attempt
         src = app_dir / name
+        manifest_files.extend(_relative_file_hashes(src, name))
         staged_path = _stage_item(src, staging, name, is_dir)
         promoted_name = _promote_staged_item(staged_path, data_dir, name)
         marker.write_text("", encoding="utf-8")
@@ -120,6 +140,9 @@ def migrate_legacy_data(
         "This folder's data was copied to the app's data directory. Originals are "
         "retained here but no longer used. Do not run the old app from here.\n",
         encoding="utf-8",
+    )
+    (data_dir / MANIFEST_FILE).write_text(
+        json.dumps({"files": manifest_files}, indent=2), encoding="utf-8"
     )
     report = {
         "migrated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
