@@ -21,6 +21,7 @@ WEBVIEW2_CLIENT_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 # Modules that must import cleanly in the app-local Python for the
 # environment to be considered valid (see marker.py).
 SMOKE_TEST_IMPORTS = [
+    "scoutmb",
     "fastapi",
     "playwright",
     "webview",

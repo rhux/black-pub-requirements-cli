@@ -12,11 +12,14 @@ the Phase B spec's dependency-edge table and a new sibling module would not be."
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 APP_NAME = "ScoutingMeritBadges"
+
+_PRIVATE_DIR_MODE = 0o700
 DATA_DIR_ENV = "SCOUTMB_DATA_DIR"
 
 
@@ -38,6 +41,25 @@ class ScheduleConfig:
     # Consecutive scout-fetch failures before the acquisition circuit breaker opens (D22/B10.2)
     # -- the legacy CLI had no breaker at all, so there is no prior value to preserve.
     breaker_threshold: int = 5
+
+
+def _directory_size(root: Path) -> int:
+    if not root.is_dir():
+        return 0
+    return sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
+
+
+def _file_size(path: Path) -> int:
+    return path.stat().st_size if path.is_file() else 0
+
+
+def _delete_directory_contents(root: Path) -> None:
+    """Removes root itself if present, then recreates it empty -- callers never see a
+    missing directory, only an empty one, so downstream code that assumes the dir exists
+    keeps working."""
+    if root.is_dir():
+        shutil.rmtree(root)
+    root.mkdir(parents=True, exist_ok=True)
 
 
 def _platform_data_root() -> Path:
@@ -84,3 +106,28 @@ class UiSettings:
     def ensure_dirs(self) -> None:
         self.data_root.mkdir(parents=True, exist_ok=True)
         self.runs_dir.mkdir(parents=True, exist_ok=True)
+
+    def apply_private_permissions(self) -> None:
+        """Best-effort current-user-only permissions. POSIX: chmod 0700. Windows: a
+        documented no-op -- ACL-based restriction is POSTPONED (vNext), not silently
+        claimed here."""
+        if sys.platform == "win32":
+            return
+        self.data_root.chmod(_PRIVATE_DIR_MODE)
+
+    def category_sizes(self) -> dict[str, int]:
+        return {
+            "scouts_csv": _file_size(self.scouts_csv),
+            "pdf_uploads": _directory_size(self.pdf_uploads_dir),
+            "runs": _directory_size(self.runs_dir),
+        }
+
+    def delete_category(self, category: str) -> None:
+        targets = {
+            "pdf_uploads": self.pdf_uploads_dir,
+            "runs": self.runs_dir,
+        }
+        target = targets.get(category)
+        if target is None:
+            return
+        _delete_directory_contents(target)

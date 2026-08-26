@@ -30,7 +30,15 @@ def resolve_root() -> Path:
     override = os.environ.get("SCOUTMB_BOOTSTRAP_ROOT")
     if override:
         return Path(override)
-    return Path(os.environ["LOCALAPPDATA"]) / APP_NAME
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        raise RuntimeError(
+            "Cannot resolve the bootstrap root: LOCALAPPDATA is not set and "
+            "SCOUTMB_BOOTSTRAP_ROOT was not provided as an override. On a real Windows "
+            "install LOCALAPPDATA is always set by the OS; set SCOUTMB_BOOTSTRAP_ROOT "
+            "explicitly when running off Windows (tests, macOS development)."
+        )
+    return Path(base) / APP_NAME
 
 
 def get_paths() -> AppPaths:
