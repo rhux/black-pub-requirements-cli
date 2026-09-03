@@ -1,0 +1,27 @@
+name: Release
+on:
+  workflow_dispatch:
+jobs:
+  # windows-latest is a Windows Server image, not literally Windows 10 -- GitHub Actions has no
+  # distinct "Windows 10 x64" runner label. Windows 10 end-user compatibility is a best-effort
+  # claim verified manually, not a thing this CI job (or any runner choice) can itself enforce;
+  # this job's pass/fail gates the release regardless of which Windows the runner presents as.
+  launcher-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync --locked
+      - run: uv pip install -r bootstrap/requirements-bootstrap-build.txt
+      - run: uv run pytest -q tests/release/ -m release
+
+  launcher-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync --locked
+      - run: uv pip install -r bootstrap/requirements-bootstrap-build.txt
+      - run: uv run pytest -q tests/release/ -m release

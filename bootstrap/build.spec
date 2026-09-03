@@ -1,8 +1,9 @@
 # PyInstaller spec for the self-bootstrapping installer.
 # Build from the repo root with: pyinstaller --noconfirm bootstrap/build.spec
-# Output: dist/ScoutingMeritBadgesSetup.exe
+# Output: dist/ScoutingMeritBadgesSetup(.exe|.app) depending on the native runner.
 
 import os
+import sys
 
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 
@@ -17,6 +18,7 @@ datas = [
     (app_src("bootstrap", "probe_msedge.py"), os.path.join("app_src", "_bootstrap_support")),
     (app_src("bootstrap", "probe_chrome_macos.py"), os.path.join("app_src", "_bootstrap_support")),
     (app_src("bootstrap", "probe_safari.py"), os.path.join("app_src", "_bootstrap_support")),
+    (app_src("bootstrap", "probe_readiness.py"), os.path.join("app_src", "_bootstrap_support")),
 ]
 
 hiddenimports = [
@@ -29,9 +31,12 @@ hiddenimports = [
     "bootstrap.marker",
     "bootstrap.source_sync",
     "bootstrap.browser_setup",
-    "bootstrap.webview2",
-    "winreg",
+    "bootstrap.webview2",  # importable on every platform since D2 (winreg import is deferred)
 ]
+if sys.platform == "win32":
+    # winreg is a real stdlib module only on Windows -- PyInstaller's Analysis would fail trying
+    # to resolve it by this name on macOS/Linux if listed unconditionally.
+    hiddenimports += ["winreg"]
 
 a = Analysis(
     [app_src("bootstrap", "entry.py")],

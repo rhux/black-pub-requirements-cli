@@ -104,13 +104,14 @@ testpaths = ["tests"]
 markers = [
     "live_service: test may contact the real scoutingevent.com (deselected by default)",
     "playwright: test needs a real browser (deselected by default)",
+    "release: builds a real PyInstaller artifact -- slow, native-runner-specific (deselected by default)",
     "private_corpus: read-only characterization against the private corpus (skipped when absent)",
     "scale: larger synthetic-volume characterization row",
     "vertical: end-to-end vertical-slice characterization row",
     "intentional_change: locks a deliberately changed behavior owned by a later slice",
     "matrix_case: binds a test to one matrix execution key (case_id, context_id, lane)",
 ]
-addopts = "-m 'not live_service and not playwright' --strict-markers --strict-config --cov-branch"
+addopts = "-m 'not live_service and not playwright and not release' --strict-markers --strict-config --cov-branch"
 # --cov-branch is required even though [tool.coverage.run] already sets `branch = true`: with
 # --cov, pytest-cov derives the COV_CORE_BRANCH env var it exports for subprocess coverage
 # combining from its OWN --cov-branch CLI flag (pytest_cov/engine.py's `self.cov_branch =

@@ -94,26 +94,25 @@ def resolve_browser_channel(paths: AppPaths, release_version: str, log: Progress
     return None
 
 
-async def verify_readiness(channel: str | None, url: str) -> bool:
+def verify_readiness(paths: AppPaths, channel: str | None, url: str) -> bool:
     """Launches the selected engine and completes one real navigation against a loopback URL
     before the caller may consider it ready. Never falls back / switches engines on failure --
-    that decision belongs to whatever called resolve_browser_channel, not to this check."""
-    from playwright.async_api import async_playwright
+    that decision belongs to whatever called resolve_browser_channel, not to this check.
 
+    Shells out to the provisioned embedded Python (bootstrap/probe_readiness.py), exactly like
+    probe_msedge_channel/probe_chrome_macos -- browser_setup.py itself must never import
+    playwright directly, or PyInstaller's Analysis bundles the entire package (confirmed via a
+    real build: ~52MB, versus an 18MB budget) into the frozen bootstrapper, which never needs
+    it -- playwright only ever runs inside the separately-provisioned app environment."""
+    probe_path = paths.app_dir / "_bootstrap_support" / "probe_readiness.py"
+    args = [str(python_exe(paths)), str(probe_path), url]
+    if channel is not None:
+        args += ["--channel", channel]
     try:
-        async with async_playwright() as playwright:
-            launch_kwargs: dict[str, object] = {"headless": True}
-            if channel is not None:
-                launch_kwargs["channel"] = channel
-            browser = await playwright.chromium.launch(**launch_kwargs)
-            try:
-                page = await browser.new_page()
-                await page.goto(url, timeout=5_000)
-            finally:
-                await browser.close()
-        return True
-    except Exception:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=PROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
         return False
+    return result.returncode == 0
 
 
 def resolve_experimental_safari() -> tuple[str, str]:
