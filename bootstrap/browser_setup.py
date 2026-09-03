@@ -49,6 +49,23 @@ def probe_msedge_channel(paths: AppPaths) -> bool:
     return result.returncode == 0
 
 
+def probe_chrome_macos(paths: AppPaths) -> bool:
+    if os.environ.get("SCOUTMB_FORCE_CHROMIUM_FALLBACK"):
+        return False  # test-only escape hatch, inert unless explicitly set
+
+    probe_path = paths.app_dir / "_bootstrap_support" / "probe_chrome_macos.py"
+    try:
+        result = subprocess.run(
+            [str(python_exe(paths)), str(probe_path)],
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return result.returncode == 0
+
+
 def install_chromium_fallback(paths: AppPaths, log: ProgressFn | None = None) -> None:
     _log(log, "Downloading browser (this can take a few minutes)...")
     result = subprocess.run(
@@ -62,12 +79,50 @@ def install_chromium_fallback(paths: AppPaths, log: ProgressFn | None = None) ->
 
 
 def resolve_browser_channel(paths: AppPaths, release_version: str, log: ProgressFn | None = None) -> str | None:
-    """Returns the Playwright channel to use, or None to use bundled Chromium."""
+    """Returns the Playwright channel to use, or None to use bundled Chromium. Safari is never
+    returned here -- it is reachable only through the separate, explicit
+    resolve_experimental_safari() opt-in."""
     _log(log, "Checking browser...")
+    if platform.system() == "Darwin":
+        if probe_chrome_macos(paths):
+            return "chrome"
+        install_chromium_capability(paths, release_version=release_version, log=log)
+        return None
     if probe_msedge_channel(paths):
         return "msedge"
     install_chromium_capability(paths, release_version=release_version, log=log)
     return None
+
+
+async def verify_readiness(channel: str | None, url: str) -> bool:
+    """Launches the selected engine and completes one real navigation against a loopback URL
+    before the caller may consider it ready. Never falls back / switches engines on failure --
+    that decision belongs to whatever called resolve_browser_channel, not to this check."""
+    from playwright.async_api import async_playwright
+
+    try:
+        async with async_playwright() as playwright:
+            launch_kwargs: dict[str, object] = {"headless": True}
+            if channel is not None:
+                launch_kwargs["channel"] = channel
+            browser = await playwright.chromium.launch(**launch_kwargs)
+            try:
+                page = await browser.new_page()
+                await page.goto(url, timeout=5_000)
+            finally:
+                await browser.close()
+        return True
+    except Exception:
+        return False
+
+
+def resolve_experimental_safari() -> tuple[str, str]:
+    """Never called from resolve_browser_channel -- only reachable via an explicit opt-in the
+    caller must invoke deliberately (e.g. a --experimental-safari CLI flag)."""
+    return "safari", (
+        "Safari support is experimental and may not correctly render the ScoutingEvent "
+        "mobile UI. Use at your own risk."
+    )
 
 
 def _ms_playwright_cache_dir() -> Path:
