@@ -22,7 +22,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from scoutmb.config import ScheduleConfig
+from scoutmb.config import ScheduleConfig, UiSettings
+from scoutmb.logging_setup import configure_logging
 
 _DEFAULTS = ScheduleConfig(input=Path("unused"))
 
@@ -138,6 +139,7 @@ async def run(
 
 def main() -> int:
     config = parse_args()
+    configure_logging(UiSettings.resolve().data_root)
     try:
         return asyncio.run(run(config))
     except KeyboardInterrupt:

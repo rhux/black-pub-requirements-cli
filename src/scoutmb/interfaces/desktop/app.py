@@ -19,6 +19,7 @@ import webview
 from scoutmb.config import UiSettings
 from scoutmb.interfaces.web.app import create_app
 from scoutmb.interfaces.web.rendezvous import bind_loopback_socket
+from scoutmb.logging_setup import configure_logging
 
 
 def _wait_until_ready(url: str, timeout_seconds: float = 5.0) -> None:
@@ -43,7 +44,10 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    app = create_app(UiSettings.resolve())
+    settings = UiSettings.resolve()
+    configure_logging(settings.data_root)
+
+    app = create_app(settings)
     sock = bind_loopback_socket()
     port = sock.getsockname()[1]
     config = uvicorn.Config(app=app, host="127.0.0.1", port=port, log_level="warning")

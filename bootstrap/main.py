@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
+import re
 import subprocess
 import sys
 import time
@@ -19,13 +21,29 @@ from bootstrap.ui import ProgressWindow
 APP_LAUNCH_SETTLE_SECONDS = 2
 
 
+_URL_PATTERN = re.compile(r"https?://\S+")
+
+
+def _redact_sensitive_values(record: logging.LogRecord) -> bool:
+    """QR URLs and attendee IDs act as bearer access tokens for real scouts' data (see
+    CLAUDE.md's privacy notes) -- never let one reach the on-disk log, redacted or not."""
+    record.msg = _URL_PATTERN.sub("[redacted-url]", str(record.msg))
+    return True
+
+
 def _setup_logging(paths: AppPaths) -> logging.Logger:
     paths.ensure_dirs()
     logger = logging.getLogger("bootstrap")
     logger.setLevel(logging.INFO)
     if not logger.handlers:
-        handler = logging.FileHandler(paths.logs_dir / "bootstrap.log", encoding="utf-8")
+        handler = logging.handlers.RotatingFileHandler(
+            paths.logs_dir / "bootstrap.log",
+            maxBytes=1_000_000,
+            backupCount=3,
+            encoding="utf-8",
+        )
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        handler.addFilter(_redact_sensitive_values)
         logger.addHandler(handler)
     return logger
 

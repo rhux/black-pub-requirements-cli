@@ -17,7 +17,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "src"
-HEAVY = ("cv2", "fitz", "playwright")
+HEAVY = ("cv2", "fitz", "playwright", "opentelemetry")
 
 # Runs in a clean `python -I` child. sys.path is set INSIDE the source, because -I implies -E
 # and would discard a PYTHONPATH we set in the environment.

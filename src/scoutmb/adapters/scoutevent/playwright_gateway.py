@@ -63,7 +63,7 @@ async def discover_name(page: Page, fallback: str) -> str:
                 if text and text.lower() not in {"schedule", "event", "menu"}:
                     return text
         except Exception:
-            pass
+            pass  # this selector didn't match/render -- try the next one, not a real failure
     return "Unknown Scout"
 
 
@@ -155,7 +155,7 @@ class PlaywrightScoutingEventGateway:
                             clicked = True
                             break
                     except Exception:
-                        continue
+                        continue  # this selector didn't click -- try the next one
                 if not clicked:
                     await page.evaluate(
                         """() => {
@@ -184,7 +184,7 @@ class PlaywrightScoutingEventGateway:
                     else:
                         await route.continue_()
                 except Exception:
-                    await route.continue_()
+                    await route.continue_()  # fail-open: never block a request over our own bug
 
             await context.route("**/*", block_dead_assets)
         page = await context.new_page()
