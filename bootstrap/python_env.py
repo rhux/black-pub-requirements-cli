@@ -6,14 +6,26 @@ everything lives under paths.python_dir.
 
 from __future__ import annotations
 
+import platform
 import subprocess
 from pathlib import Path
 from typing import Callable
 
-from bootstrap.config import GET_PIP_URL, PYTHON_EMBED_URL, PYTHON_VERSION
+from bootstrap import capability_cache
+from bootstrap.config import (
+    GET_PIP_URL,
+    PYTHON_EMBED_SHA256,
+    PYTHON_EMBED_SIZE_BYTES,
+    PYTHON_EMBED_URL,
+    PYTHON_VERSION,
+)
 from bootstrap.downloader import download
 from bootstrap.paths import AppPaths
 from bootstrap.safe_extract import safe_extract_zip
+
+# The embeddable zip at PYTHON_EMBED_URL is a Windows-amd64-specific build -- this is the one
+# capability payload whose "supported platform" is a single fixed OS, not a set.
+_PYTHON_EMBED_OS = "Windows"
 
 PTH_FILENAME = "python" + "".join(PYTHON_VERSION.split(".")[:2]) + "._pth"
 
@@ -33,14 +45,29 @@ def pythonw_exe(paths: AppPaths) -> Path:
     return paths.python_dir / "pythonw.exe"
 
 
-def _download_and_extract_python(paths: AppPaths, log: ProgressFn | None) -> None:
+def _download_and_extract_python(paths: AppPaths, log: ProgressFn | None, release_version: str) -> None:
+    if platform.system() != _PYTHON_EMBED_OS:
+        raise RuntimeError(
+            f"platform mismatch: the embeddable Python payload is built for {_PYTHON_EMBED_OS}, "
+            f"current platform is {platform.system()}"
+        )
+
     _log(log, "Downloading Python runtime...")
     zip_path = paths.state_dir / "python-embed.zip"
-    download(PYTHON_EMBED_URL, zip_path)
+    download(
+        PYTHON_EMBED_URL,
+        zip_path,
+        expected_sha256=PYTHON_EMBED_SHA256,
+        expected_size=PYTHON_EMBED_SIZE_BYTES,
+    )
 
     _log(log, "Extracting Python runtime...")
     safe_extract_zip(zip_path, paths.python_dir)
     zip_path.unlink(missing_ok=True)
+
+    capability_cache.record_and_persist(
+        paths.capability_cache_dir, payload_id="python-embed", release_version=release_version
+    )
 
 
 def _patch_pth_file(paths: AppPaths, log: ProgressFn | None) -> None:
@@ -120,9 +147,11 @@ def _install_requirements(paths: AppPaths, requirements_path: Path, log: Progres
         raise RuntimeError(f"Dependency install failed:\n{result.stdout}\n{result.stderr}")
 
 
-def provision_python(paths: AppPaths, requirements_path: Path, log: ProgressFn | None = None) -> None:
+def provision_python(
+    paths: AppPaths, requirements_path: Path, release_version: str, log: ProgressFn | None = None
+) -> None:
     """Full provisioning sequence: download, extract, enable pip, install deps."""
-    _download_and_extract_python(paths, log)
+    _download_and_extract_python(paths, log, release_version)
     _patch_pth_file(paths, log)
     _bootstrap_pip(paths, log)
     _install_requirements(paths, requirements_path, log)

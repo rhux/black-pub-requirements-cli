@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import subprocess
 from pathlib import Path
 from typing import Callable
 
+from bootstrap import capability_cache
 from bootstrap.paths import AppPaths
 from bootstrap.python_env import python_exe
 
@@ -18,6 +20,11 @@ ProgressFn = Callable[[str], None]
 
 PROBE_TIMEOUT_SECONDS = 20
 CHROMIUM_INSTALL_TIMEOUT_SECONDS = 20 * 60
+
+# Chromium is acquired via `playwright install chromium` (install_chromium_fallback), which
+# manages its own download internally -- we don't control a URL or hash to pin against, so this
+# is a supported-platform-set check, not a hash-pinned-payload check like python_env.py's.
+SUPPORTED_CHROMIUM_PLATFORMS = frozenset({"Windows", "Darwin", "Linux"})
 
 
 def _log(log: ProgressFn | None, message: str) -> None:
@@ -54,13 +61,61 @@ def install_chromium_fallback(paths: AppPaths, log: ProgressFn | None = None) ->
         raise RuntimeError(f"Chromium install failed:\n{result.stdout}\n{result.stderr}")
 
 
-def resolve_browser_channel(paths: AppPaths, log: ProgressFn | None = None) -> str | None:
+def resolve_browser_channel(paths: AppPaths, release_version: str, log: ProgressFn | None = None) -> str | None:
     """Returns the Playwright channel to use, or None to use bundled Chromium."""
     _log(log, "Checking browser...")
     if probe_msedge_channel(paths):
         return "msedge"
-    install_chromium_fallback(paths, log)
+    install_chromium_capability(paths, release_version=release_version, log=log)
     return None
+
+
+def _ms_playwright_cache_dir() -> Path:
+    """Mirrors Playwright's own default browsers-path resolution (PLAYWRIGHT_BROWSERS_PATH
+    override, else the OS-conventional user cache dir) -- used only to discover which Chromium
+    revision `playwright install` actually left behind, never to control where it installs."""
+    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if override:
+        return Path(override)
+    home = Path.home()
+    system = platform.system()
+    if system == "Windows":
+        return Path(os.environ.get("LOCALAPPDATA", str(home))) / "ms-playwright"
+    if system == "Darwin":
+        return home / "Library" / "Caches" / "ms-playwright"
+    return home / ".cache" / "ms-playwright"
+
+
+def _discover_chromium_revision() -> str:
+    cache_root = _ms_playwright_cache_dir()
+    candidates = (
+        sorted(p.name for p in cache_root.iterdir() if p.is_dir() and p.name.startswith("chromium-"))
+        if cache_root.is_dir()
+        else []
+    )
+    if not candidates:
+        raise RuntimeError(
+            f"chromium install reported success but no chromium-* directory was found "
+            f"under {cache_root}"
+        )
+    return candidates[-1].removeprefix("chromium-")
+
+
+def install_chromium_capability(
+    paths: AppPaths, *, release_version: str, log: ProgressFn | None = None
+) -> None:
+    current_platform = platform.system()
+    if current_platform not in SUPPORTED_CHROMIUM_PLATFORMS:
+        raise RuntimeError(
+            f"platform mismatch: chromium install is not supported on {current_platform!r} "
+            f"(supported: {sorted(SUPPORTED_CHROMIUM_PLATFORMS)})"
+        )
+    install_chromium_fallback(paths, log)
+    revision = _discover_chromium_revision()
+    capability_cache.record_and_persist(
+        paths.capability_cache_dir, payload_id="chromium", release_version=release_version
+    )
+    _log(log, f"Chromium revision {revision} ready.")
 
 
 def write_browser_channel_marker(paths: AppPaths, channel: str | None) -> None:

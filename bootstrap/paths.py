@@ -29,6 +29,10 @@ class AppPaths:
     def current_pointer_path(self) -> Path:
         return self.state_dir / "current.json"
 
+    @property
+    def capability_cache_dir(self) -> Path:
+        return self.root / "capabilities"
+
     def ensure_dirs(self) -> None:
         for path in (
             self.root,
@@ -37,6 +41,7 @@ class AppPaths:
             self.state_dir,
             self.logs_dir,
             self.releases_dir,
+            self.capability_cache_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 

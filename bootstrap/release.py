@@ -12,6 +12,7 @@ import os
 import shutil
 from pathlib import Path
 
+from bootstrap import capability_cache
 from bootstrap.activation import ActivationTuple, validate_activation
 from bootstrap.paths import AppPaths
 from bootstrap.release_manifest import ReleaseManifest, build_release_manifest
@@ -47,6 +48,8 @@ def activate(paths: AppPaths, manifest: ReleaseManifest, *, state_generation: in
             f"generation {state_generation} (supports "
             f"[{manifest.state_schema_min}, {manifest.state_schema_max}])"
         )
+    rollback_version = current_release_version(paths)  # last chance to read the outgoing version
+
     tuple_ = ActivationTuple(
         release_version=manifest.version,
         state_generation=state_generation,
@@ -55,6 +58,15 @@ def activate(paths: AppPaths, manifest: ReleaseManifest, *, state_generation: in
     tmp_path = paths.current_pointer_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(tuple_.to_json(), indent=2), encoding="utf-8")
     os.replace(tmp_path, paths.current_pointer_path)
+
+    active_and_rollback_versions = {manifest.version}
+    if rollback_version is not None:
+        active_and_rollback_versions.add(rollback_version)
+    capability_cache.evict_unreferenced(
+        paths.capability_cache_dir,
+        capability_cache.load(paths.capability_cache_dir),
+        active_and_rollback_versions,
+    )
 
 
 def current_release_version(paths: AppPaths) -> str | None:

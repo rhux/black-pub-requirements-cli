@@ -12,15 +12,19 @@ from pathlib import Path
 from typing import Any
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CapabilityManifest:
+    """sha256/size_bytes are None for a payload we don't acquire via our own downloader (e.g.
+    Chromium, acquired through Playwright's own installer) -- there is nothing of ours to pin
+    a hash against, so the field is optional rather than forcing a second manifest shape."""
+
     payload_id: str
     version: str
     os: str
     arch: str
-    sha256: str
-    size_bytes: int
     source_url: str
+    sha256: str | None = None
+    size_bytes: int | None = None
 
     def to_json(self) -> str:
         return json.dumps(
@@ -36,7 +40,7 @@ class CapabilityManifest:
         )
 
     @classmethod
-    def from_json(cls, data: dict[str, Any]) -> "CapabilityManifest":
+    def from_json(cls, data: dict[str, Any]) -> CapabilityManifest:
         return cls(**data)
 
 

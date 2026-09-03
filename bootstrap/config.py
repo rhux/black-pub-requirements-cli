@@ -13,6 +13,11 @@ PYTHON_EMBED_URL = (
     f"https://www.python.org/ftp/python/{PYTHON_VERSION}/"
     f"python-{PYTHON_VERSION}-embed-amd64.zip"
 )
+# python.org release artifacts are immutable per version -- captured 2026-09-03 via a direct
+# HTTPS fetch of PYTHON_EMBED_URL and a local sha256sum. Re-derive both whenever PYTHON_VERSION
+# changes; never guess or carry forward the old value.
+PYTHON_EMBED_SHA256 = "8d3f33be9eb810f23c102f08475af2854e50484b8e4e06275e937be61ce3d2fb"
+PYTHON_EMBED_SIZE_BYTES = 11_094_114
 GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 
 WEBVIEW2_BOOTSTRAPPER_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"

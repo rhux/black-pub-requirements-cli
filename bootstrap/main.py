@@ -101,11 +101,11 @@ def _run(window: ProgressWindow, paths: AppPaths, logger: logging.Logger) -> Non
         return
 
     status("Setting up Python environment (first run only, may take a few minutes)...")
-    python_env.provision_python(paths, requirements_path, log=status)
+    python_env.provision_python(paths, requirements_path, manifest.version, log=status)
 
     status("Checking browser...")
     webview2.ensure_webview2(log=status)
-    channel = browser_setup.resolve_browser_channel(paths, log=status)
+    channel = browser_setup.resolve_browser_channel(paths, manifest.version, log=status)
     browser_setup.write_browser_channel_marker(paths, channel)
 
     marker.write_marker(
