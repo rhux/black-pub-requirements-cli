@@ -32,7 +32,7 @@
     {
       "id": 3,
       "subject": "Task 4 (D4): Native thin \u226418MB Windows & macOS installers",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [
         2
       ],
@@ -42,7 +42,7 @@
     {
       "id": 4,
       "subject": "Task 5 (D5): Redacted rotating diagnostics + no-op telemetr",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [
         3
       ],
@@ -80,5 +80,5 @@
       "activeForm": "Implementing Task 8 (D8)"
     }
   ],
-  "lastUpdated": "2026-09-03T20:18:46Z"
+  "lastUpdated": "2026-09-03T20:59:23Z"
 }
