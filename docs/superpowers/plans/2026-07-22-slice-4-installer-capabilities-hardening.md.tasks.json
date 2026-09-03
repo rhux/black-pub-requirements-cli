@@ -12,7 +12,7 @@
     {
       "id": 1,
       "subject": "Task 2 (D2): Fix macOS winreg import blocker + browser sele",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [
         0
       ],
@@ -22,7 +22,7 @@
     {
       "id": 2,
       "subject": "Task 3 (D3): Local immutable capability-payload lifecycle",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [
         1
       ],
@@ -80,5 +80,5 @@
       "activeForm": "Implementing Task 8 (D8)"
     }
   ],
-  "lastUpdated": "2026-09-03T20:02:39Z"
+  "lastUpdated": "2026-09-03T20:08:36Z"
 }
