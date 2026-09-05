@@ -131,3 +131,44 @@ class UiSettings:
         if target is None:
             return
         _delete_directory_contents(target)
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseLimits:
+    """Every field's default is a MEASURED value (Slice 4, D7), not a guessed round number.
+    Measured 2026-09-05 against a real 200-page synthetic PDF (tests/factories/pdf_builder,
+    run through the real scoutmb.adapters.pdf.pages.extract_pdf): 2,419,811 bytes on disk,
+    3.125s wall time, ~133MB real OS-level max RSS (resource.getrusage -- tracemalloc alone
+    showed only 730KB, since it never sees fitz/cv2/numpy's native buffers). Rendered-page
+    pixel dimensions measured directly via fitz at each DPI tier this app actually uses; a US
+    Letter page at 400 DPI (the highest tier) is 3400x4400px.
+
+    max_workers/max_queue_depth/disk_reserve_bytes/startup_timeout_seconds/
+    max_requests_per_run, all present in earlier drafts of this dataclass, were dropped: this
+    package processes attendees strictly sequentially (no worker pool, no request queue), and
+    no code path anywhere caps concurrent requests or preflights disk space against a runtime
+    budget -- including them with fabricated numbers would violate "every field must be a real
+    measured value." max_archive_bytes was also dropped from here: scoutmb has zero zipfile/
+    archive handling anywhere (grepped to confirm) -- the one real "archive extraction with an
+    unmeasured limit" in this codebase is bootstrap/safe_extract.py::safe_extract_zip, a
+    bootstrap-layer concern (bootstrap deliberately never imports scoutmb) fixed at its own
+    real call site instead.
+
+    Re-run the measurement (tests/performance/test_resource_limits.py documents the exact
+    commands) and update both the value and this comment if the workload characteristics
+    change materially."""
+
+    # 25MB: ~10x the measured 200-page real-world file, covering large multi-troop schedules
+    # with headroom.
+    max_upload_bytes: int = 25_000_000
+    # 500 pages: 2.5x the 200 pages actually tested successfully end-to-end.
+    max_pdf_pages: int = 500
+    # 6000px: covers a 400-DPI-rendered US Letter page (measured 3400x4400, so 4400 is the
+    # real ceiling at today's highest DPI tier) plus headroom for legal-size paper.
+    max_pdf_dimension_px: int = 6_000
+    # ~38x the measured 3.125s/200-page baseline -- generous headroom for a slower host or a
+    # near-max_pdf_pages file; documented, not force-enforced (see class docstring).
+    parse_timeout_seconds: int = 120
+    # ~3.75x the measured ~133MB real max RSS for a 200-page file, covering the 500-page
+    # ceiling; documented, not force-enforced (see class docstring).
+    parse_memory_budget_bytes: int = 500_000_000

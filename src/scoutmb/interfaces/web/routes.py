@@ -31,8 +31,9 @@ from uuid import uuid4
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from scoutmb.config import ScheduleConfig, UiSettings
+from scoutmb.config import ReleaseLimits, ScheduleConfig, UiSettings
 from scoutmb.core.identity import RunIdentity
+from scoutmb.errors import ScoutmbError
 from scoutmb.interfaces.cli import pdf as pdf_cli
 from scoutmb.interfaces.cli.schedule import run as run_schedule
 from scoutmb.interfaces.web.composition import build_reporting_service
@@ -118,6 +119,13 @@ async def get_scouts(request: Request) -> list[dict[str, str]]:
     ]
 
 
+def assert_upload_within_limit(*, size_bytes: int, limits: ReleaseLimits) -> None:
+    if size_bytes > limits.max_upload_bytes:
+        raise ScoutmbError(
+            f"upload of {size_bytes} bytes exceeds the {limits.max_upload_bytes} byte limit"
+        )
+
+
 @router.post("/api/pdf-extract", status_code=202)
 async def start_pdf_extract(
     request: Request, files: list[UploadFile] = File(...)
@@ -142,9 +150,15 @@ async def start_pdf_extract(
         pdf_uploads_dir.mkdir(parents=True)
 
     saved_paths: list[Path] = []
+    limits = ReleaseLimits()
     for upload in files:
+        contents = await upload.read()
+        try:
+            assert_upload_within_limit(size_bytes=len(contents), limits=limits)
+        except ScoutmbError as exc:
+            raise HTTPException(413, str(exc)) from exc
         dest = pdf_uploads_dir / Path(upload.filename or "upload.pdf").name
-        dest.write_bytes(await upload.read())
+        dest.write_bytes(contents)
         saved_paths.append(dest)
 
     loop = asyncio.get_running_loop()

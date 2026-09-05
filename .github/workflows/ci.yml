@@ -109,3 +109,14 @@ jobs:
       - run: uv sync --locked --all-extras
       - run: uv audit
       - run: uv run python tools/check_licenses.py --lock uv.lock --policy release/license-policy.toml
+
+  # D7: pinned to macos-latest, matching coverage-baseline's precedent -- reproducibility for a
+  # timing-sensitive job matters more here than it would for a purely functional test.
+  performance:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync --locked --all-extras
+      - run: uv run pytest -q tests/performance/ tests/property/ -v

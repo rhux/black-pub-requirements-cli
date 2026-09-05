@@ -19,8 +19,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from scoutmb.config import ReleaseLimits
 from scoutmb.core.models import SCOUTINGEVENT_PREFIX
-from scoutmb.errors import CapabilityUnavailable
+from scoutmb.errors import CapabilityUnavailable, ScoutmbError
 
 _PDF_DISTRIBUTIONS = ("PyMuPDF", "opencv-python-headless", "numpy")
 
@@ -147,6 +148,12 @@ def page_regions(image: Any) -> list[tuple[str, Any]]:
 def render_page(page: Any, dpi: int) -> Any:
     cv2, _, np = _import_pdf_stack()
     pixmap = page.get_pixmap(dpi=dpi, alpha=False)
+    limits = ReleaseLimits()
+    if pixmap.width > limits.max_pdf_dimension_px or pixmap.height > limits.max_pdf_dimension_px:
+        raise ScoutmbError(
+            f"rendered page dimension {pixmap.width}x{pixmap.height} exceeds the "
+            f"{limits.max_pdf_dimension_px}px limit"
+        )
     image = np.frombuffer(pixmap.samples, dtype=np.uint8)
     image = image.reshape(pixmap.height, pixmap.width, pixmap.n)
     if pixmap.n == 4:

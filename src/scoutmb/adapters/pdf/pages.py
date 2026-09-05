@@ -28,6 +28,7 @@ from scoutmb.adapters.pdf.extract import (
     decode_rendered_qr,
     render_page,
 )
+from scoutmb.config import ReleaseLimits
 from scoutmb.core.models import ExtractedAttendee, ExtractionError
 
 
@@ -86,7 +87,21 @@ def extract_pdf(
     except Exception as exc:  # PyMuPDF raises several exception types for malformed PDFs.
         return [], [ExtractionError(pdf_path.name, 0, "", "", f"Could not open PDF: {exc}")]
 
+    limits = ReleaseLimits()
     with document:
+        if len(document) > limits.max_pdf_pages:
+            # Same graceful-degradation shape as "Could not open PDF" above: reported as one
+            # ExtractionError, the batch continues -- never a raised exception that would
+            # crash an entire multi-file run over one oversized input.
+            return [], [
+                ExtractionError(
+                    pdf_path.name,
+                    0,
+                    "",
+                    "",
+                    f"PDF has {len(document)} pages, exceeding the {limits.max_pdf_pages} page limit",
+                )
+            ]
         for page_index, page in enumerate(document, start=1):
             printed_name, registrant_type = extract_page_identity(page)
             attendee_name = normalize_obvious_case(printed_name) if normalize_case else printed_name

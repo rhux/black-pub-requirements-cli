@@ -15,7 +15,17 @@ def _is_symlink_entry(info: zipfile.ZipInfo) -> bool:
     return (mode & 0xF000) == _SYMLINK_MODE
 
 
-def safe_extract_zip(zip_path: Path, dest: Path, *, max_expanded_bytes: int = 2 * 1024**3) -> None:
+# 100MB: ~9x the real measured size of this codebase's one actual caller's payload -- the
+# python-embed.zip python_env.py downloads is 11,094,114 bytes (measured 2026-09-03, see
+# bootstrap/config.py::PYTHON_EMBED_SHA256's provenance comment) -- with headroom for a future
+# larger embeddable Python release. Previously a guessed, unmeasured 2GB placeholder (Slice 4,
+# D7: "every limit must be a real measured value").
+_DEFAULT_MAX_EXPANDED_BYTES = 100_000_000
+
+
+def safe_extract_zip(
+    zip_path: Path, dest: Path, *, max_expanded_bytes: int = _DEFAULT_MAX_EXPANDED_BYTES
+) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as archive:
         total_expanded = 0
