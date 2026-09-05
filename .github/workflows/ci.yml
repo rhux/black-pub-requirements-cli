@@ -96,3 +96,16 @@ jobs:
         run: sudo iptables -I OUTPUT 1 ! -o lo -m conntrack --ctstate NEW -j REJECT
       - name: Run offline default lane
         run: uv run pytest -m "not live_service and not playwright and not private_corpus" --matrix-lane default -q
+
+  # D6: uv audit (OSV vulnerability DB) + check_licenses.py (PyPI license lookups, since uv.lock
+  # itself carries no license field at all -- see tools/check_licenses.py's module docstring)
+  # both make real outbound network calls, same as any other job's `uv sync`.
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync --locked --all-extras
+      - run: uv audit
+      - run: uv run python tools/check_licenses.py --lock uv.lock --policy release/license-policy.toml

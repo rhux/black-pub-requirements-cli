@@ -1,0 +1,46 @@
+# MIT/BSD-2/BSD-3/Apache-2.0/ISC/PSF-2.0 are the originally confirmed permissive core (Slice 4
+# planning, 2026-09-03). 0BSD, Zlib, CC0-1.0, and MIT-0 were added during D6 execution (real
+# `uv audit`/PyPI lookups surfaced numpy as "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+# and cffi as "MIT-0", both real runtime deps, e.g. via opencv-python-headless and pywebview's
+# Windows backend) -- all four are permissive/public-domain-equivalent, none require attribution
+# beyond a copyright notice or impose copyleft, consistent with the original list's spirit.
+# Widened by explicit user decision during the Slice 4 execution session.
+allowed = [
+    "MIT", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "ISC", "PSF-2.0",
+    "0BSD", "Zlib", "CC0-1.0", "MIT-0",
+]
+
+# uv.lock records only name/version, never a license -- confirmed empirically, not a key-path
+# issue. License identity is resolved via PyPI's JSON API (license_expression, then a short
+# `license` string, then License classifiers, in that order); anything none of those resolve
+# lands here, by hand, after a real human check of the package's actual license.
+[overrides]
+colorama = "BSD-3-Clause"       # verified against the real LICENSE.txt: has the no-endorsement clause
+mypy-extensions = "MIT"         # PyPI metadata carries no license field; verified via GitHub LICENSE
+clr-loader = "MIT"              # PyPI metadata carries no license field; verified via GitHub LICENSE
+pywebview = "BSD-3-Clause"      # PyPI's `license` field is the full license TEXT, not an identifier
+
+# Explicit, reviewed exceptions to the allowlist above -- each entry is a real, named policy
+# decision, never a silent pass, and check_licenses.py prints "GRANTED EXCEPTION" for every one
+# on every run so this stays visible in CI logs indefinitely, not just at the moment it was
+# added.
+[exceptions]
+# PyMuPDF (the `fitz` import, pdf optional-dependency group) is dual-licensed: AGPL-3.0 or a
+# paid Artifex commercial license. No commercial license is purchased, so this project uses it
+# under AGPL-3.0 -- a copyleft license the Global Constraint above otherwise rejects outright.
+# This predates Slice 4's license-compliance gate (D6): PyMuPDF has been a dependency since
+# pdf_to_scouts.py's original PDF/QR extraction, well before this gate existed to catch it.
+# Grandfathered by explicit user decision, 2026-09-03 (Slice 4 execution session). Revisit
+# before any real end-user distribution: either purchase Artifex's commercial license or
+# replace PyMuPDF with a permissively-licensed alternative.
+pymupdf = "AGPL-3.0-or-later"
+
+# MPL-2.0 (Mozilla Public License, a file-level/weak copyleft, not in the GPL/AGPL/LGPL/SSPL
+# family the Global Constraint rejects) for three dev/test-only dependencies -- none of these
+# are shipped to end users in the installer or the provisioned runtime environment: certifi and
+# hypothesis via httpx/httpcore (Starlette TestClient) and the property-testing dev dependency;
+# pathspec via dev tooling (ruff/mypy's own transitive deps). Per-package exceptions rather than
+# a general allowlist addition, by explicit user decision, 2026-09-03.
+certifi = "MPL-2.0"
+hypothesis = "MPL-2.0"
+pathspec = "MPL-2.0"
