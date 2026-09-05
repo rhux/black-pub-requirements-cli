@@ -62,7 +62,7 @@
     {
       "id": 6,
       "subject": "Task 7 (D7): Measured resource & performance limits",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [
         5
       ],
@@ -72,7 +72,7 @@
     {
       "id": 7,
       "subject": "Task 8 (D8): Final acceptance, docs, live-service smoke tes",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [
         6
       ],
@@ -80,5 +80,5 @@
       "activeForm": "Implementing Task 8 (D8)"
     }
   ],
-  "lastUpdated": "2026-09-05T21:13:31Z"
+  "lastUpdated": "2026-09-05T21:42:21Z"
 }
