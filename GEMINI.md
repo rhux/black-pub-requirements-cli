@@ -1,3 +1,30 @@
+# GEMINI.md
+
+## Project overview
+
+This repository is `scoutmb`, a Python package (`src/scoutmb/`) for a Scout troop's summer camp:
+it turns printed class-schedule PDFs into a QR-code roster (`troop349-pdf`), then uses that
+roster to fetch each attendee's live schedule and merit-badge requirement status from
+`scoutingevent.com` (`troop349-schedule`), producing CSV/JSON and a self-contained HTML report.
+`troop349` bundles both behind a local native window. A separate `bootstrap/` package (no
+dependency on `scoutmb`) builds a thin native installer for Windows/macOS.
+
+The package is organized in layers — `core` (pure domain logic) → `ports`/`adapters` (typed
+seams and their real implementations) → `features` (orchestration) → `interfaces`
+(CLI/web/desktop entry points) — with an automated test
+(`tests/architecture/test_dependency_rules.py`) enforcing which layer may import which. Full
+usage is in `README.md`; the fuller architecture, testing, and CI writeup is in `CLAUDE.md`.
+
+To set up and verify a change:
+
+```bash
+uv sync --locked --all-extras
+uv run pytest -q
+```
+
+The default pytest lane skips three marker-gated categories (`live_service`, `playwright`,
+`release`) — see `CLAUDE.md` for what each is and how CI exercises them separately.
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 

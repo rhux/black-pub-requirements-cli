@@ -1,17 +1,11 @@
-"""troop349-schedule console script: argument-for-argument identical to scout_schedule_cli.py's
-CLI. Interface layer -- argument parsing and orchestration only, mirroring interfaces/cli/pdf.py's
-existing shape. This module no longer imports scout_schedule_cli at all (B10.2), so Task B10.4's
-deletion of that file cannot break it. The argparse construction is a duplicate of
-scout_schedule_cli.parse_args's (both read their defaults from ScheduleConfig, sub-plan 2's Task
-B6, so the two cannot silently drift on default VALUES -- only the flag/help text structure is
-duplicated here, matching this codebase's existing precedent for a flat-script/package shim
-boundary, e.g. features/reporting/service.py's own module docstring: "duplicate
-scout_schedule_cli.py's same-named functions rather than importing them... kept in lockstep by
-inspection.")
+"""troop349-schedule console script. Interface layer -- argument parsing and orchestration only,
+mirroring interfaces/cli/pdf.py's shape. The argparse construction reads its defaults from
+ScheduleConfig (sub-plan 2's Task B6) rather than hardcoding them here, so the CLI's defaults and
+the config dataclass's defaults cannot silently drift apart.
 
 run() is the ONE place that composes the schedule CLI's adapters (via composition.py's builders)
-and calls run_schedule_pipeline -- both this module's own main() and scout_schedule_cli.async_main's
-shim call run(), so the composition logic exists exactly once."""
+and calls run_schedule_pipeline -- main() below is the only caller, so the composition logic
+exists exactly once."""
 
 from __future__ import annotations
 
@@ -97,8 +91,8 @@ async def run(
     resume_event: asyncio.Event | None = None,
 ) -> int:
     """Composes the schedule CLI's adapters and calls run_schedule_pipeline. The ONE place that
-    does this composition -- main() below and scout_schedule_cli.async_main's shim both call
-    this rather than each building their own gateway/checkpoint-store/browser."""
+    does this composition -- main() below is the only caller, rather than building its own
+    gateway/checkpoint-store/browser inline."""
     from scoutmb.features.acquisition.pipeline import run_schedule_pipeline
     from scoutmb.features.acquisition.retry import RetryPolicy
     from scoutmb.interfaces.cli.composition import (

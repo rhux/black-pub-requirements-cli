@@ -1,3 +1,24 @@
+# AGENTS.md
+
+## Project summary
+
+`scoutmb` (`src/scoutmb/`) is a two-stage tool for a Scout troop's summer-camp merit-badge
+tracking: extract attendee/QR data from printed schedule PDFs (`troop349-pdf`), then use that to
+pull live schedule and requirement-completion data from `scoutingevent.com`
+(`troop349-schedule`). `troop349` wraps both behind a local native window. `bootstrap/` is a
+separate, stdlib-only installer package that ships the app as a thin Windows/macOS launcher —
+it never imports `scoutmb`.
+
+Layering (`core` → `ports`/`adapters` → `features` → `interfaces`) is enforced by
+`tests/architecture/test_dependency_rules.py`; `interfaces/{cli,web}/composition.py` are the
+only modules allowed to import an adapter directly. See `README.md` for usage and `CLAUDE.md`
+for the fuller architecture writeup, testing/CI layout, and privacy notes — this file exists for
+tools that read `AGENTS.md` specifically rather than `CLAUDE.md`.
+
+Run `uv sync --locked --all-extras && uv run pytest -q` to set up and verify. The default test
+lane deselects `live_service`/`playwright`/`release`-marked tests; see `CLAUDE.md`'s Testing and
+CI section for what each covers and how CI runs them.
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 

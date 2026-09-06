@@ -4,86 +4,129 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Two standalone Python CLI scripts (no package, no build step, no test suite) that form a two-stage pipeline for pulling Scout merit-badge class schedules and requirement completion off `scoutingevent.com`:
+A `uv`-managed Python package (`scoutmb`, under `src/scoutmb/`) that pulls Scout merit-badge
+class schedules and requirement completion off `scoutingevent.com`, plus a self-bootstrapping
+Windows/macOS installer (`bootstrap/`) that ships it as a thin native launcher. Three console
+scripts (`pyproject.toml`'s `[project.scripts]`):
 
-1. **`pdf_to_scouts.py`** — extracts attendee name, registrant type, and QR-code contents from printed class-schedule PDFs, producing a `scouts.csv`.
-2. **`scout_schedule_cli.py`** — consumes that CSV, drives a real browser to each attendee's QR URL to obtain a session, then pulls schedule/requirement JSON directly from the site's AJAX endpoint and generates CSV/JSON/HTML output.
+- **`troop349-pdf`** — extracts attendee name, registrant type, and QR-code contents from
+  printed class-schedule PDFs, producing a `scouts.csv`.
+- **`troop349-schedule`** — consumes that CSV, drives a real browser to each attendee's QR URL
+  to obtain a session, then pulls schedule/requirement JSON directly from the site's AJAX
+  endpoint and generates CSV/JSON/HTML output.
+- **`troop349`** — launches both stages behind a local native window (or the system browser
+  with `--browser`) instead of the command line.
 
-Run stage 1 only when starting from PDFs; if you already have a CSV/XLSX/JSON of names+QR URLs, go straight to stage 2.
+Run `troop349-pdf` only when starting from PDFs; if you already have a CSV/XLSX/JSON of
+names+QR URLs, go straight to `troop349-schedule`. See `README.md` for full usage.
 
 ## Setup and running
 
-Originally Windows-only; also runs on macOS (verified on Apple Silicon — every dependency, including PyMuPDF, opencv-python-headless, and pywebview's PyObjC frameworks, has native arm64/universal2 wheels, so nothing needs Rosetta or a source build).
-
-### Windows/PowerShell
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m playwright install chromium   # only needed for scout_schedule_cli.py
+```bash
+uv sync --locked --all-extras
+uv run playwright install chromium   # only needed for troop349-schedule / troop349
 ```
 
-Run the pipeline:
-
-```powershell
-python .\pdf_to_scouts.py ".\Class_Schedule_2026_07_06.pdf" --output .\scouts.csv --strict
-python .\scout_schedule_cli.py --input .\scouts.csv --output .\heritage-results
-```
-
-### macOS (bash/zsh)
+`--all-extras` pulls in the `pdf` (PyMuPDF, opencv-python-headless) and `acquisition`
+(Playwright) optional groups. Every dependency, including PyMuPDF, opencv-python-headless, and
+pywebview's PyObjC frameworks, publishes native arm64/universal2 wheels on Apple Silicon — no
+Rosetta or source build needed.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m playwright install chromium   # only needed for scout_schedule_cli.py
+uv run troop349-pdf "Class_Schedule_2026_07_06.pdf" --output scouts.csv --strict
+uv run troop349-schedule --input scouts.csv --output heritage-results
 ```
 
-Run the pipeline:
+Run the full test suite (default lane — `live_service`/`playwright`/`release` are deselected
+unless explicitly requested):
 
 ```bash
-python pdf_to_scouts.py "Class_Schedule_2026_07_06.pdf" --output scouts.csv --strict
-python scout_schedule_cli.py --input scouts.csv --output heritage-results
+uv run pytest -q
 ```
 
-There is no test suite, linter, or CI config in this repo. Verify changes by running the scripts against real or sample input and inspecting the generated CSV/JSON/HTML output.
-
-`--debug-dir` (pdf_to_scouts.py) and `--headed` (scout_schedule_cli.py) are the primary tools for diagnosing extraction/scraping failures.
+`ruff check .` / `ruff format --check .` / `mypy` all run clean; `.github/workflows/ci.yml`
+runs each as its own job (see Testing and CI below). `--debug-dir` (`troop349-pdf`) and
+`--headed` (`troop349-schedule`) are the primary tools for diagnosing extraction/scraping
+failures.
 
 ## Architecture
 
-### `pdf_to_scouts.py` — PDF → CSV
+`src/scoutmb/` follows a layered structure, enforced by `tests/architecture/test_dependency_rules.py`'s
+`ALLOWED` import registry (an `interfaces`-layer module may import `features`/`adapters`/etc.;
+`core` may only import `errors`):
 
-- `expand_pdf_inputs`: resolves CLI args that may be files, directories (optionally `--recursive`), or glob patterns — needed because Windows shells don't expand globs themselves.
-- `extract_page_identity`: pulls attendee name/registrant type from page text by locating fixed labels ("Attendee Information", "Registrant").
-- QR decoding is tried in two tiers, cheapest first:
-  1. `decode_embedded_qr` — scans embedded page images for square, QR-code-shaped candidates and decodes directly (fast path, works for most PDFs).
-  2. `decode_rendered_qr` — falls back to rendering the page as a bitmap at multiple DPIs (`--render-dpi`, default 144/200/300/400) and multiple crop regions (`page_regions`), since some PDFs embed the QR as vector content rather than a raster image.
-  `decode_variants` additionally tries Otsu thresholding and multiple upscales against each candidate image to squeeze out marginal decodes.
-- `choose_qr_value` prefers a decoded value starting with the ScoutingEvent mobile URL prefix over other decoded strings (a page can contain more than one QR-shaped image).
-- `normalize_obvious_case` fixes a narrow OCR artifact (`MIles` → `Miles`) via a regex heuristic, while deliberately not touching valid mixed-case names like `McDonald` or `O'Neil` — disable with `--no-normalize-obvious-case` if it ever misfires on a real name.
-- Output CSV columns `Attendee Name` / `Registrant Type` / `QR Code Contents` are the exact contract `scout_schedule_cli.py` expects; the remaining columns (source PDF, page, decode method) are for auditing only and are ignored downstream.
-- Adults are excluded by default via `DEFAULT_ADULT_TYPES`; `--adult-type` extends the exclusion set, `--include-adults` disables filtering entirely.
+- **`core/`** — pure domain logic: models, identity, output schemas, and the requirement-tree
+  inference engine (`core/inference/`). No I/O, no adapters.
+- **`ports/`** — `Protocol`-per-collaborator seams (`clock.py`, `checkpoint_store.py`,
+  `observability.py`, ...), one real implementation each in `adapters/`. Never a generic
+  catch-all abstraction — each port is scoped to exactly the one thing it stands in for.
+- **`adapters/`** — real implementations: `pdf/` (PyMuPDF/OpenCV extraction), `scoutevent/`
+  (Playwright and HTTP gateways to the live site), `files/` (atomic CSV/JSON/checkpoint I/O),
+  `html/` (the report template), `observability/` (the no-op telemetry seam).
+- **`features/`** — orchestration: `ingest/` (PDF → CSV), `acquisition/` (the schedule-download
+  pipeline, retry policy, circuit breaker), `reporting/` (HTML/CSV/JSON/email output).
+- **`interfaces/`** — the only layer allowed to import `adapters` directly (via a
+  `composition.py` in each of `cli/`, `web/`; `tests/architecture` enforces this too):
+  `cli/` (the two console-script entry points), `web/` (the local FastAPI UI `troop349` embeds),
+  `desktop/` (the pywebview wrapper around `web/`).
+- **`config.py`**, **`errors.py`**, **`network_policy.py`**, **`logging_setup.py`**,
+  **`runtime/`** — cross-cutting, single-file/single-purpose modules living directly under
+  `src/scoutmb/`, not nested under any of the above layers.
 
-### `scout_schedule_cli.py` — CSV → live schedule/requirement data → reports
+`bootstrap/` is a separate, stdlib-only package: it never imports `scoutmb` (see
+`bootstrap/python_env.py`'s own docstring) since its entire job is provisioning the isolated
+Python environment `scoutmb` actually runs in. It builds into a thin (~12MB) native
+Windows/macOS launcher via `bootstrap/build.spec` (PyInstaller) that downloads/verifies a
+hash-pinned embeddable Python and the app source at first run — see `bootstrap/README.md`.
 
-- **Why Playwright is used at all**: `scoutingevent.com`'s mobile UI runs old jQuery Mobile code that throws before its schedule `listview` finishes initializing, so the rendered page is broken. The CLI uses a real Chromium context only to establish the PHP session cookie and trigger the initial schedule AJAX call (`navigate_and_trigger_schedule`), then reads the raw JSON response directly instead of relying on the DOM. Subsequent per-class requirement requests are issued as in-page `fetch()` calls (`post_requirement`) reusing that same session — no further navigation needed.
-- `DEAD_ASSET_HOSTS` are two known JS asset hosts that currently hang; requests to them are aborted by default (`--allow-dead-assets` to stop blocking them) since the JSON endpoints don't depend on them.
-- `load_inputs` dispatches on file suffix (`.xlsx` / `.csv` / `.json` / anything else treated as line-delimited) and each loader tolerates several header-name aliases (`norm_header` + `first_matching_key`) so differently-formatted input files still work.
-- One `ScoutResult` is built per attendee, holding its `ClassRecord`s and `RequirementRecord`s plus any non-fatal `errors` (a scout with errors doesn't stop the batch — the run's exit code reflects whether any scout had errors, per-scout failures are recorded and processing continues).
-- **Requirement completion inference** (`annotate_requirement_statuses`, used only for the HTML report, not the CSV/JSON exports) is the most intricate piece of logic in the codebase:
-  - `requirement_path` parses ScoutingEvent's requirement-number strings (e.g. `"3b"`, `"(c)"`) into a comparable path tuple, tracking the last-seen top-level number to handle malformed numbers like `"#(c)"` that omit it.
-  - A parent/child tree is reconstructed from these paths per (scout, class) group, with a fallback using a header stack for cases where strict path-prefix matching fails.
-  - `calculate` recursively derives a `complete` / `complete_check` / `incomplete` status per requirement: a parent is complete if the API already marked it complete, or if enough children are satisfied — either all of them, or, for "Do TWO of the following"-style choice requirements (`choice_requirement_count` parses the wording), at least the stated count. `complete_check` signals "inferred, should double-check" rather than an authoritative complete from the API.
-- `write_html_report` embeds a single self-contained HTML template (inline `<style>`/`<script>`, JSON data injected via `json_for_html` which escapes for safe embedding in a `<script type="application/json">` block) — there is no separate frontend build; edit the template string in place.
-- `write_outputs` is the single place that fans results out to all output files: `scouts.json` (full nested payload), `classes.csv`, `requirements.csv`, `errors.csv`, `summary.json`, `raw/` (untouched request payloads for auditing), and the HTML report.
+### Requirement completion inference
+
+`core/inference/` (used only for the HTML report, not the CSV/JSON exports) is the most
+intricate piece of domain logic in the package:
+
+- `numbering.py` parses ScoutingEvent's requirement-number strings (e.g. `"3b"`, `"(c)"`) into a
+  comparable path tuple, tracking the last-seen top-level number to handle malformed numbers
+  like `"#(c)"` that omit it.
+- `tree.py` reconstructs a parent/child tree from these paths per (scout, class) group, with a
+  header-stack fallback for cases where strict path-prefix matching fails.
+- `status.py` recursively derives a `complete`/`complete_check`/`incomplete` status per
+  requirement: a parent is complete if the API already marked it complete, or if enough children
+  are satisfied — either all of them, or, for "Do TWO of the following"-style choice
+  requirements (`missing.py` parses the wording), at least the stated count.
+  `complete_check` signals "inferred, should double-check" rather than an authoritative complete
+  from the API.
+
+## Testing and CI
+
+No `raw_data/`-backed private corpus exists in a fresh checkout — `tests/private_corpus/` is
+skipped automatically when it's absent; it's a `.gitignore`d local-only symlink, never a CI
+requirement.
+
+Pytest markers (`pyproject.toml`'s `[tool.pytest.ini_options]`), all deselected by default:
+
+- `live_service` — the *one* test (`tests/live_service/test_real_scoutingevent_read.py`) allowed
+  to touch the real site; read-only, requires `SCOUTMB_ALLOW_LIVE_SERVICE=1`.
+- `playwright` — needs a real installed browser.
+- `release` — builds a real PyInstaller artifact; slow, native-runner-specific.
+
+`.github/workflows/ci.yml` jobs: `static-quality` (ruff/mypy/lock-check), `architecture`,
+`test` (ubuntu + windows), `coverage-baseline` (pinned to macos-latest — several OS-dispatch
+branches only execute on one platform per host), `egress-denied` (offline default lane with
+non-loopback egress blocked at the OS level), `supply-chain` (`uv audit` + license-compliance
+gate against `release/license-policy.toml`), `performance` (pinned to macos-latest, for
+reproducible timing).
+
+`.github/workflows/release.yml` (`workflow_dispatch` only) builds and size-budget-checks the
+native installer on each platform's own runner — never cross-built.
 
 ## Data/privacy notes
 
-- QR URLs and attendee IDs act as bearer access tokens for real scouts' data. `.gitignore` already excludes generated output directories (`scouting-output*/`, `heritage-results*/`), input files (`scouts*.csv`, `*.xlsx`), and `.venv/` — keep it that way and don't commit real PDFs, CSVs, or generated reports. `permissions.deny` in `.claude/settings.json` blocks Claude from reading these paths directly.
+QR URLs and attendee IDs act as bearer access tokens for real scouts' data. `.gitignore`
+excludes generated output directories (`scouting-output*/`, `heritage-results*/`), input files
+(`scouts*.csv`, `*.xlsx`), and the local `raw_data` corpus symlink — keep it that way and don't
+commit real PDFs, CSVs, or generated reports. `permissions.deny` in `.claude/settings.json`
+blocks Claude from reading these paths directly.
 
-<!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
 **IMPORTANT: This project has a knowledge graph. ALWAYS use the

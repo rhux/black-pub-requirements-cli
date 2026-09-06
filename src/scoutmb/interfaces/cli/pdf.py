@@ -28,17 +28,12 @@ DEFAULT_ADULT_TYPES = {"adult", "part-time adult"}
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        # Derived from how the script was actually invoked, not hardcoded: this module backs
-        # BOTH the troop349-pdf console script and the legacy pdf_to_scouts.py shim, and each
-        # must show its own name in --help, matching pre-Task-18 behavior for the legacy path.
-        # A hardcoded prog= here previously clobbered pdf_to_scouts.py's own usage output with
-        # "troop349-pdf" (Task 18 review finding #3). Path(...).name mirrors argparse's own
-        # default (os.path.basename(sys.argv[0])) -- spelled out explicitly rather than omitted
-        # so the intent survives a future edit.
+        # Path(...).name mirrors argparse's own default (os.path.basename(sys.argv[0])) --
+        # spelled out explicitly rather than omitted so the intent survives a future edit.
         prog=Path(sys.argv[0]).name,
         description=(
             "Extract attendee names and QR-code contents from one or more class-schedule PDFs "
-            "and create a CSV compatible with scout_schedule_cli.py."
+            "and create a CSV compatible with troop349-schedule."
         ),
     )
     parser.add_argument(
