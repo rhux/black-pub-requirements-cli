@@ -149,14 +149,22 @@ async def start_pdf_extract(request: Request, files: list[UploadFile] = File(...
 
     saved_paths: list[Path] = []
     limits = ReleaseLimits()
+    upload_chunk_bytes = 1_048_576  # 1MiB -- read/enforce the limit incrementally, never buffer
+    # the whole upload in memory first: reading it fully before checking would let an oversized
+    # upload trigger exactly the memory usage the limit exists to prevent.
     for upload in files:
-        contents = await upload.read()
-        try:
-            assert_upload_within_limit(size_bytes=len(contents), limits=limits)
-        except ScoutmbError as exc:
-            raise HTTPException(413, str(exc)) from exc
         dest = pdf_uploads_dir / Path(upload.filename or "upload.pdf").name
-        dest.write_bytes(contents)
+        total_bytes = 0
+        with dest.open("wb") as handle:
+            while chunk := await upload.read(upload_chunk_bytes):
+                total_bytes += len(chunk)
+                try:
+                    assert_upload_within_limit(size_bytes=total_bytes, limits=limits)
+                except ScoutmbError as exc:
+                    handle.close()
+                    dest.unlink(missing_ok=True)
+                    raise HTTPException(413, str(exc)) from exc
+                handle.write(chunk)
         saved_paths.append(dest)
 
     loop = asyncio.get_running_loop()

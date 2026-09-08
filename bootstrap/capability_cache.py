@@ -53,6 +53,8 @@ def evict_unreferenced(
     """Iterates the actual cache directory, not manifest.entries -- a payload the manifest
     never recorded a reference for at all is just as unreferenced as one whose only recorded
     references are stale, and must be evicted the same way."""
+    if not cache_dir.is_dir():
+        return  # nothing staged yet -- consistent with load()'s handling of a missing dir
     for payload_path in cache_dir.iterdir():
         if not payload_path.is_file() or payload_path.name == _MANIFEST_FILE:
             continue

@@ -147,13 +147,22 @@ def page_regions(image: Any) -> list[tuple[str, Any]]:
 
 def render_page(page: Any, dpi: int) -> Any:
     cv2, _, np = _import_pdf_stack()
-    pixmap = page.get_pixmap(dpi=dpi, alpha=False)
     limits = ReleaseLimits()
-    if pixmap.width > limits.max_pdf_dimension_px or pixmap.height > limits.max_pdf_dimension_px:
+    # Checked from the page's own size (points, always cheap/available) BEFORE rendering --
+    # get_pixmap() below allocates the full-size buffer itself, so checking the pixmap's
+    # dimensions only after calling it would let a hostile/malformed oversized page trigger
+    # exactly the expensive allocation the limit exists to prevent.
+    projected_width = page.rect.width * dpi / 72
+    projected_height = page.rect.height * dpi / 72
+    if (
+        projected_width > limits.max_pdf_dimension_px
+        or projected_height > limits.max_pdf_dimension_px
+    ):
         raise ScoutmbError(
-            f"rendered page dimension {pixmap.width}x{pixmap.height} exceeds the "
-            f"{limits.max_pdf_dimension_px}px limit"
+            f"rendering at {dpi} DPI would produce a {projected_width:.0f}x{projected_height:.0f}px "
+            f"image, exceeding the {limits.max_pdf_dimension_px}px limit"
         )
+    pixmap = page.get_pixmap(dpi=dpi, alpha=False)
     image = np.frombuffer(pixmap.samples, dtype=np.uint8)
     image = image.reshape(pixmap.height, pixmap.width, pixmap.n)
     if pixmap.n == 4:

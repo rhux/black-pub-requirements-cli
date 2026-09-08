@@ -122,3 +122,15 @@ def test_chromium_install_fails_loudly_if_playwright_left_no_discoverable_revisi
     paths = _paths(tmp_path)
     with pytest.raises(RuntimeError, match="chromium"):
         browser_setup.install_chromium_capability(paths, release_version="1.0.0")
+
+
+def test_discover_chromium_revision_sorts_numerically_not_lexicographically(tmp_path, monkeypatch):
+    """Regression: a naive string sort ranks "999" above "1180" (since '9' > '1' as the first
+    character), picking a stale revision as if it were the newest whenever revision numbers span
+    a digit-count boundary."""
+    cache_root = tmp_path / "ms-playwright"
+    (cache_root / "chromium-999").mkdir(parents=True)
+    (cache_root / "chromium-1180").mkdir(parents=True)
+    monkeypatch.setattr(browser_setup, "_ms_playwright_cache_dir", lambda: cache_root)
+
+    assert browser_setup._discover_chromium_revision() == "1180"

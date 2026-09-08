@@ -142,17 +142,23 @@ def _ms_playwright_cache_dir() -> Path:
 
 def _discover_chromium_revision() -> str:
     cache_root = _ms_playwright_cache_dir()
-    candidates = (
-        sorted(p.name for p in cache_root.iterdir() if p.is_dir() and p.name.startswith("chromium-"))
+    names = (
+        [p.name for p in cache_root.iterdir() if p.is_dir() and p.name.startswith("chromium-")]
         if cache_root.is_dir()
         else []
     )
-    if not candidates:
+    # Sorted numerically, not lexicographically: revision numbers vary in digit count over
+    # time (e.g. a future 5-digit revision after years of 4-digit ones), and string sort would
+    # rank "chromium-999" above "chromium-1180" ('9' > '1' as the first character) despite 999
+    # being the older revision.
+    revisions = [name.removeprefix("chromium-") for name in names]
+    numeric_revisions = [rev for rev in revisions if rev.isdigit()]
+    if not numeric_revisions:
         raise RuntimeError(
-            f"chromium install reported success but no chromium-* directory was found "
+            f"chromium install reported success but no chromium-<revision> directory was found "
             f"under {cache_root}"
         )
-    return candidates[-1].removeprefix("chromium-")
+    return max(numeric_revisions, key=int)
 
 
 def install_chromium_capability(

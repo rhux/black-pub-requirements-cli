@@ -38,3 +38,11 @@ def test_evict_unreferenced_never_deletes_the_manifest_file_itself(tmp_path: Pat
     evict_unreferenced(cache_dir, manifest, active_and_rollback_versions={"1.0.0"})
 
     assert (cache_dir / "manifest.json").exists()
+
+
+def test_evict_unreferenced_tolerates_a_cache_dir_that_was_never_created(tmp_path: Path) -> None:
+    """A first activation before anything has ever been staged into capability_cache_dir must
+    not crash -- consistent with load()'s own handling of a missing directory."""
+    never_created = tmp_path / "cache"
+
+    evict_unreferenced(never_created, CacheManifest(), active_and_rollback_versions={"1.0.0"})
