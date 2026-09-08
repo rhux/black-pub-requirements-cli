@@ -164,7 +164,6 @@ def test_decode_embedded_qr_success_path_decodes_the_embedded_image(tmp_path: Pa
     assert decode_embedded_qr(pdf) == "https://scoutingevent.com/mobile/abc123"
 
 
-
 def test_private_stack_guard_also_fails_closed() -> None:
     """Blocking the real import is stronger than monkeypatching the error path: it proves the
     guard converts a REAL ImportError, not a stub."""

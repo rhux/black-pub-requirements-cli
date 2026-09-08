@@ -330,9 +330,7 @@ def test_shape_check_special_cases_only_the_canonical_main_guard(tmp_path: Path)
 
     real_conditional = tmp_path / "not_a_shim.py"
     real_conditional.write_text(
-        "import sys\n"
-        "if sys.platform == 'win32':\n"
-        "    import winreg  # noqa: F401\n"
+        "import sys\nif sys.platform == 'win32':\n    import winreg  # noqa: F401\n"
     )
     assert _shape_check_offenders(real_conditional) != []
 
@@ -352,10 +350,7 @@ def test_shape_check_ignores_union_type_annotations_but_not_body_binops(tmp_path
     assert _shape_check_offenders(clean_shim) == []
 
     dirty_body = tmp_path / "dirty_body.py"
-    dirty_body.write_text(
-        "def compute(a: int, b: int) -> int:\n"
-        "    return a | b\n"
-    )
+    dirty_body.write_text("def compute(a: int, b: int) -> int:\n    return a | b\n")
     assert _shape_check_offenders(dirty_body) != []
 
 

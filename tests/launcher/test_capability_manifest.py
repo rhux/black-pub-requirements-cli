@@ -27,7 +27,9 @@ def test_capability_manifest_round_trips_through_json(tmp_path):
     payload = tmp_path / "chromium.zip"
     payload.write_bytes(b"fake chromium contents")
     manifest = build_capability_manifest(
-        payload_id="chromium", version="130.0", source_url="https://example.invalid/c.zip",
+        payload_id="chromium",
+        version="130.0",
+        source_url="https://example.invalid/c.zip",
         payload_path=payload,
     )
 

@@ -145,7 +145,9 @@ def main(argv: list[str] | None = None) -> int:
             violations[f"{name}=={version}"] = license_id
 
     for key, license_id in sorted(granted_exceptions.items()):
-        print(f"GRANTED EXCEPTION: {key} ({license_id}) -- see {args.policy}'s [exceptions] comment")
+        print(
+            f"GRANTED EXCEPTION: {key} ({license_id}) -- see {args.policy}'s [exceptions] comment"
+        )
 
     if violations or unresolved:
         for key, license_id in sorted(violations.items()):

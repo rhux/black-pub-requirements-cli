@@ -13,7 +13,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 @pytest.mark.release  # makes a real network call to pypi.org, per-package -- not free/instant
 def test_check_licenses_passes_against_the_real_lock_and_policy():
     result = subprocess.run(
-        [sys.executable, "tools/check_licenses.py", "--lock", "uv.lock", "--policy", "release/license-policy.toml"],
+        [
+            sys.executable,
+            "tools/check_licenses.py",
+            "--lock",
+            "uv.lock",
+            "--policy",
+            "release/license-policy.toml",
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -36,7 +43,9 @@ def test_check_licenses_rejects_a_disallowed_license(tmp_path, monkeypatch):
     assert result != 0
 
 
-def test_check_licenses_treats_unresolvable_license_as_a_failure_not_a_silent_pass(tmp_path, monkeypatch):
+def test_check_licenses_treats_unresolvable_license_as_a_failure_not_a_silent_pass(
+    tmp_path, monkeypatch
+):
     import tools.check_licenses as check_licenses
 
     monkeypatch.setattr(check_licenses, "resolve_license", lambda name, version: None)

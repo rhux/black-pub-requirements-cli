@@ -29,58 +29,119 @@ def parse_args(argv: list[str] | None = None) -> ScheduleConfig:
             "bypassing the site's broken jQuery Mobile rendering."
         )
     )
-    parser.add_argument("--input", "-i", required=True, type=Path, help=(
-        "CSV, XLSX, JSON, or text file containing scout names and QR URLs."
-    ))
-    parser.add_argument("--sheet", default=_DEFAULTS.sheet, help=(
-        f'XLSX sheet name (default: "{_DEFAULTS.sheet}").'
-    ))
-    parser.add_argument("--output", "-o", type=Path, default=_DEFAULTS.output, help=(
-        f"Output directory (default: {_DEFAULTS.output})."
-    ))
-    parser.add_argument("--headed", action="store_true", help="Show the Chromium window while running.")
-    parser.add_argument("--channel", default=_DEFAULTS.channel, help=(
-        "Playwright browser channel to use (e.g. 'msedge'); default uses Playwright's bundled Chromium."
-    ))
-    parser.add_argument("--timeout", type=int, default=_DEFAULTS.timeout, help=(
-        f"Seconds to wait for the schedule response for each scout (default: {_DEFAULTS.timeout})."
-    ))
-    parser.add_argument("--request-delay-ms", type=int, default=_DEFAULTS.request_delay_ms, help=(
-        f"Delay between class-requirement requests (default: {_DEFAULTS.request_delay_ms} ms)."
-    ))
-    parser.add_argument("--scout-delay-ms", type=int, default=_DEFAULTS.scout_delay_ms, help=(
-        "Delay between scouts, in milliseconds. Default: a random delay "
-        "between 500-2000 ms per scout (so requests don't hit the server at a "
-        "fixed cadence); pass a fixed value (e.g. 0 to disable, or 750 for a "
-        "fixed 750ms) to override."
-    ))
-    parser.add_argument("--allow-dead-assets", action="store_true", help=(
-        "Do not block the two known mike.dev.* JavaScript URLs that currently time out."
-    ))
-    parser.add_argument("--include-adults", action="store_true", help=(
-        "Include Adult and Part-Time Adult rows when the input contains a Registrant Type column."
-    ))
-    parser.add_argument("--no-html", action="store_true", help=(
-        "Do not generate the self-contained sortable/filterable HTML report."
-    ))
-    parser.add_argument("--html-name", default=_DEFAULTS.html_name, help=(
-        f"HTML report filename inside the output directory (default: {_DEFAULTS.html_name})."
-    ))
-    parser.add_argument("--email-report", action="store_true", help=(
-        "Also generate per-scout missing-requirement emails (HTML, text, and a "
-        "combined CSV) in an 'emails' subdirectory of the output directory."
-    ))
-    parser.add_argument("--breaker-threshold", type=int, default=_DEFAULTS.breaker_threshold, help=(
-        "Consecutive scout-fetch failures before the acquisition circuit breaker opens and "
-        f"the batch stops (default: {_DEFAULTS.breaker_threshold})."
-    ))
+    parser.add_argument(
+        "--input",
+        "-i",
+        required=True,
+        type=Path,
+        help=("CSV, XLSX, JSON, or text file containing scout names and QR URLs."),
+    )
+    parser.add_argument(
+        "--sheet",
+        default=_DEFAULTS.sheet,
+        help=(f'XLSX sheet name (default: "{_DEFAULTS.sheet}").'),
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=_DEFAULTS.output,
+        help=(f"Output directory (default: {_DEFAULTS.output})."),
+    )
+    parser.add_argument(
+        "--headed", action="store_true", help="Show the Chromium window while running."
+    )
+    parser.add_argument(
+        "--channel",
+        default=_DEFAULTS.channel,
+        help=(
+            "Playwright browser channel to use (e.g. 'msedge'); default uses Playwright's bundled Chromium."
+        ),
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=_DEFAULTS.timeout,
+        help=(
+            f"Seconds to wait for the schedule response for each scout (default: {_DEFAULTS.timeout})."
+        ),
+    )
+    parser.add_argument(
+        "--request-delay-ms",
+        type=int,
+        default=_DEFAULTS.request_delay_ms,
+        help=(
+            f"Delay between class-requirement requests (default: {_DEFAULTS.request_delay_ms} ms)."
+        ),
+    )
+    parser.add_argument(
+        "--scout-delay-ms",
+        type=int,
+        default=_DEFAULTS.scout_delay_ms,
+        help=(
+            "Delay between scouts, in milliseconds. Default: a random delay "
+            "between 500-2000 ms per scout (so requests don't hit the server at a "
+            "fixed cadence); pass a fixed value (e.g. 0 to disable, or 750 for a "
+            "fixed 750ms) to override."
+        ),
+    )
+    parser.add_argument(
+        "--allow-dead-assets",
+        action="store_true",
+        help=("Do not block the two known mike.dev.* JavaScript URLs that currently time out."),
+    )
+    parser.add_argument(
+        "--include-adults",
+        action="store_true",
+        help=(
+            "Include Adult and Part-Time Adult rows when the input contains a Registrant Type column."
+        ),
+    )
+    parser.add_argument(
+        "--no-html",
+        action="store_true",
+        help=("Do not generate the self-contained sortable/filterable HTML report."),
+    )
+    parser.add_argument(
+        "--html-name",
+        default=_DEFAULTS.html_name,
+        help=(
+            f"HTML report filename inside the output directory (default: {_DEFAULTS.html_name})."
+        ),
+    )
+    parser.add_argument(
+        "--email-report",
+        action="store_true",
+        help=(
+            "Also generate per-scout missing-requirement emails (HTML, text, and a "
+            "combined CSV) in an 'emails' subdirectory of the output directory."
+        ),
+    )
+    parser.add_argument(
+        "--breaker-threshold",
+        type=int,
+        default=_DEFAULTS.breaker_threshold,
+        help=(
+            "Consecutive scout-fetch failures before the acquisition circuit breaker opens and "
+            f"the batch stops (default: {_DEFAULTS.breaker_threshold})."
+        ),
+    )
     args = parser.parse_args(argv)
     return ScheduleConfig(
-        input=args.input, sheet=args.sheet, output=args.output, headed=args.headed,
-        channel=args.channel, timeout=args.timeout, request_delay_ms=args.request_delay_ms,
-        scout_delay_ms=args.scout_delay_ms, allow_dead_assets=args.allow_dead_assets,
-        include_adults=args.include_adults, no_html=args.no_html, html_name=args.html_name,
-        email_report=args.email_report, breaker_threshold=args.breaker_threshold,
+        input=args.input,
+        sheet=args.sheet,
+        output=args.output,
+        headed=args.headed,
+        channel=args.channel,
+        timeout=args.timeout,
+        request_delay_ms=args.request_delay_ms,
+        scout_delay_ms=args.scout_delay_ms,
+        allow_dead_assets=args.allow_dead_assets,
+        include_adults=args.include_adults,
+        no_html=args.no_html,
+        html_name=args.html_name,
+        email_report=args.email_report,
+        breaker_threshold=args.breaker_threshold,
     )
 
 
@@ -113,7 +174,9 @@ async def run(
     # run_schedule_pipeline/run_batch (the cross-scout breaker) -- see pipeline.py's own
     # docstring on why this sharing is this caller's contract to uphold.
     retry_policy = RetryPolicy(
-        sleeper=MonotonicSleeper(), jitter=SeededJitter(), breaker_threshold=config.breaker_threshold
+        sleeper=MonotonicSleeper(),
+        jitter=SeededJitter(),
+        breaker_threshold=config.breaker_threshold,
     )
 
     async with build_launched_browser(headed=config.headed, channel=config.channel) as browser:

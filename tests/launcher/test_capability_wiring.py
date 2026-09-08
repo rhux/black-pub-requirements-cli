@@ -78,7 +78,9 @@ def test_chromium_install_is_platform_gated_before_invoking_playwright(tmp_path,
     monkeypatch.setattr(browser_setup.platform, "system", lambda: "PlayStation")
 
     def fail_if_called(*_a, **_k):
-        raise AssertionError("install_chromium_fallback should never be invoked for an unsupported platform")
+        raise AssertionError(
+            "install_chromium_fallback should never be invoked for an unsupported platform"
+        )
 
     monkeypatch.setattr(browser_setup, "install_chromium_fallback", fail_if_called)
 
@@ -87,13 +89,17 @@ def test_chromium_install_is_platform_gated_before_invoking_playwright(tmp_path,
         browser_setup.install_chromium_capability(paths, release_version="1.0.0")
 
 
-def test_chromium_install_records_the_playwright_revision_as_a_cache_reference(tmp_path, monkeypatch):
+def test_chromium_install_records_the_playwright_revision_as_a_cache_reference(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(browser_setup.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(browser_setup, "install_chromium_fallback", lambda *a, **k: None)
 
     cache_root = tmp_path / "ms-playwright"
     (cache_root / "chromium-1105").mkdir(parents=True)
-    (cache_root / "chromium-1180").mkdir(parents=True)  # highest revision -- the one that should win
+    (cache_root / "chromium-1180").mkdir(
+        parents=True
+    )  # highest revision -- the one that should win
     monkeypatch.setattr(browser_setup, "_ms_playwright_cache_dir", lambda: cache_root)
 
     paths = _paths(tmp_path)
@@ -103,7 +109,9 @@ def test_chromium_install_records_the_playwright_revision_as_a_cache_reference(t
     assert "1.0.0" in cache.entries["chromium"]
 
 
-def test_chromium_install_fails_loudly_if_playwright_left_no_discoverable_revision(tmp_path, monkeypatch):
+def test_chromium_install_fails_loudly_if_playwright_left_no_discoverable_revision(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(browser_setup.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(browser_setup, "install_chromium_fallback", lambda *a, **k: None)
 

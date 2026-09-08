@@ -35,7 +35,9 @@ def _fake_source_root(tmp_path: Path, version: str) -> Path:
     return source
 
 
-def test_activate_evicts_capability_payloads_unreferenced_by_active_or_rollback(tmp_path: Path) -> None:
+def test_activate_evicts_capability_payloads_unreferenced_by_active_or_rollback(
+    tmp_path: Path,
+) -> None:
     paths = _paths(tmp_path)
     cache_dir = paths.capability_cache_dir
     ancient_payload = cache_dir / "chromium"

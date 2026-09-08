@@ -11,7 +11,9 @@ def test_gate_1_and_2_evidence_is_present():
 
 
 def test_gate_3_deferred_status_is_explicitly_recorded():
-    slice3_followup = REPO_ROOT / "docs/superpowers/plans/2026-08-26-slice-3-followup-launch-release-dir.md"
+    slice3_followup = (
+        REPO_ROOT / "docs/superpowers/plans/2026-08-26-slice-3-followup-launch-release-dir.md"
+    )
     text = slice3_followup.read_text()
     assert "still outstanding" in text.lower() or "deferred" in text.lower()
 

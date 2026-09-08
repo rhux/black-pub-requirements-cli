@@ -13,7 +13,9 @@ def test_the_three_intentional_swallows_are_documented_inline():
     against, not the swallow behavior itself (already covered by
     tests/unit/scoutevent/test_playwright_gateway.py)."""
     lines = GATEWAY.read_text(encoding="utf-8").splitlines()
-    swallow_line_numbers = [i for i, line in enumerate(lines) if line.strip() == "except Exception:"]
+    swallow_line_numbers = [
+        i for i, line in enumerate(lines) if line.strip() == "except Exception:"
+    ]
     assert len(swallow_line_numbers) == 3, (
         f"expected exactly the three known intentional swallows, found {len(swallow_line_numbers)}"
     )

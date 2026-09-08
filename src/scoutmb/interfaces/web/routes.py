@@ -127,9 +127,7 @@ def assert_upload_within_limit(*, size_bytes: int, limits: ReleaseLimits) -> Non
 
 
 @router.post("/api/pdf-extract", status_code=202)
-async def start_pdf_extract(
-    request: Request, files: list[UploadFile] = File(...)
-) -> JSONResponse:
+async def start_pdf_extract(request: Request, files: list[UploadFile] = File(...)) -> JSONResponse:
     settings: UiSettings = request.app.state.settings
     job_registry = request.app.state.job_registry
     if not files:
@@ -172,9 +170,7 @@ async def start_pdf_extract(
     async def worker() -> None:
         try:
             argv = [str(path) for path in saved_paths] + ["-o", str(settings.scouts_csv)]
-            return_code = await asyncio.to_thread(
-                pdf_cli.main, argv, progress_callback=on_progress
-            )
+            return_code = await asyncio.to_thread(pdf_cli.main, argv, progress_callback=on_progress)
             rows = _read_scouts_rows(settings) if settings.scouts_csv.exists() else []
             decoded_count = sum(1 for row in rows if row.get("QR Code Contents"))
             errors_csv = settings.scouts_csv.with_name(f"{settings.scouts_csv.stem}.errors.csv")
@@ -239,9 +235,7 @@ async def start_schedule_download(request: Request) -> JSONResponse:
                 channel=browser_channel,
                 email_report=False,
             )
-            await run_schedule(
-                config, progress_callback=on_progress, resume_event=resume_event
-            )
+            await run_schedule(config, progress_callback=on_progress, resume_event=resume_event)
             summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
             report_name = summary.get("html_report")
             await queue.put(

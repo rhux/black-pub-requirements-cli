@@ -74,5 +74,7 @@ def test_installer_excludes_heavy_optional_stacks(tmp_path):
 
     toc_path = work_dir / "build" / "xref-build.html"
     xref_text = toc_path.read_text(encoding="utf-8", errors="ignore")
-    found = {stack for stack in HEAVY_STACKS if f"{stack}." in xref_text or f">{stack}<" in xref_text}
+    found = {
+        stack for stack in HEAVY_STACKS if f"{stack}." in xref_text or f">{stack}<" in xref_text
+    }
     assert not found, f"heavy stack(s) found in the frozen bootstrapper's dependency graph: {found}"

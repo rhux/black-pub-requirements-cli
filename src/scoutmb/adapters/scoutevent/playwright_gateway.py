@@ -82,9 +82,13 @@ class _PlaywrightSession:
         attendee_id = values.get("attendeeID", "")
         payload = await response.json()
         display_name = await discover_name(self._page, fallback_name)
-        return ScheduleFetchResult(attendee_id=attendee_id, display_name=display_name, payload=payload)
+        return ScheduleFetchResult(
+            attendee_id=attendee_id, display_name=display_name, payload=payload
+        )
 
-    async def fetch_requirements(self, attendee_id: str, class_p4_id: str) -> RequirementFetchResult:
+    async def fetch_requirements(
+        self, attendee_id: str, class_p4_id: str
+    ) -> RequirementFetchResult:
         """Fetches AND validates in one step -- validate_requirement_row's import stays
         adapter-to-adapter (allowed), never reaching into features/acquisition/service.py, which
         only ever sees the already-validated result."""
@@ -177,7 +181,9 @@ class PlaywrightScoutingEventGateway:
             async def block_dead_assets(route: Any) -> None:
                 try:
                     hostname = (
-                        re.sub(r"^https?://", "", route.request.url).split("/", 1)[0].split(":", 1)[0]
+                        re.sub(r"^https?://", "", route.request.url)
+                        .split("/", 1)[0]
+                        .split(":", 1)[0]
                     )
                     if hostname in DEAD_ASSET_HOSTS:
                         await route.abort()
