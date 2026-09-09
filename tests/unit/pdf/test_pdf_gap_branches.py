@@ -166,7 +166,18 @@ class _QrPixmap:
         self.samples = rgb.tobytes()
 
 
+class _FakeRect:
+    """US Letter in points -- comfortably under max_pdf_dimension_px at every DPI these tests
+    use, since render_page now checks the projected pixel size from page.rect before ever
+    calling get_pixmap (Slice 4, D7)."""
+
+    width = 612.0
+    height = 792.0
+
+
 class _QrRenderPage:
+    rect = _FakeRect()
+
     def __init__(self, image: np.ndarray) -> None:
         self._image = image
 
@@ -256,6 +267,8 @@ class _FakePixmap:
 
 
 class _FakeRenderPage:
+    rect = _FakeRect()
+
     def __init__(self, n: int) -> None:
         self._n = n
 
