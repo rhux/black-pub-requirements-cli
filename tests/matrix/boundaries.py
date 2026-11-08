@@ -846,7 +846,7 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         exclusion_id="EXC-PKG-PDF-EMBEDDED-EXHAUSTED",
         area_id="pkg-adapters",
         file="src/scoutmb/adapters/pdf/extract.py",
-        line=246,
+        line=262,
         branch_to=None,
         rationale=(
             "Only the one-page, QR-found happy path is exercised at this entry point "
@@ -859,8 +859,8 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         exclusion_id="EXC-PKG-PDF-EMBEDDED-EXHAUSTED-ARC",
         area_id="pkg-adapters",
         file="src/scoutmb/adapters/pdf/extract.py",
-        line=241,
-        branch_to=246,
+        line=257,
+        branch_to=262,
         rationale="Same single-page-always-found gap as EXC-PKG-PDF-EMBEDDED-EXHAUSTED.",
         review_reference="Task 24 review: see test_core_imports.py test_decode_embedded_qr_success_path_...",
     ),
@@ -868,8 +868,8 @@ EXCLUSIONS: tuple[BranchExclusion, ...] = (
         exclusion_id="EXC-PKG-PDF-EMBEDDED-CONTINUE-ARC",
         area_id="pkg-adapters",
         file="src/scoutmb/adapters/pdf/extract.py",
-        line=243,
-        branch_to=241,
+        line=259,
+        branch_to=257,
         rationale=(
             "The value-not-found-on-this-page loop-continue arc; same single-page-always-found "
             "gap as EXC-PKG-PDF-EMBEDDED-EXHAUSTED (the only test at this entry point supplies a "
