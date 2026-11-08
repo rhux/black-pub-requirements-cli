@@ -93,7 +93,9 @@ def _fake_pdf_main_error(message: str):
     return fake
 
 
-def _fake_schedule_async_main(*, summary_extra: dict | None = None, raise_message: str | None = None):
+def _fake_schedule_async_main(
+    *, summary_extra: dict | None = None, raise_message: str | None = None
+):
     async def fake(config, *, progress_callback=None, resume_event=None) -> int:
         if raise_message is not None:
             raise RuntimeError(raise_message)
@@ -227,9 +229,7 @@ async def test_pdf_extract_busy_rejects_a_second_run(
 async def test_pdf_extract_success_writes_csv_and_frees_job_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        routes_module.pdf_cli, "main", _fake_pdf_main_success(_SCOUTS_CSV_BODY)
-    )
+    monkeypatch.setattr(routes_module.pdf_cli, "main", _fake_pdf_main_success(_SCOUTS_CSV_BODY))
     async with _client_for(tmp_path) as (client, settings):
         before = _tasks_snapshot()
         resp = await client.post(
@@ -273,7 +273,9 @@ async def test_pdf_extract_rejects_concurrent_run(
 @pytest.mark.matrix_case(case_id="UI-ROUTE-026", context_id="route", lane="default")
 async def test_schedule_download_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        routes_module, "run_schedule", _fake_schedule_async_main(summary_extra={"scouts_processed": 1})
+        routes_module,
+        "run_schedule",
+        _fake_schedule_async_main(summary_extra={"scouts_processed": 1}),
     )
     async with _client_for(tmp_path) as (client, settings):
         settings.scouts_csv.write_text(_SCOUTS_CSV_BODY, encoding="utf-8-sig")
@@ -289,7 +291,9 @@ async def test_schedule_download_success(tmp_path: Path, monkeypatch: pytest.Mon
 
 
 @pytest.mark.matrix_case(case_id="UI-ROUTE-027", context_id="route", lane="default")
-async def test_schedule_download_worker_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_schedule_download_worker_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(
         routes_module, "run_schedule", _fake_schedule_async_main(raise_message="boom-schedule")
     )
@@ -558,9 +562,7 @@ async def test_open_emails_folder_success_calls_open_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     opened_paths: list[str] = []
-    monkeypatch.setattr(
-        routes_module, "open_folder", lambda path: opened_paths.append(str(path))
-    )
+    monkeypatch.setattr(routes_module, "open_folder", lambda path: opened_paths.append(str(path)))
     async with _client_for(tmp_path) as (client, settings):
         run_dir = settings.runs_dir / "2026-07-23_1200"
         (run_dir / "emails").mkdir(parents=True)
@@ -671,7 +673,7 @@ async def test_wrong_http_method_matches_legacy(tmp_path: Path, case, context_id
 # applies identically here), and the stale-uploads-cleanup/warnings-count branches.
 # --------------------------------------------------------------------------------------------
 def test_safe_run_id_rejects_a_bare_dot_via_the_resolved_parent_check(tmp_path: Path) -> None:
-    """"." contains none of '/', '\\\\', '..' (the first guard), but runs_dir/"." resolves to
+    """ "." contains none of '/', '\\\\', '..' (the first guard), but runs_dir/"." resolves to
     runs_dir itself, whose parent is runs_dir's parent, not runs_dir -- exactly the mismatch the
     second check exists to catch."""
     from fastapi import HTTPException
@@ -702,9 +704,7 @@ def _fake_request_for(settings: UiSettings):
 
     return SimpleNamespace(
         app=SimpleNamespace(
-            state=SimpleNamespace(
-                settings=settings, job_registry=JobSupervisor(), operations={}
-            )
+            state=SimpleNamespace(settings=settings, job_registry=JobSupervisor(), operations={})
         )
     )
 

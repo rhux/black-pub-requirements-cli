@@ -83,8 +83,12 @@ def test_process_scout_raw_filenames_are_distinct_for_same_named(tmp_path):
         )
         browser = StrictFakeBrowser(script, FakeClock())
         gateway = PlaywrightScoutingEventGateway(browser, allow_dead_assets=True)  # type: ignore[arg-type]
-        retry_policy = RetryPolicy(sleeper=MonotonicSleeper(), jitter=SeededJitter(), breaker_threshold=99)
-        service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
+        retry_policy = RetryPolicy(
+            sleeper=MonotonicSleeper(), jitter=SeededJitter(), breaker_threshold=99
+        )
+        service = AcquisitionService(
+            gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink()
+        )
         scout = ScoutInput(name="Avery Archer", url="https://127.0.0.1/mobile/x?t=TESTTOKEN0001")
         await service.process(
             scout=scout,

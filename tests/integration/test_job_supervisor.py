@@ -122,5 +122,7 @@ async def test_reusing_a_job_id_cancels_the_superseded_task() -> None:
 
     # first_task's own done-callback fires here -- it must NOT evict second_task's still-live
     # registry entry, since by the time it runs, "x" no longer belongs to first_task at all.
-    assert supervisor.get("x") is second_task, "the superseded task's cancellation evicted second's entry"
+    assert supervisor.get("x") is second_task, (
+        "the superseded task's cancellation evicted second's entry"
+    )
     await second_task

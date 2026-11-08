@@ -68,10 +68,14 @@ def test_wait_until_ready(
     monkeypatch.setattr(desktop_app.urllib.request, "urlopen", fake_urlopen)
 
     if expect_ready:
-        desktop_app._wait_until_ready("http://127.0.0.1:0/api/health", timeout_seconds=timeout_seconds)
+        desktop_app._wait_until_ready(
+            "http://127.0.0.1:0/api/health", timeout_seconds=timeout_seconds
+        )
     else:
         with pytest.raises(RuntimeError):
-            desktop_app._wait_until_ready("http://127.0.0.1:0/api/health", timeout_seconds=timeout_seconds)
+            desktop_app._wait_until_ready(
+                "http://127.0.0.1:0/api/health", timeout_seconds=timeout_seconds
+            )
 
     assert calls["urlopen"] == expect_urlopen_calls
     assert calls["sleep"] == expect_sleep_calls

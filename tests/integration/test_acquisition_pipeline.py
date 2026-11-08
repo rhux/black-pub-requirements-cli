@@ -65,7 +65,9 @@ async def test_breaker_is_shared_across_the_whole_pipeline_run(tmp_path) -> None
     clock = FakeClock()
     browser = StrictFakeBrowser(StrictScript(()), clock)  # nothing scripted -- every fetch fails
     gateway = PlaywrightScoutingEventGateway(browser)  # type: ignore[arg-type]
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=2)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=2
+    )
     service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
     checkpoint_store = AtomicFileCheckpointStore(tmp_path / "out" / "checkpoint.json")
 
@@ -94,7 +96,9 @@ async def test_complete_is_not_applied_until_reporting_succeeds(tmp_path) -> Non
     clock = FakeClock()
     browser = StrictFakeBrowser(StrictScript(()), clock)  # never called -- zero scouts
     gateway = PlaywrightScoutingEventGateway(browser)  # type: ignore[arg-type]
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
     checkpoint_store = AtomicFileCheckpointStore(tmp_path / "out" / "checkpoint.json")
     run_state = RunStateMachine()
@@ -127,7 +131,9 @@ async def test_cancellation_maps_to_cancel_not_fail(tmp_path) -> None:
     clock = FakeClock()
     browser = StrictFakeBrowser(StrictScript(()), clock)  # never called -- zero scouts
     gateway = PlaywrightScoutingEventGateway(browser)  # type: ignore[arg-type]
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
     checkpoint_store = AtomicFileCheckpointStore(tmp_path / "out" / "checkpoint.json")
     run_state = RunStateMachine()
@@ -161,7 +167,9 @@ async def test_progress_callback_and_pause_resume_events_fire_through_the_whole_
     clock = FakeClock()
     browser = StrictFakeBrowser(StrictScript(()), clock)  # nothing scripted -- every fetch fails
     gateway = PlaywrightScoutingEventGateway(browser)  # type: ignore[arg-type]
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
     checkpoint_store = AtomicFileCheckpointStore(tmp_path / "out" / "checkpoint.json")
 
@@ -205,7 +213,9 @@ async def test_pause_resume_without_a_progress_callback_does_not_crash(tmp_path)
     clock = FakeClock()
     browser = StrictFakeBrowser(StrictScript(()), clock)
     gateway = PlaywrightScoutingEventGateway(browser)  # type: ignore[arg-type]
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
     checkpoint_store = AtomicFileCheckpointStore(tmp_path / "out" / "checkpoint.json")
     resume_event = asyncio.Event()

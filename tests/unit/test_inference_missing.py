@@ -53,7 +53,9 @@ def test_is_not_used_is_case_insensitive() -> None:
 def test_ancestor_walk_stops_at_an_already_complete_parent() -> None:
     rows = [
         _row(requirement_number="1", parent_requirement_number=None, calculated_status="complete"),
-        _row(requirement_number="1a", parent_requirement_number="1", calculated_status="incomplete"),
+        _row(
+            requirement_number="1a", parent_requirement_number="1", calculated_status="incomplete"
+        ),
     ]
     selected = select_actionable(rows, attendee_key_of=_key, cleaned_description_of=str)
     assert selected == {1: True}
@@ -73,8 +75,12 @@ def test_ancestor_walk_stops_naturally_at_an_already_visited_ancestor() -> None:
             total_subrequirements=2,
             completed_subrequirements=0,
         ),
-        _row(requirement_number="1a1", parent_requirement_number="1a", calculated_status="incomplete"),
-        _row(requirement_number="1a2", parent_requirement_number="1a", calculated_status="incomplete"),
+        _row(
+            requirement_number="1a1", parent_requirement_number="1a", calculated_status="incomplete"
+        ),
+        _row(
+            requirement_number="1a2", parent_requirement_number="1a", calculated_status="incomplete"
+        ),
     ]
     selected = select_actionable(rows, attendee_key_of=_key, cleaned_description_of=str)
     assert selected == {0: False, 1: True, 2: True}

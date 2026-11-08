@@ -77,9 +77,7 @@ def build_pdf_extractor() -> PdfExtractor:
 # import would break composition.py entirely for a PDF-only install. This is the ONLY place in
 # the package that calls async_playwright() itself.
 @asynccontextmanager
-async def build_launched_browser(
-    *, headed: bool, channel: str | None
-) -> AsyncIterator[Browser]:
+async def build_launched_browser(*, headed: bool, channel: str | None) -> AsyncIterator[Browser]:
     """Launches ONE Chromium browser for a schedule-CLI run and guarantees it is closed even on
     an exception -- interfaces/cli/schedule.py's run() holds this open for the whole batch, the
     same lifetime scout_schedule_cli.async_main's inline `async with async_playwright()` block

@@ -64,9 +64,7 @@ async def run_batch(
 
     # Scouts finished on a prior process are reconstructed from the checkpoint, not re-fetched
     # -- a resumed run's report must include them alongside whatever this run newly processes.
-    results: list[ScoutResult] = [
-        scout_result_from_row(row) for row in completed_results.values()
-    ]
+    results: list[ScoutResult] = [scout_result_from_row(row) for row in completed_results.values()]
 
     total = len(scouts)
     was_paused = False
@@ -122,9 +120,13 @@ async def run_batch(
         if progress_callback is not None:
             await progress_callback(
                 {
-                    "type": "scout_done", "index": index, "total": total,
-                    "name": label, "attendee_id": result.attendee_id,
-                    "classes": len(result.classes), "requirements": len(result.requirements),
+                    "type": "scout_done",
+                    "index": index,
+                    "total": total,
+                    "name": label,
+                    "attendee_id": result.attendee_id,
+                    "classes": len(result.classes),
+                    "requirements": len(result.requirements),
                     "errors": len(result.errors),
                 }
             )

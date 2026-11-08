@@ -139,7 +139,9 @@ class PackageAcquisitionRunner:
         retry_policy = RetryPolicy(
             sleeper=_RecordingSleeper(clock, script), jitter=_ZeroJitter(), breaker_threshold=99
         )
-        service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
+        service = AcquisitionService(
+            gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink()
+        )
 
         result = asyncio.run(
             service.process(
@@ -183,11 +185,15 @@ class PackageAcquisitionRunner:
             retry_policy = RetryPolicy(
                 sleeper=_RecordingSleeper(clock, script), jitter=_ZeroJitter(), breaker_threshold=99
             )
-            service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
+            service = AcquisitionService(
+                gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink()
+            )
             asyncio.run(
                 service.process(
                     scout=ScoutInput(name=case.scout_name, url=case.qr_url),
-                    config=AcquisitionConfig(timeout_seconds=case.timeout_seconds, request_delay_ms=0),
+                    config=AcquisitionConfig(
+                        timeout_seconds=case.timeout_seconds, request_delay_ms=0
+                    ),
                     raw_dir=raw_dir,
                     run_identity=run_identity,
                 )
@@ -247,7 +253,9 @@ async def test_has_req_zero_skips_the_requirement_fetch(tmp_path: Path) -> None:
     clock = FakeClock()
     browser = StrictFakeBrowser(script, clock)
     gateway = PlaywrightScoutingEventGateway(browser)  # type: ignore[arg-type]
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(clock, script), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(clock, script), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
 
     result = await service.process(
@@ -290,7 +298,9 @@ async def test_schema_drift_row_produces_bounded_error_not_a_blank_record(tmp_pa
     clock = FakeClock()
     browser = StrictFakeBrowser(script, clock)
     gateway = PlaywrightScoutingEventGateway(browser)  # type: ignore[arg-type]
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(clock, script), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(clock, script), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
 
     result = await service.process(

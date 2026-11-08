@@ -60,7 +60,9 @@ async def test_breaker_state_is_shared_across_scouts(tmp_path) -> None:
     the RetryPolicy instance -- not a fresh one per scout -- is what run_batch threads through."""
     clock = FakeClock()
     browser = StrictFakeBrowser(StrictScript(()), clock)
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=2)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=2
+    )
     service = _service(browser, retry_policy)
     checkpoint_store = AtomicFileCheckpointStore(tmp_path / "checkpoint.json")
     run_identity = RunIdentity()
@@ -102,15 +104,21 @@ async def test_completed_scout_is_skipped_on_resume(tmp_path) -> None:
             output_ids={},
             completed_results={
                 url: {
-                    "name": "Avery", "qr_url": url, "attendee_id": "90000001",
-                    "classes": [], "requirements": [], "errors": [],
+                    "name": "Avery",
+                    "qr_url": url,
+                    "attendee_id": "90000001",
+                    "classes": [],
+                    "requirements": [],
+                    "errors": [],
                 }
             },
         )
     )
     clock = FakeClock()
     browser = StrictFakeBrowser(StrictScript(()), clock)  # nothing scripted -- must never be called
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = _service(browser, retry_policy)
 
     await run_batch(
@@ -156,13 +164,19 @@ async def test_checkpoint_file_exists_before_the_first_scout_is_processed(tmp_pa
 
     class _ObservingService:
         async def process(
-            self, *, scout: ScoutInput, config: AcquisitionConfig, raw_dir: Path,
+            self,
+            *,
+            scout: ScoutInput,
+            config: AcquisitionConfig,
+            raw_dir: Path,
             run_identity: RunIdentity,
         ) -> ScoutResult:
             observed_exists_when_processing_started.append(checkpoint_path.exists())
             return ScoutResult(name=scout.name, qr_url=scout.url, attendee_id="A1")
 
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
 
     await run_batch(
         [ScoutInput(name="Avery", url="https://scoutingevent.com/mobile/checkin?t=A")],
@@ -185,7 +199,9 @@ async def test_failed_scout_is_not_marked_completed_and_is_retried_on_resume(tmp
     checkpoint_store = AtomicFileCheckpointStore(tmp_path / "checkpoint.json")
     clock = FakeClock()
     browser = StrictFakeBrowser(StrictScript(()), clock)  # nothing scripted -- schedule fetch fails
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = _service(browser, retry_policy)
 
     results = await run_batch(
@@ -216,7 +232,9 @@ async def test_resumed_run_report_includes_previously_completed_scouts(tmp_path)
     clock_1 = FakeClock()
     script_1 = StrictScript((_sched("90000001", _schedule_payload()),))
     browser_1 = StrictFakeBrowser(script_1, clock_1)
-    retry_policy_1 = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy_1 = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service_1 = _service(browser_1, retry_policy_1)
 
     first_results = await run_batch(
@@ -235,7 +253,9 @@ async def test_resumed_run_report_includes_previously_completed_scouts(tmp_path)
     clock_2 = FakeClock()
     script_2 = StrictScript((_sched("90000002", _schedule_payload()),))
     browser_2 = StrictFakeBrowser(script_2, clock_2)
-    retry_policy_2 = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy_2 = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service_2 = _service(browser_2, retry_policy_2)
 
     second_results = await run_batch(
@@ -283,7 +303,9 @@ async def test_old_format_checkpoint_reprocesses_rather_than_drops_its_scout(tmp
     clock = FakeClock()
     script = StrictScript((_sched("90000001", _schedule_payload()),))
     browser = StrictFakeBrowser(script, clock)
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = _service(browser, retry_policy)
 
     results = await run_batch(
@@ -353,7 +375,9 @@ async def test_run_batch_prints_legacy_style_progress(tmp_path, capsys) -> None:
     clock = FakeClock()
     script = StrictScript((_sched("90000001", _schedule_payload()),))
     browser = StrictFakeBrowser(script, clock)
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = _service(browser, retry_policy)
 
     await run_batch(
@@ -381,7 +405,9 @@ async def test_pause_resume_without_a_run_state_skips_the_transition_calls(tmp_p
     clock = FakeClock()
     script = StrictScript((_sched("90000001", _schedule_payload()),))
     browser = StrictFakeBrowser(script, clock)
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = _service(browser, retry_policy)
 
     events: list[dict] = []

@@ -46,10 +46,7 @@ class Checkpoint:
             self,
             "completed_results",
             MappingProxyType(
-                {
-                    url: MappingProxyType(dict(row))
-                    for url, row in self.completed_results.items()
-                }
+                {url: MappingProxyType(dict(row)) for url, row in self.completed_results.items()}
             ),
         )
 

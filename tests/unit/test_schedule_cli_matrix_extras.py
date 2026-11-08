@@ -126,9 +126,7 @@ def test_cli_sched_002_empty_scout_list_fails_closed_with_exit_2(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     csv_path = tmp_path / "scouts.csv"
-    csv_path.write_text(
-        "Attendee Name,Registrant Type,QR Code Contents\n", encoding="utf-8"
-    )
+    csv_path.write_text("Attendee Name,Registrant Type,QR Code Contents\n", encoding="utf-8")
 
     # If build_launched_browser were ever reached, this would raise -- proving the browser
     # genuinely never launches for this member.
@@ -157,9 +155,7 @@ def test_cli_sched_002_empty_scout_list_fails_closed_with_exit_2(
 
 
 @pytest.mark.matrix_case(case_id="CLI-SCHED-003", context_id="run", lane="default")
-def test_cli_sched_003_one_scout_success(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_sched_003_one_scout_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # The real gateway's egress check runs before every navigation, even against a fake page --
     # opt in the same way tests/vertical/conftest.py does for its synthetic scoutingevent.com URLs.
     monkeypatch.setenv("SCOUTMB_ALLOW_LIVE_SERVICE", "1")
@@ -290,9 +286,7 @@ def test_cli_sched_005_top_level_exception_maps_to_error_message_and_exit_2(
         raise Exception("boom")
 
     monkeypatch.setattr(schedule_cli, "run", _boom)
-    monkeypatch.setattr(
-        sys, "argv", ["troop349-schedule", "--input", str(tmp_path / "scouts.csv")]
-    )
+    monkeypatch.setattr(sys, "argv", ["troop349-schedule", "--input", str(tmp_path / "scouts.csv")])
 
     exit_code = schedule_cli.main()
     captured = capsys.readouterr()

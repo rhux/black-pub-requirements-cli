@@ -57,8 +57,7 @@ class AtomicFileCheckpointStore:
             raise CorruptCheckpoint(f"{self._path}'s completed_urls must be a list of strings")
 
         if not isinstance(raw_output_ids, dict) or not all(
-            isinstance(key, str) and isinstance(value, str)
-            for key, value in raw_output_ids.items()
+            isinstance(key, str) and isinstance(value, str) for key, value in raw_output_ids.items()
         ):
             raise CorruptCheckpoint(f"{self._path}'s output_ids must be a string-to-string object")
 

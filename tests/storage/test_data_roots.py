@@ -5,9 +5,7 @@ from pathlib import Path
 from scoutmb.config import UiSettings
 
 
-def test_resolution_is_platform_and_code_location_independent(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_resolution_is_platform_and_code_location_independent(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("SCOUTMB_DATA_DIR", raising=False)
     other_cwd = tmp_path / "somewhere-else"
     other_cwd.mkdir()

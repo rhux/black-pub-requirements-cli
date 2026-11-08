@@ -160,9 +160,7 @@ def scout_result_from_row(data: Mapping[str, Any]) -> ScoutResult:
         qr_url=_text(data.get("qr_url")),
         attendee_id=_text(data.get("attendee_id")),
         classes=tuple(class_from_mapping(row) for row in data.get("classes") or ()),
-        requirements=tuple(
-            requirement_from_mapping(row) for row in data.get("requirements") or ()
-        ),
+        requirements=tuple(requirement_from_mapping(row) for row in data.get("requirements") or ()),
         errors=tuple(str(item) for item in data.get("errors") or ()),
     )
 

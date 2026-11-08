@@ -27,9 +27,7 @@ def _fake_source_root(tmp_path: Path, version: str) -> Path:
     return source
 
 
-def test_launch_uses_active_release_dir_as_cwd_after_staging(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_launch_uses_active_release_dir_as_cwd_after_staging(tmp_path: Path, monkeypatch) -> None:
     paths = AppPaths(
         root=tmp_path,
         python_dir=tmp_path / "python",

@@ -91,7 +91,9 @@ class AcquisitionService:
                 output_id = run_identity.output_id(AttendeeId.parse(attendee_id, name))
                 slug = attendee_filename_stem(name, output_id)
                 self.sink.publish_text(
-                    raw_dir / f"{slug}-schedule.json", _json_dump(schedule.payload), encoding="utf-8"
+                    raw_dir / f"{slug}-schedule.json",
+                    _json_dump(schedule.payload),
+                    encoding="utf-8",
                 )
 
                 if int((schedule.payload.get("status") or {}).get("status", 0)) != 1:
@@ -181,7 +183,9 @@ class AcquisitionService:
                         )
                         continue
 
-                    errors.extend(f"{class_record.class_name}: {msg}" for msg in requirement_result.row_errors)
+                    errors.extend(
+                        f"{class_record.class_name}: {msg}" for msg in requirement_result.row_errors
+                    )
 
                     for validated in requirement_result.validated_rows:
                         requirements.append(

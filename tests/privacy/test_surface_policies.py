@@ -358,9 +358,7 @@ def test_priv_egress_csv(tmp_path: Path) -> None:
     from scoutmb.core.models import RequirementRecord
 
     record = RequirementRecord(**_requirement_row())
-    write_csv(
-        tmp_path / "requirements.csv", [record], list(RequirementRecord.__dataclass_fields__)
-    )
+    write_csv(tmp_path / "requirements.csv", [record], list(RequirementRecord.__dataclass_fields__))
     text = (tmp_path / "requirements.csv").read_text(encoding="utf-8-sig")
     assert SENTINEL_SESSION_ID not in text
     assert SENTINEL_ABSOLUTE_PATH not in text

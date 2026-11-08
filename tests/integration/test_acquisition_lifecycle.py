@@ -33,7 +33,9 @@ async def test_context_closes_even_when_schedule_fetch_raises(tmp_path) -> None:
     script = StrictScript(())  # nothing scripted -> the gateway's first call raises immediately
     browser = StrictFakeBrowser(script, clock)
     gateway = PlaywrightScoutingEventGateway(browser)  # type: ignore[arg-type]
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
 
     result = await service.process(

@@ -19,9 +19,10 @@ def test_manifest_records_source_hashes(tmp_path: Path) -> None:
 
     manifest = json.loads((data_dir / "migration_manifest.json").read_text(encoding="utf-8"))
     entries = {entry["path"]: entry for entry in manifest["files"]}
-    assert entries["scouts.csv"]["sha256"] == hashlib.sha256(
-        b"name,url\nAvery,https://x\n"
-    ).hexdigest()
+    assert (
+        entries["scouts.csv"]["sha256"]
+        == hashlib.sha256(b"name,url\nAvery,https://x\n").hexdigest()
+    )
     assert entries["scouts.csv"]["size"] == len(b"name,url\nAvery,https://x\n")
     assert "runs/r1.json" in entries
 

@@ -66,7 +66,9 @@ def _xref_normalized(value: str) -> str:
     return re.sub(r"embedded-image:xref-\d+", "embedded-image:xref-<n>", value)
 
 
-def _substitute(argv: tuple[str, ...], pdf_path: Path, out_path: Path, missing_path: Path) -> list[str]:
+def _substitute(
+    argv: tuple[str, ...], pdf_path: Path, out_path: Path, missing_path: Path
+) -> list[str]:
     mapping = {"{pdf}": str(pdf_path), "{out}": str(out_path), "{missing}": str(missing_path)}
     return [mapping.get(token, token) for token in argv]
 
@@ -118,7 +120,9 @@ def _handle_extract_like(case: PdfCase, root: Path, context_id: str) -> None:
                 pdf_path, dpis=_DPIS, normalize_case=True, debug_dir=debug_dir
             )
     else:
-        attendees, errors = extract_pdf(pdf_path, dpis=_DPIS, normalize_case=True, debug_dir=debug_dir)
+        attendees, errors = extract_pdf(
+            pdf_path, dpis=_DPIS, normalize_case=True, debug_dir=debug_dir
+        )
 
     exp = case.expected_legacy
     assert len(attendees) == len(exp.attendees)

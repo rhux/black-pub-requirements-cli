@@ -179,9 +179,7 @@ def test_requirements_csv_header_and_row(tmp_path):
 @pytest.mark.matrix_case(case_id="ART-SCHEMA-004", context_id="schema", lane="default")
 def test_errors_csv_header_and_rows(tmp_path):
     out = tmp_path / "run"
-    result = ScoutResult(
-        name=SCOUT_NAME, qr_url=QR_URL, attendee_id=ATTENDEE_ID, errors=("boom",)
-    )
+    result = ScoutResult(name=SCOUT_NAME, qr_url=QR_URL, attendee_id=ATTENDEE_ID, errors=("boom",))
     build_reporting_service().publish(
         out,
         [result],

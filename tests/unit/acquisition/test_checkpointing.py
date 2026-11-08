@@ -65,9 +65,7 @@ def test_completed_url_is_recognized_on_resume(tmp_path) -> None:
 @pytest.mark.matrix_case(case_id="ACQ-RESUME-003", context_id="resume", lane="default")
 def test_output_id_map_survives_a_reload(tmp_path) -> None:
     store = AtomicFileCheckpointStore(tmp_path / "checkpoint.json")
-    store.save(
-        Checkpoint(version=1, completed_urls=(), output_ids={"attendee-1": "same-uuid"})
-    )
+    store.save(Checkpoint(version=1, completed_urls=(), output_ids={"attendee-1": "same-uuid"}))
     reloaded = AtomicFileCheckpointStore(tmp_path / "checkpoint.json").load()
     assert reloaded.output_ids["attendee-1"] == "same-uuid"
 
@@ -92,7 +90,9 @@ def test_non_object_json_fails_closed(tmp_path) -> None:
 
 def test_wrong_version_fails_closed(tmp_path) -> None:
     path = tmp_path / "checkpoint.json"
-    path.write_text(json.dumps({"version": 999, "completed_urls": [], "output_ids": {}}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"version": 999, "completed_urls": [], "output_ids": {}}), encoding="utf-8"
+    )
     with pytest.raises(CorruptCheckpoint):
         AtomicFileCheckpointStore(path).load()
 
@@ -177,10 +177,18 @@ def test_completed_results_rows_are_genuinely_immutable_too(tmp_path) -> None:
     """Freezing only the OUTER completed_results mapping (an earlier draft's shape) leaves each
     ROW dict mutable through the exposed mapping's own values -- __post_init__ must wrap each
     row in its own MappingProxyType too, not just the top-level dict."""
-    mutable_row = {"name": "Avery", "qr_url": "https://x/a", "attendee_id": "A1",
-                    "classes": [], "requirements": [], "errors": []}
+    mutable_row = {
+        "name": "Avery",
+        "qr_url": "https://x/a",
+        "attendee_id": "A1",
+        "classes": [],
+        "requirements": [],
+        "errors": [],
+    }
     checkpoint = Checkpoint(
-        version=1, completed_urls=("https://x/a",), output_ids={},
+        version=1,
+        completed_urls=("https://x/a",),
+        output_ids={},
         completed_results={"https://x/a": mutable_row},
     )
     mutable_row["name"] = "mutated-after-construction"
@@ -252,8 +260,12 @@ def test_completed_results_orphaned_url_fails_closed(tmp_path) -> None:
                 "output_ids": {},
                 "completed_results": {
                     "https://x/orphan": {
-                        "name": "Ghost", "qr_url": "https://x/orphan", "attendee_id": "G1",
-                        "classes": [], "requirements": [], "errors": [],
+                        "name": "Ghost",
+                        "qr_url": "https://x/orphan",
+                        "attendee_id": "G1",
+                        "classes": [],
+                        "requirements": [],
+                        "errors": [],
                     }
                 },
             }
@@ -285,6 +297,8 @@ def test_save_failure_preserves_prior_bytes(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr("scoutmb.adapters.files.atomic.os.replace", _boom)
     with pytest.raises(OSError):
-        store.save(Checkpoint(version=1, completed_urls=("https://x/a", "https://x/b"), output_ids={}))
+        store.save(
+            Checkpoint(version=1, completed_urls=("https://x/a", "https://x/b"), output_ids={})
+        )
 
     assert path.read_bytes() == original_bytes

@@ -20,7 +20,9 @@ from tests.matrix.pytest_support import execution_params
 from scoutmb.core.identity import safe_slug
 
 _RESERVED_WINDOWS_DEVICE_NAMES = frozenset(
-    {"con", "prn", "aux", "nul"} | {f"com{d}" for d in "123456789"} | {f"lpt{d}" for d in "123456789"}
+    {"con", "prn", "aux", "nul"}
+    | {f"com{d}" for d in "123456789"}
+    | {f"lpt{d}" for d in "123456789"}
 )
 
 # Members whose raw input carries a genuine collision/collapse hazard that survives into the

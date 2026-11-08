@@ -43,7 +43,9 @@ def _redacted_sample(row: dict[str, Any]) -> str:
     'REDACTED' before truncation -- truncation alone (an earlier draft's only protection) still
     lets a sensitive field's value leak if it happens to sort near the start of the dict."""
     redacted = {
-        key: "REDACTED" if any(marker in key.upper() for marker in _SENSITIVE_KEY_MARKERS) else value
+        key: "REDACTED"
+        if any(marker in key.upper() for marker in _SENSITIVE_KEY_MARKERS)
+        else value
         for key, value in row.items()
     }
     return repr(redacted)

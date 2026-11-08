@@ -125,7 +125,9 @@ async def _run_request_count_case(dataset: SyntheticDataset, raw_dir: Path) -> i
     clock = FakeClock()
     browser = StrictFakeBrowser(script, clock)
     gateway = PlaywrightScoutingEventGateway(browser, allow_dead_assets=False)  # type: ignore[arg-type]
-    retry_policy = RetryPolicy(sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99)
+    retry_policy = RetryPolicy(
+        sleeper=_RecordingSleeper(), jitter=_ZeroJitter(), breaker_threshold=99
+    )
     service = AcquisitionService(gateway=gateway, retry_policy=retry_policy, sink=AtomicFileSink())
     config = AcquisitionConfig(timeout_seconds=5, request_delay_ms=0)
     run_identity = RunIdentity()

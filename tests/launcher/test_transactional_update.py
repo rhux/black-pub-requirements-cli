@@ -98,7 +98,9 @@ def test_offline_restart_uses_last_known_good(tmp_path: Path) -> None:
     source_n_minus_1 = _fake_source_root(tmp_path, "0.1.0")
     source_n = _fake_source_root(tmp_path, "0.2.0")
 
-    manifest_1 = release.stage_release(paths, source_n_minus_1, source_n_minus_1 / "requirements.txt")
+    manifest_1 = release.stage_release(
+        paths, source_n_minus_1, source_n_minus_1 / "requirements.txt"
+    )
     release.activate(paths, manifest_1, state_generation=1)
 
     manifest_2 = release.stage_release(paths, source_n, source_n / "requirements.txt")

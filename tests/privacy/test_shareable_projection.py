@@ -251,9 +251,7 @@ def test_two_blank_identity_scout_dicts_fail_loudly_via_write_email_reports(
     scouts = [_scout("1"), _scout("2")]
 
     with pytest.raises(AssertionError, match="blank attendee_id"):
-        build_reporting_service()._write_email_reports(
-            tmp_path, scouts, run_identity=RunIdentity()
-        )
+        build_reporting_service()._write_email_reports(tmp_path, scouts, run_identity=RunIdentity())
 
     # No email content written: the guard fires inside build_missing_requirements, before any
     # per-scout .txt/.html or the combined missing_requirements.csv is produced. (write_email_
